@@ -405,6 +405,9 @@ def add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini =
   # SOCend must be between SOCmin and SOCmax
   if SOCend < SOCmin: SOCend = SOCmin
   if SOCend > SOCmax: SOCend = SOCmax
+  
+  # If no optimization applied (w=0) the battery is not used:
+  if (w == 0): return np.array([0.0]*len(G))
 
   # Optimization parameters
   time_slots = len(G)

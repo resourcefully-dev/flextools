@@ -4,7 +4,7 @@ pyenv <- new.env()
 
 .onAttach <- function(libname, pkgname) {
   if (reticulate::py_module_available('pandas') & reticulate::py_module_available('cvxopt')) {
-    reticulate::source_python(system.file("python/utils.py", package = 'evflex'), envir = pyenv)
+    reticulate::source_python(system.file("python/utils.py", package = 'flextools'), envir = pyenv)
   } else {
     if (!reticulate::py_module_available('pandas')) {
       packageStartupMessage("Python dependencies warning: pandas module not available. Please install it into the defined Python environment.")
@@ -22,7 +22,7 @@ pyenv.exists <- function() {
 
 
 load.pyenv <- function() {
-  reticulate::source_python(system.file("python/utils.py", package = 'evflex'), envir = pyenv)
+  reticulate::source_python(system.file("python/utils.py", package = 'flextools'), envir = pyenv)
 }
 
 

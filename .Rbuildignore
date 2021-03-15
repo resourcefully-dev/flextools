@@ -1,0 +1,9 @@
+^environment\.yml$
+^renv$
+^renv\.lock$
+^evflex\.Rproj$
+^\.Rproj\.user$
+^LICENSE\.md$
+^data-raw$
+vignettes
+tests

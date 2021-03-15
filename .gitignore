@@ -1,0 +1,5 @@
+.Rproj.user
+R/*.rda
+data-raw
+tests
+vignettes

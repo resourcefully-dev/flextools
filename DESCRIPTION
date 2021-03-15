@@ -1,0 +1,27 @@
+Package: flextools
+Title: Tools for demand-response optimization
+Version: 0.0.0.9000
+Authors@R: 
+    person(given = "Marc",
+           family = "Cañigueral",
+           role = c("aut", "cre"),
+           email = "marc.canigueral@udg.edu",
+           comment = c(ORCID = "https://orcid.org/0000-0001-9724-5829"))
+Description: This package provides the necessary tools to simulate demand-response scenarios regarding
+	electric vehicles flexibility or a stationary battery. The EV sessions coordination algorithm 
+	is based on the user profile concept raised by package {evprof}.
+	This package depends on Python optimization package CVXOPT to handle the quadratic optimizations.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.1
+Depends: 
+    R (>= 2.10)
+Imports: 
+    dplyr,
+    lubridate,
+    xts,
+    reticulate,
+    rlang,
+    tibble

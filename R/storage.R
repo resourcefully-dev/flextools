@@ -94,7 +94,7 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 #'
 #' @importFrom reticulate r_to_py
 #'
-add_battery <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL, SOCend = NULL, up_to_G = TRUE, window_length = NULL) {
+add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL, SOCend = NULL, up_to_G = TRUE, window_length = NULL) {
   if (!pyenv.exists()) load.pyenv()
   pyenv$add_battery_time_series(
     w,
@@ -113,6 +113,37 @@ add_battery <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini 
 }
 
 
+#' Simple battery profile
+#'
+#' Charging when there is surplus, discharging when there is deficit
+#'
+#' @param G numeric vector, being the renewable generation profile
+#' @param L numeric vector, being the load profile
+#' @param Bcap numeric, capacity of the battery
+#' @param Bc numeric, maximum charging power
+#' @param Bd numeric, maximum discharging power
+#' @param SOCini numeric, required State-of-Charge at the window beginning
+#'
+#' @return numeric vector
+#' @export
+#'
+#' @importFrom dplyr lag
+#'
+add_battery_simple <- function(G, L, Bcap, Bc, Bd, SOCini = 0) {
+  storage <- rep(0, (length(G)+1))
+  storage[1] <- Bcap*SOCini/100
+  battery_potential <- pmax(pmin(G - L, Bc), - Bd)
+  # battery_potential[!(hour(datetime) %in% discharging_hours) & (battery_potential < 0)] <- 0
+
+  for (i in 2:length(storage)) {
+    storage_i <- storage[i-1] + battery_potential[i-1]
+    storage_i <- pmax(pmin(storage_i, Bcap), 0)
+    storage[i] <- storage_i
+  }
+
+  battery <- c(storage, NA) - lag(storage)
+  return(battery[!is.na(battery)])
+}
 
 
 

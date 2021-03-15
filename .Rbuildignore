@@ -1,7 +1,6 @@
-^environment\.yml$
 ^renv$
 ^renv\.lock$
-^evflex\.Rproj$
+^flextools\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$
 ^data-raw$

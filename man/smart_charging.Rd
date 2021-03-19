@@ -7,8 +7,8 @@
 smart_charging(
   sessions,
   fitting_data,
-  dttm_seq,
   window_length,
+  window_start,
   opt_weights,
   responsive,
   power_th = 0,
@@ -19,13 +19,15 @@ smart_charging(
 )
 }
 \arguments{
-\item{sessions}{sessions data set}
+\item{sessions}{tibble, sessions data set}
 
-\item{fitting_data}{optimization fitting data, first column being \code{datetime}. The other columns could be \code{solar} (solar generation) and \code{fixed} (static demand from other sectors like buildings, offices, ...).}
+\item{fitting_data}{tibble, optimization fitting data, first column being \code{datetime}.
+The other columns could be \code{solar} (solar generation) and \code{fixed} (static demand from other sectors like buildings, offices, ...).
+Only sessions starting within the time sequence of column \code{datetime} will be shifted.}
 
-\item{dttm_seq}{datetime sequence to apply smart charging}
+\item{window_length}{integer, optimization window length}
 
-\item{window_length}{optimization window length}
+\item{window_start}{integer, hour to start the optimization window. If \code{window_start = 6} the EV sessions are optimized from 6:00 to 6:00.}
 
 \item{opt_weights}{Named list with the optimization weight \code{w} of the \code{minimize_grid_flow} function. The names of the list must exactly match the user profiles names.}
 

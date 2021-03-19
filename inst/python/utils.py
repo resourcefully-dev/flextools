@@ -305,11 +305,6 @@ def smart_charging(sessions_norm, profiles_demand, fitting_data, window_length, 
   
   # Initiallize output sessions
   sessions_opt = DataFrame()
-
-  # Parameters check
-  if (len(profiles_demand.index)%window_length != 0):
-    message("Demand length must be multiple of optimization windows length.")
-    return(None)
   
   # Get the fixed demand
   if 'fixed' in fitting_data:

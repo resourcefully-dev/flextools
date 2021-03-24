@@ -44,8 +44,8 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
 #' @param fitting_data tibble, optimization fitting data, first column being `datetime`.
 #' The other columns could be `solar` (solar generation) and `fixed` (static demand from other sectors like buildings, offices, ...).
 #' Only sessions starting within the time sequence of column `datetime` will be shifted.
-#' @param window_length integer, optimization window length
-#' @param window_start integer, hour to start the optimization window. If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
+#' @param window_length integer, number of data points of the optimization window (not in hours)
+#' @param window_start_hour integer, hour to start the optimization window. If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
 #' @param opt_weights Named list with the optimization weight `w` of the `minimize_grid_flow` function. The names of the list must exactly match the user profiles names.
 #' @param responsive Named list with the ratio of sessions responsive to smart charging program for each profile. The names of the list must exactly match the user profiles names.
 #' @param power_th power threshold from to consider flexibility required
@@ -63,14 +63,15 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
 #' @return a list with two elements: optimization setpoints and coordinated sessions schedule
 #' @export
 #'
-smart_charging <- function(sessions, fitting_data, window_length, window_start, opt_weights, responsive, power_th = 0, up_to_G = TRUE, grid_cap = NULL, sort_by_flex = TRUE, include_msg = FALSE) {
+smart_charging <- function(sessions, fitting_data, window_length, window_start_hour, opt_weights, responsive, power_th = 0, up_to_G = TRUE, grid_cap = NULL, sort_by_flex = TRUE, include_msg = FALSE) {
 
   if (!pyenv.exists()) load.pyenv()
 
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
+  window_start_hour <- as.integer(window_start_hour)
   dttm_seq_original <- fitting_data[['datetime']]
-  dttm_seq_window_start <- dttm_seq_original[dttm_seq_original >= dttm_seq_original[which(hour(dttm_seq_original) == 6)[1]]]
+  dttm_seq_window_start <- dttm_seq_original[dttm_seq_original >= dttm_seq_original[which(hour(dttm_seq_original) == window_start_hour)[1]]]
   n_windows <- length(dttm_seq_window_start) %/% window_length
   dttm_seq <- dttm_seq_window_start[1:(n_windows*window_length)]
   time_interval <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)

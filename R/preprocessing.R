@@ -111,8 +111,10 @@ normalize_sessions <- function(sessions, start, time_interval) {
   sessions_data <- sessions_data[sessions_data[['coe']] >= sessions_data[['che']], ]
   # Build energy vector
   sessions_data[['e']] <- get_energy(sessions_data[['p']], sessions_data[['chs']], sessions_data[['che']], time_interval)
-  # Power levels
-  sessions_data[['pl']] <- 2
+
+  # # Power levels
+  # sessions_data[['pl']] <- 2
+
   # Check if energy charged is feasible (sum == 0)
   check <- round(sum((sessions_data[['che']] - sessions_data[['chs']])*time_interval*sessions_data[['p']] - sessions_data[['e']]))
   if (check == 0) {
@@ -204,7 +206,6 @@ get_schedule <- function(sessions_norm, window) {
 get_demand <- function(sessions, dttm_seq, aggregated = FALSE, stacked = FALSE, normalized = FALSE) {
 
   if (!pyenv.exists()) load.pyenv()
-  # pyenv <- import_utils()
 
   time_interval <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
   start <- dttm_seq[1]
@@ -215,17 +216,14 @@ get_demand <- function(sessions, dttm_seq, aggregated = FALSE, stacked = FALSE, 
   if (normalized) {
     sessions_norm <- sessions
   } else {
-    head(sessions)
+    print(head(sessions))
     sessions_norm <- sessions %>%
-      # filter(.data$ConnectionStartDateTime >= start, .data$ConnectionStartDateTime <= end) %>%
-      filter(.data$ConnectionStartDateTime >= start) %>%
+      filter(.data$ConnectionStartDateTime >= start, .data$ConnectionStartDateTime <= end) %>%
       normalize_sessions(start, time_interval)
-    head(sessions_norm)
+    print(head(sessions_norm))
   }
 
   demand_df <- pyenv$get_demand(sessions_norm, window, aggregated = reticulate::r_to_py(aggregated), stacked = reticulate::r_to_py(stacked))
-
-  print(demand_df)
 
   demand_df %>%
     as_tibble() %>%

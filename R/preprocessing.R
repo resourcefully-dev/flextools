@@ -208,15 +208,19 @@ get_demand <- function(sessions, dttm_seq, aggregated = FALSE, stacked = FALSE, 
 
   time_interval <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
   start <- dttm_seq[1]
+  print(start)
   end <- dttm_seq[length(dttm_seq)]
   window <- c(0, length(dttm_seq)) %>% as.integer
 
   if (normalized) {
     sessions_norm <- sessions
   } else {
+    head(sessions)
     sessions_norm <- sessions %>%
-      filter(.data$ConnectionStartDateTime >= start, .data$ConnectionStartDateTime <= end) %>%
+      # filter(.data$ConnectionStartDateTime >= start, .data$ConnectionStartDateTime <= end) %>%
+      filter(.data$ConnectionStartDateTime >= start) %>%
       normalize_sessions(start, time_interval)
+    head(sessions_norm)
   }
 
   demand_df <- pyenv$get_demand(sessions_norm, window, aggregated = reticulate::r_to_py(aggregated), stacked = reticulate::r_to_py(stacked))

@@ -113,13 +113,12 @@ normalize_sessions <- function(sessions, start, time_interval) {
   sessions_data <- sessions_data[sessions_data[['coe']] >= sessions_data[['che']], ]
   # Build energy vector
   sessions_data[['e']] <- get_energy(sessions_data[['p']], sessions_data[['chs']], sessions_data[['che']], time_interval)
-  print(head(sessions_data))
+
   # # Power levels
   # sessions_data[['pl']] <- 2
 
   # Check if energy charged is feasible (sum == 0)
   check <- round(sum((sessions_data[['che']] - sessions_data[['chs']])*time_interval*sessions_data[['p']] - sessions_data[['e']]))
-  print(check)
   if (check == 0) {
     return(sessions_data)
   }

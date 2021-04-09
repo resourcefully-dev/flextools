@@ -81,7 +81,6 @@ smart_charging <- function(sessions, fitting_data, window_length, window_start_h
 
   # Normalize sessions
   sessions_norm <- normalize_sessions(sessions, start, time_interval)
-  print(head(sessions_norm))
 
   fitting_data_norm <- fitting_data %>%
     filter(.data$datetime >= start, .data$datetime <= end) %>%
@@ -93,7 +92,6 @@ smart_charging <- function(sessions, fitting_data, window_length, window_start_h
 
   # Smart charging results
   results <- pyenv$smart_charging(sessions_norm, profiles_demand, fitting_data_norm, window_length, dict(opt_weights), dict(responsive), power_th, r_to_py(up_to_G), r_to_py(grid_cap), r_to_py(sort_by_flex), r_to_py(include_msg))
-  print(results)
   setpoints <- as_tibble(results[[1]]) %>% mutate(datetime = dttm_seq) %>% select('datetime', everything())
   sessions_opt <- denormalize_sessions(results[[2]], start, time_interval)
 

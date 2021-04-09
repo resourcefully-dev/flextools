@@ -96,7 +96,7 @@ get_energy <- function(power_kW, charging_start, charging_end, time_interval_min
 normalize_sessions <- function(sessions, start, time_interval) {
   # Normalization: The time slot index is an integer (e.g. from 0 to 96 with 15 minutes interval) instead of a datetime vector.
   # Thus, we have to make the translation considering that the `start` datetime value is now index 0.
-  i0 <- get_dhm_idx(start)
+  i0 <- get_dhm_idx(start, time_interval)
   sessions_data <- tibble(
     "Session" = as.character(sessions[["Session"]]),
     "prof" = as.character(sessions[["Profile"]]),

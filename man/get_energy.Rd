@@ -4,7 +4,7 @@
 \alias{get_energy}
 \title{Get energy from charging hours and charging power}
 \usage{
-get_energy(power_kW, charging_start, charging_end, time_interval_mins = 15)
+get_energy(power_kW, charging_start, charging_end, time_interval_mins)
 }
 \arguments{
 \item{power_kW}{charging power (kW)}

@@ -66,7 +66,7 @@ approximate_sessions <- function(sessions, time_interval = 15, power_interval = 
 #'
 #' @importFrom lubridate day hour minute
 #'
-get_dhm_idx <- function(dt, time_interval_mins=15) {
+get_dhm_idx <- function(dt, time_interval_mins) {
   day(dt)*24*60/time_interval_mins + hour(dt)*60/time_interval_mins + round(minute(dt)/time_interval_mins)
 }
 
@@ -78,7 +78,7 @@ get_dhm_idx <- function(dt, time_interval_mins=15) {
 #' @param charging_end charging end hour
 #' @param time_interval_mins interval of time (minutes)
 #'
-get_energy <- function(power_kW, charging_start, charging_end, time_interval_mins=15) {
+get_energy <- function(power_kW, charging_start, charging_end, time_interval_mins) {
   power_kW*(charging_end-charging_start)*time_interval_mins
 }
 
@@ -209,18 +209,15 @@ get_demand <- function(sessions, dttm_seq, aggregated = FALSE, stacked = FALSE, 
 
   time_interval <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
   start <- dttm_seq[1]
-  print(start)
   end <- dttm_seq[length(dttm_seq)]
   window <- c(0, length(dttm_seq)) %>% as.integer
 
   if (normalized) {
     sessions_norm <- sessions
   } else {
-    print(head(sessions))
     sessions_norm <- sessions %>%
       filter(.data$ConnectionStartDateTime >= start, .data$ConnectionStartDateTime <= end) %>%
       normalize_sessions(start, time_interval)
-    print(head(sessions_norm))
   }
 
   demand_df <- pyenv$get_demand(sessions_norm, window, aggregated = reticulate::r_to_py(aggregated), stacked = reticulate::r_to_py(stacked))

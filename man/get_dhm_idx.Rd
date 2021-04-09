@@ -4,7 +4,7 @@
 \alias{get_dhm_idx}
 \title{Get initial index}
 \usage{
-get_dhm_idx(dt, time_interval_mins = 15)
+get_dhm_idx(dt, time_interval_mins)
 }
 \arguments{
 \item{dt}{datetime}

@@ -94,8 +94,8 @@ get_energy <- function(power_kW, charging_start, charging_end, time_interval_min
 #' @importFrom dplyr tibble mutate_if
 #'
 normalize_sessions <- function(sessions, start, time_interval) {
-  # Normalization: The index must be from 0 to 96 (if 15 minutes interval) instead of a datetime vector.
-  # Thus, we have to make the translation considering that 06:00 AM is now index 0.
+  # Normalization: The time slot index is an integer (e.g. from 0 to 96 with 15 minutes interval) instead of a datetime vector.
+  # Thus, we have to make the translation considering that the `start` datetime value is now index 0.
   i0 <- get_dhm_idx(start)
   sessions_data <- tibble(
     "Session" = as.character(sessions[["Session"]]),
@@ -176,12 +176,10 @@ denormalize_sessions <- function(sessions_norm, start, time_interval) {
 #' @importFrom reticulate import_from_path
 #'
 #' @return data.frame
-# #' @export
 #'
 get_schedule <- function(sessions_norm, window) {
 
   if (!pyenv.exists()) load.pyenv()
-  # pyenv <- import_utils()
   pyenv$get_schedule(sessions_norm, window)
 
 }
@@ -222,6 +220,8 @@ get_demand <- function(sessions, dttm_seq, aggregated = FALSE, stacked = FALSE, 
   }
 
   demand_df <- pyenv$get_demand(sessions_norm, window, aggregated = reticulate::r_to_py(aggregated), stacked = reticulate::r_to_py(stacked))
+
+  print(demand_df)
 
   demand_df %>%
     as_tibble() %>%

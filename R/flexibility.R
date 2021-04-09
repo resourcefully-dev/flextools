@@ -80,7 +80,7 @@ smart_charging <- function(sessions, fitting_data, window_length, window_start_h
   window <- as.integer(c(0, length(dttm_seq)))
 
   # Normalize sessions
-  sessions_norm <- sessions_norm <- normalize_sessions(sessions, start, time_interval)
+  sessions_norm <- normalize_sessions(sessions, start, time_interval)
   print(head(sessions_norm))
 
   fitting_data_norm <- fitting_data %>%

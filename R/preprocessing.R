@@ -106,6 +106,8 @@ normalize_sessions <- function(sessions, start, time_interval) {
     "coe" = get_dhm_idx(sessions[['ConnectionEndDateTime']], time_interval)-i0,
     "p" = sessions[["Power"]]
   )
+  # Only session after the starting datetime value
+  sessions_data <- sessions_data[sessions_data$cos >= 0, ]
   # Check that all sessions are feasible: start before charging end and end charging before session end
   sessions_data <- sessions_data[sessions_data[['chs']] >= sessions_data[['cos']], ]
   sessions_data <- sessions_data[sessions_data[['coe']] >= sessions_data[['che']], ]
@@ -215,9 +217,7 @@ get_demand <- function(sessions, dttm_seq, aggregated = FALSE, stacked = FALSE, 
   if (normalized) {
     sessions_norm <- sessions
   } else {
-    sessions_norm <- sessions %>%
-      filter(.data$ConnectionStartDateTime >= start, .data$ConnectionStartDateTime <= end) %>%
-      normalize_sessions(start, time_interval)
+    sessions_norm <- normalize_sessions(sessions, start, time_interval)
   }
 
   demand_df <- pyenv$get_demand(sessions_norm, window, aggregated = reticulate::r_to_py(aggregated), stacked = reticulate::r_to_py(stacked))

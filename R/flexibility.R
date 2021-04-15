@@ -83,13 +83,15 @@ smart_charging <- function(sessions, fitting_data, window_length, window_start_h
   sessions_norm <- normalize_sessions(sessions, start, time_interval)
 
   # Get user profiles demand
-  profiles_demand <- pyenv$get_demand(sessions_norm, window = as.integer(c(0, length(dttm_seq))))
+  profiles_demand <- pyenv$get_demand(sessions_norm, window = as.integer(c(0, length(dttm_seq)))) %>%
+    mutate(timeslot = row_number()-1) %>% # Time slots start at 0 (start = 0)
+    tibble::column_to_rownames("timeslot") # Adapt to Python pandas DataFrame
 
   # Normalize fitting data
   fitting_data_norm <- fitting_data %>%
     filter(.data$datetime %in% dttm_seq) %>%
     mutate(timeslot = row_number()-1) %>% # Time slots start at 0 (start = 0)
-    select(.data$timeslot, -.data$datetime, everything()) %>%
+    select(.data$timeslot, everything(), -.data$datetime) %>%
     tibble::column_to_rownames("timeslot") # Adapt to Python pandas DataFrame
 
   if (nrow(profiles_demand) == nrow(fitting_data_norm)) {

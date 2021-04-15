@@ -55,7 +55,7 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
 #' @param include_msg logical, whether to output the algorithm messages for every user profile and time-slot
 #'
 #' @importFrom dplyr %>% filter mutate_if mutate select everything row_number left_join bind_rows
-#' @importFrom lubridate hour
+#' @importFrom lubridate hour minute
 #' @importFrom tibble column_to_rownames as_tibble
 #' @importFrom rlang .data
 #' @importFrom reticulate dict r_to_py import_from_path
@@ -69,33 +69,41 @@ smart_charging <- function(sessions, fitting_data, window_length, window_start_h
 
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
-  window_start_hour <- as.integer(window_start_hour)
   dttm_seq_original <- fitting_data[['datetime']]
-  dttm_seq_window_start <- dttm_seq_original[dttm_seq_original >= dttm_seq_original[which(hour(dttm_seq_original) == window_start_hour)[1]]]
+  dttm_seq_window_start <- dttm_seq_original[
+    dttm_seq_original >= dttm_seq_original[which((hour(dttm_seq_original) == window_start_hour) & (minute(dttm_seq_original) == 0))[1]]
+  ]
   n_windows <- length(dttm_seq_window_start) %/% window_length
   dttm_seq <- dttm_seq_window_start[1:(n_windows*window_length)]
   time_interval <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
   start <- dttm_seq[1]
   end <- dttm_seq[length(dttm_seq)]
-  window <- as.integer(c(0, length(dttm_seq)))
 
   # Normalize sessions
   sessions_norm <- normalize_sessions(sessions, start, time_interval)
 
-  fitting_data_norm <- fitting_data %>%
-    filter(.data$datetime >= start, .data$datetime <= end) %>%
-    mutate(timeslot = row_number()) %>%
-    select(.data$timeslot, -.data$datetime, everything()) %>%
-    tibble::column_to_rownames("timeslot")
+  # Get user profiles demand
+  profiles_demand <- pyenv$get_demand(sessions_norm, window = as.integer(c(0, length(dttm_seq))))
 
-  profiles_demand <- pyenv$get_demand(sessions_norm, window)
+  # Normalize fitting data
+  fitting_data_norm <- fitting_data %>%
+    filter(.data$datetime %in% dttm_seq) %>%
+    mutate(timeslot = row_number()-1) %>% # Time slots start at 0 (start = 0)
+    select(.data$timeslot, -.data$datetime, everything()) %>%
+    tibble::column_to_rownames("timeslot") # Adapt to Python pandas DataFrame
+
+  if (nrow(profiles_demand) == nrow(fitting_data_norm)) {
+    print('Same number of rows')
+    print(utils::head(profiles_demand))
+    print(utils::head(fitting_data_norm))
+  }
 
   # Smart charging results
   results <- pyenv$smart_charging(sessions_norm, profiles_demand, fitting_data_norm, window_length, dict(opt_weights), dict(responsive), power_th, r_to_py(up_to_G), r_to_py(grid_cap), r_to_py(sort_by_flex), r_to_py(include_msg))
   setpoints <- as_tibble(results[[1]]) %>% mutate(datetime = dttm_seq) %>% select('datetime', everything())
   sessions_opt <- denormalize_sessions(results[[2]], start, time_interval)
 
-  # Add sessions discarded by optimization windows
+  # Add sessions discarded by smart charging algorithm
   sessions_out <- sessions[!(sessions[['Session']] %in% sessions_norm[['Session']]), ]
   sessions_opt_final <- bind_rows(sessions_opt, sessions_out)
   sessions_opt_final_sorted <- left_join(sessions['Session'], sessions_opt_final, by = 'Session') %>%

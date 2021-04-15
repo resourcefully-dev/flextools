@@ -94,12 +94,6 @@ smart_charging <- function(sessions, fitting_data, window_length, window_start_h
     select(.data$timeslot, everything(), -.data$datetime) %>%
     tibble::column_to_rownames("timeslot") # Adapt to Python pandas DataFrame
 
-  if (nrow(profiles_demand) == nrow(fitting_data_norm)) {
-    print('Same number of rows')
-    print(utils::head(profiles_demand))
-    print(utils::head(fitting_data_norm))
-  }
-
   # Smart charging results
   results <- pyenv$smart_charging(sessions_norm, profiles_demand, fitting_data_norm, window_length, dict(opt_weights), dict(responsive), power_th, r_to_py(up_to_G), r_to_py(grid_cap), r_to_py(sort_by_flex), r_to_py(include_msg))
   setpoints <- as_tibble(results[[1]]) %>% mutate(datetime = dttm_seq) %>% select('datetime', everything())

@@ -262,8 +262,7 @@ def postpone_sessions(sessions_prof, demand, setpoint, power_th, responsive, sor
     # DEBUG = "For timeslot " + str(int(flex_timeslot)) + " we need " + str(round(flex_demand_timeslot, 2))+ " and we have " + str(round(flex_sessions_timeslot['p'].sum(), 2))
     # if verbose: print(DEBUG)
 
-    if flex_timeslot == flex_demand.index[-1]: 
-      print('Flex timeslot =', flex_timeslot, 'Last window timeslot = ', flex_demand.index[-1])
+    if flex_timeslot == setpoint.index[-1]: 
       if include_msg: msg.append("Can't shift outside the optimization window")
       break
 

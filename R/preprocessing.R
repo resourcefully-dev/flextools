@@ -106,20 +106,14 @@ normalize_sessions <- function(sessions, start, time_interval) {
     "coe" = get_dhm_idx(sessions[['ConnectionEndDateTime']], time_interval)-i0,
     "p" = sessions[["Power"]]
   )
-  # Only session after the starting datetime value
-  # sessions_data <- sessions_data[sessions_data$cos >= 0, ]
-  # Check that all sessions are feasible: start before charging end and end charging before session end
+  # Only session after the starting datetime value and with a proper order of time variables
   sessions_data <- sessions_data[
     (sessions_data['cos'] >= 0) & (sessions_data['chs'] >= sessions_data['cos']) &
       (sessions_data['che'] >= sessions_data['chs']) & (sessions_data['coe'] >= sessions_data['che']),
   ]
-  # sessions_data <- sessions_data[sessions_data[['che']] >= sessions_data[['chs']], ]
-  # sessions_data <- sessions_data[sessions_data[['coe']] >= sessions_data[['che']], ]
+
   # Build energy vector
   sessions_data[['e']] <- get_energy(sessions_data[['p']], sessions_data[['chs']], sessions_data[['che']], time_interval)
-
-  # # Power levels
-  # sessions_data[['pl']] <- 2
 
   # Check if energy charged is feasible (sum == 0)
   check <- round(sum((sessions_data[['che']] - sessions_data[['chs']])*time_interval*sessions_data[['p']] - sessions_data[['e']]))

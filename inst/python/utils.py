@@ -297,7 +297,7 @@ def postpone_sessions(sessions_prof, demand, setpoint, power_th, responsive, sor
 def smart_charging(sessions_norm, profiles_demand, fitting_data, window_length, opt_weights, responsive, power_th=0, up_to_G = True, grid_cap = None, sort_by_flex = True, include_msg=False):
   
   # opt_weights = opt_weights.set_index('profile')
-  opt_profiles = Series(opt_weights.keys())
+  opt_profiles = Series(list(opt_weights.keys()), dtype='string')
   sessions_norm = sessions_norm.set_index('Session')
   sessions_norm['f'] = (sessions_norm['coe'] - sessions_norm['chs']) - (sessions_norm['che'] - sessions_norm['chs'])
   sessions_norm['shifted'] = 0

@@ -109,9 +109,9 @@ normalize_sessions <- function(sessions, start, time_interval) {
   # Only session after the starting datetime value
   # sessions_data <- sessions_data[sessions_data$cos >= 0, ]
   # Check that all sessions are feasible: start before charging end and end charging before session end
-  sessions_data <- sessions_data.loc[
+  sessions_data <- sessions_data[
     (sessions_data['cos'] >= 0) & (sessions_data['chs'] >= sessions_data['cos']) &
-      (sessions_data['che'] >= sessions_data['chs']) & (sessions_data['coe'] >= sessions_data['che'])
+      (sessions_data['che'] >= sessions_data['chs']) & (sessions_data['coe'] >= sessions_data['che']),
   ]
   # sessions_data <- sessions_data[sessions_data[['che']] >= sessions_data[['chs']], ]
   # sessions_data <- sessions_data[sessions_data[['coe']] >= sessions_data[['che']], ]

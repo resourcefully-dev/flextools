@@ -59,15 +59,17 @@ approximate_sessions <- function(sessions, time_interval = 15, power_interval = 
 
 # Sessions normalization --------------------------------------------------
 
-#' Get initial index
+#' Convert datetime to time slot index
 #'
-#' @param dt datetime
-#' @param time_interval_mins interval of time (minutes)
+#' @param dttm datetime, value to convert to time slot index
+#' @param start datetime, start datetime value
+#' @param time_interval_mins integer, interval of time between time slots (minutes)
 #'
 #' @importFrom lubridate day hour minute
 #'
-get_dhm_idx <- function(dt, time_interval_mins) {
-  day(dt)*24*60/time_interval_mins + hour(dt)*60/time_interval_mins + round(minute(dt)/time_interval_mins)
+convert_datetime_to_timeslot <- function(dttm, start, time_interval_mins) {
+  as.integer(as.numeric(dttm - start, unit = 'hours')*60/time_interval_mins) + 1
+  # day(dt)*24*60/time_interval_mins + hour(dt)*60/time_interval_mins + round(minute(dt)/time_interval_mins)
 }
 
 
@@ -96,14 +98,13 @@ get_energy <- function(power_kW, charging_start, charging_end, time_interval_min
 normalize_sessions <- function(sessions, start, time_interval) {
   # Normalization: The time slot index is an integer (e.g. from 0 to 96 with 15 minutes interval) instead of a datetime vector.
   # Thus, we have to make the translation considering that the `start` datetime value is now index 0.
-  i0 <- get_dhm_idx(start, time_interval)
   sessions_data <- tibble(
     "Session" = as.character(sessions[["Session"]]),
     "prof" = as.character(sessions[["Profile"]]),
-    "cos" = get_dhm_idx(sessions[['ConnectionStartDateTime']], time_interval)-i0,
-    "chs" = get_dhm_idx(sessions[['ChargingStartDateTime']], time_interval)-i0,
-    "che" = get_dhm_idx(sessions[['ChargingEndDateTime']], time_interval)-i0,
-    "coe" = get_dhm_idx(sessions[['ConnectionEndDateTime']], time_interval)-i0,
+    "cos" = convert_datetime_to_timeslot(sessions[['ConnectionStartDateTime']], start, time_interval),
+    "chs" = convert_datetime_to_timeslot(sessions[['ChargingStartDateTime']], start, time_interval),
+    "che" = convert_datetime_to_timeslot(sessions[['ChargingEndDateTime']], start, time_interval),
+    "coe" = convert_datetime_to_timeslot(sessions[['ConnectionEndDateTime']], start, time_interval),
     "p" = sessions[["Power"]]
   )
   # Only session after the starting datetime value and with a proper order of time variables

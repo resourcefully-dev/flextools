@@ -40,15 +40,15 @@ round_to_interval <- function (dbl, interval) {
 #'
 #' @importFrom dplyr mutate %>%
 #' @importFrom rlang .data
-#' @importFrom xts align.time
+#' @importFrom lubridate round_date
 #'
 approximate_sessions <- function(sessions, time_interval = 15, power_interval = 1) {
   sessions %>%
     mutate(
-      ConnectionStartDateTime = xts::align.time(.data$ConnectionStartDateTime, n=60*time_interval),
-      ConnectionEndDateTime = xts::align.time(.data$ConnectionEndDateTime, n=60*time_interval),
-      ChargingStartDateTime = xts::align.time(.data$ChargingStartDateTime, n=60*time_interval),
-      ChargingEndDateTime = xts::align.time(.data$ChargingEndDateTime, n=60*time_interval),
+      ConnectionStartDateTime = round_date(.data$ConnectionStartDateTime, paste(time_interval, "minutes")),
+      ConnectionEndDateTime = round_date(.data$ConnectionEndDateTime, paste(time_interval, "minutes")),
+      ChargingStartDateTime = round_date(.data$ChargingStartDateTime, paste(time_interval, "minutes")),
+      ChargingEndDateTime = round_date(.data$ChargingEndDateTime, paste(time_interval, "minutes")),
       Power = round_to_interval(.data$Power, power_interval),
       ConnectionHours = as.numeric(.data$ConnectionEndDateTime - .data$ConnectionStartDateTime, units='hours'),
       ChargingHours = as.numeric(.data$ChargingEndDateTime - .data$ChargingStartDateTime, units='hours'),

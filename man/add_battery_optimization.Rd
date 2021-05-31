@@ -14,8 +14,6 @@ add_battery_optimization(
   SOCmin = 0,
   SOCmax = 100,
   SOCini = NULL,
-  SOCend = NULL,
-  up_to_G = TRUE,
   window_length = NULL
 )
 }
@@ -36,11 +34,7 @@ add_battery_optimization(
 
 \item{SOCmax}{numeric, maximum State-of-Charge of the battery}
 
-\item{SOCini}{numeric, required State-of-Charge at the window beginning}
-
-\item{SOCend}{numeric, required State-of-Charge at the window end}
-
-\item{up_to_G}{logical, whether to limit the flexible EV demand up to renewable Generation}
+\item{SOCini}{numeric, required State-of-Charge at the beginning/end of optimization window}
 
 \item{window_length}{integer, window length. If \code{NULL}, the window length will be the length of \code{G}}
 }

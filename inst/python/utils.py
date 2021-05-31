@@ -380,7 +380,7 @@ def smart_charging(sessions_norm, profiles_demand, fitting_data, window_length, 
 
 ################################## BATTERY ########################################
 
-def add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = None, SOCend = None, up_to_G = True):
+def add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = None):
   # Parameters check
   if (w > 1):
     print("Error: Objectives weights must sum 1.")
@@ -396,10 +396,9 @@ def add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini =
     return None
     
   if SOCini is None: SOCini = 0
-  if SOCend is None: SOCend = 0
-  # SOCend must be between SOCmin and SOCmax
-  if SOCend < SOCmin: SOCend = SOCmin
-  if SOCend > SOCmax: SOCend = SOCmax
+  # SOCini must be between SOCmin and SOCmax
+  if SOCini < SOCmin: SOCini = SOCmin
+  if SOCini > SOCmax: SOCini = SOCmax
   
   # If no optimization applied (w=0) the battery is not used:
   if (w == 0): return np.array([0.0]*len(G))
@@ -409,11 +408,11 @@ def add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini =
   identityMat = np.identity(time_slots)
   cumsumMat = np.tril(np.full((time_slots, time_slots), 1)) # Lower triangle matrix
   
-  # Upper limit for up to solar rule
-  Bmax = np.array([Bc]*time_slots)
-  if up_to_G:
-    Bmax[G > L] = G[G > L] - L[G > L]
-    Bmax[Bmax > Bc] = Bc
+  # # Upper limit for up to solar rule
+  # Bmax = np.array([Bc]*time_slots)
+  # if up_to_G:
+  #   Bmax[G > L] = G[G > L] - L[G > L]
+  #   Bmax[Bmax > Bc] = Bc
 
   # Objective function terms
   P = mat(2*identityMat, tc = 'd')
@@ -421,14 +420,15 @@ def add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini =
 
   # Constraints
         # Ax = b
-          # Final SOC = SOCend
+          # Balance = 0 at the end of window
   A = mat([[1] for i in range(time_slots)], tc='d')
-  b = mat((SOCend - SOCini)/100*Bcap, tc='d')
+  b = mat(0, tc='d')  # (SOCend - SOCini)/100*Bcap
   
       # Gx <= h
         # B charging/discharging limits
   G_B_max = identityMat
-  h_B_max = np.array([[Bmax[i]] for i in range(time_slots)])
+  # h_B_max = np.array([[Bmax[i]] for i in range(time_slots)])
+  h_B_max = np.array([[Bc] for i in range(time_slots)])
   G_B_min = identityMat*-1
   h_B_min = np.array([[Bd] for i in range(time_slots)]) # Negative*Negative=Positive (+Bd)
   
@@ -448,7 +448,7 @@ def add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini =
   return BO.round(2)
 
 
-def add_battery_time_series(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = None, SOCend = None, up_to_G = True, window_length = None):
+def add_battery_time_series(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = None, window_length = None):
   
   if window_length is None: window_length = len(G)
   B_total = []
@@ -457,7 +457,7 @@ def add_battery_time_series(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOC
     G_sub = G[i:int(i+window_length)]
     L_sub = L[i:int(i+window_length)]
 
-    B_sub = add_battery_window(w, G_sub, L_sub, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, SOCend, up_to_G)
+    B_sub = add_battery_window(w, G_sub, L_sub, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini)
     
     B_total = np.append(B_total, B_sub)
   

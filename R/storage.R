@@ -84,9 +84,7 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 #' @param Bd numeric, maximum discharging power
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
-#' @param SOCini numeric, required State-of-Charge at the window beginning
-#' @param SOCend numeric, required State-of-Charge at the window end
-#' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param window_length integer, window length. If `NULL`, the window length will be the length of `G`
 #'
 #' @return numeric vector
@@ -94,7 +92,7 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 #'
 #' @importFrom reticulate r_to_py
 #'
-add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL, SOCend = NULL, up_to_G = TRUE, window_length = NULL) {
+add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL, window_length = NULL) {
   if (!pyenv.exists()) load.pyenv()
   pyenv$add_battery_time_series(
     w,
@@ -106,8 +104,6 @@ add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax =
     SOCmin,
     SOCmax,
     SOCini = r_to_py(SOCini),
-    SOCend = r_to_py(SOCend),
-    up_to_G = r_to_py(up_to_G),
     window_length = r_to_py(window_length)
   )
 }

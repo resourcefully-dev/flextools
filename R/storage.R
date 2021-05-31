@@ -18,7 +18,7 @@ get_storage_losses <- function(power, loss) {
 #' Accumulated storage level
 #'
 #' @param power numeric vector, being positive when charging and negative when discharging
-#' @param init numeric, initial storage level
+#' @param init numeric, initial storage level (in energy units, not %)
 #' @param loss numeric, the hourly storage loss in percentage (%/hour), passed to `get_storage_losses` function
 #'
 #' @return numeric vector
@@ -28,7 +28,7 @@ get_storage_losses <- function(power, loss) {
 #'
 get_storage_level <- function(power, init = 0, loss = 0) {
   storage_losses <- get_storage_losses(power, loss)
-  pmax(c(init, cumsum(power + storage_losses) - cumsum(lag(storage_losses, default = 0))), 0)
+  pmax(c(init, init + cumsum(power + storage_losses) - cumsum(lag(storage_losses, default = 0))), 0)
 }
 
 
@@ -36,7 +36,7 @@ get_storage_level <- function(power, init = 0, loss = 0) {
 #'
 #' @param df tibble, being the first column `datetime` variable
 #' @param power numeric vector, being positive when charging and negative when discharging
-#' @param init numeric, initial storage level
+#' @param init numeric, initial storage level (in energy units, not %)
 #' @param loss numeric, the hourly storage loss in percentage (%/hour), passed to `get_storage_losses` function
 #'
 #' @return tibble, with extra column `storage`

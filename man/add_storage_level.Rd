@@ -11,7 +11,7 @@ add_storage_level(df, power, init = 0, loss = 0)
 
 \item{power}{numeric vector, being positive when charging and negative when discharging}
 
-\item{init}{numeric, initial storage level}
+\item{init}{numeric, initial storage level (in energy units, not \%)}
 
 \item{loss}{numeric, the hourly storage loss in percentage (\%/hour), passed to \code{get_storage_losses} function}
 }

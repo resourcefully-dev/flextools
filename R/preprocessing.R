@@ -209,11 +209,8 @@ get_all_sessions_interval_demand_fast <- function(sessions, slot) {
   dplyr::tibble(
     timeslot = slot,
     dplyr::summarise(
-      dplyr::filter(
-        sessions,
-        rlang::.data$chs <= slot, slot < rlang::.data$che
-      ),
-      demand = sum(rlang::.data$p)
+      dplyr::filter(sessions, .data$chs <= slot, slot < .data$che),
+      demand = sum(.data$p)
     )
   )
 }

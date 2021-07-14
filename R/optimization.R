@@ -250,7 +250,7 @@ add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax =
 #'
 #' @importFrom osqp osqp osqpSettings
 #'
-add_battery_window <- function (w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL) {
+add_battery_window <- function (w, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -264,12 +264,12 @@ add_battery_window <- function (w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100,
   # Lower and upper bounds
   ## General bounds
   Amat_general <- identityMat
-  lb_general <- rep(Bd, time_slots)
+  lb_general <- rep(-Bd, time_slots)
   ub_general <- rep(Bc, time_slots)
 
   ## SOC limits
   Amat_cumsum <- cumsumMat
-  lb_cumsum <- rep((SOCini - SOCmin)/100*Bcap, time_slots)
+  lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
   ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
 
   ## Total sum of B == 0 (neutral balance)

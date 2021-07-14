@@ -21,7 +21,10 @@ Depends:
 Imports: 
     dplyr,
     lubridate,
-    xts,
     reticulate,
     rlang,
-    tibble
+    tibble,
+    osqp,
+    tidyr,
+    purrr,
+    Matrix

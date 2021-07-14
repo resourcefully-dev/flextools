@@ -7,11 +7,11 @@
 denormalize_sessions(sessions_norm, start, time_interval)
 }
 \arguments{
-\item{sessions_norm}{normalized sessions data set}
+\item{sessions_norm}{tibble, normalized sessions data set}
 
-\item{start}{first value of the normalization datetime sequence}
+\item{start}{datetime, start datetime value}
 
-\item{time_interval}{interval of time (minutes)}
+\item{time_interval}{integer, interval of time between time slots (minutes)}
 }
 \value{
 tibble

@@ -72,43 +72,6 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 }
 
 
-
-
-#' Battery optimal charging/discharging profile
-#'
-#' @param w numeric between `0` and `1`, being the weight of the flexibility potential
-#' @param G numeric vector, being the renewable generation profile
-#' @param L numeric vector, being the load profile
-#' @param Bcap numeric, capacity of the battery
-#' @param Bc numeric, maximum charging power
-#' @param Bd numeric, maximum discharging power
-#' @param SOCmin numeric, minimum State-of-Charge of the battery
-#' @param SOCmax numeric, maximum State-of-Charge of the battery
-#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param window_length integer, window length. If `NULL`, the window length will be the length of `G`
-#'
-#' @return numeric vector
-#' @export
-#'
-#' @importFrom reticulate r_to_py
-#'
-add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL, window_length = NULL) {
-  if (!pyenv.exists()) load.pyenv()
-  pyenv$add_battery_time_series(
-    w,
-    G,
-    L,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini = r_to_py(SOCini),
-    window_length = r_to_py(window_length)
-  )
-}
-
-
 #' Simple battery profile
 #'
 #' Charging when there is surplus, discharging when there is deficit

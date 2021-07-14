@@ -1,20 +1,4 @@
 
-# Dygraphs support -------------------------------------------------------------------------
-
-#' Convert a data.frame or tibble to timeseries data.frame
-#'
-#' @param df data.frame or tibble
-#'
-#' @return timeseries data.frame
-#' @export
-#'
-#' @importFrom xts xts
-#'
-df_to_ts <- function(df) {
-  xts::xts(df[-1], order.by = df[[1]])
-}
-
-
 # Sessions approximation --------------------------------------------------
 
 #' Round a numeric value to interval
@@ -63,174 +47,185 @@ approximate_sessions <- function(sessions, time_interval = 15, power_interval = 
 #'
 #' @param dttm datetime, value to convert to time slot index
 #' @param start datetime, start datetime value
-#' @param time_interval_mins integer, interval of time between time slots (minutes)
+#' @param time_interval integer, interval of time between time slots (minutes)
 #'
 #' @importFrom lubridate day hour minute
 #'
-convert_datetime_to_timeslot <- function(dttm, start, time_interval_mins) {
-  as.integer(as.numeric(dttm - start, unit = 'hours')*60/time_interval_mins) + 1
-  # day(dt)*24*60/time_interval_mins + hour(dt)*60/time_interval_mins + round(minute(dt)/time_interval_mins)
+convert_datetime_to_timeslot <- function(dttm, start, time_interval) {
+  as.integer(as.numeric(dttm - start, unit = 'hours')*60/time_interval) + 1
 }
 
 
-#' Get energy from charging hours and charging power
+#' Convert time slot index to datetime
 #'
-#' @param power_kW charging power (kW)
-#' @param charging_start connection start hour
-#' @param charging_end charging end hour
-#' @param time_interval_mins interval of time (minutes)
+#' @param timeslot integer, time slot
+#' @param start datetime, start datetime value
+#' @param time_interval integer, interval of time between time slots (minutes)
 #'
-get_energy <- function(power_kW, charging_start, charging_end, time_interval_mins) {
-  power_kW*(charging_end-charging_start)*time_interval_mins
+#' @importFrom lubridate minutes
+#'
+convert_timeslot_to_datetime <- function(timeslot, start, time_interval) {
+  start + minutes((timeslot - 1) * time_interval)
 }
 
 
 #' Normalize sessions (from datetime to timeslots)
 #'
 #' @param sessions sessions data set
-#' @param start first value of the normalization datetime sequence
-#' @param time_interval interval of time (minutes)
+#' @param start datetime, start datetime value
+#' @param time_interval integer, interval of time between time slots (minutes)
 #'
-# #' @export
+#' @return tibble
+#' @export
 #'
 #' @importFrom dplyr tibble mutate_if
 #'
-normalize_sessions <- function(sessions, start, time_interval) {
-  # Normalization: The time slot index is an integer (e.g. from 0 to 96 with 15 minutes interval) instead of a datetime vector.
-  # Thus, we have to make the translation considering that the `start` datetime value is now index 0.
-  sessions_data <- tibble(
-    "Session" = as.character(sessions[["Session"]]),
-    "prof" = as.character(sessions[["Profile"]]),
-    "cos" = convert_datetime_to_timeslot(sessions[['ConnectionStartDateTime']], start, time_interval),
-    "chs" = convert_datetime_to_timeslot(sessions[['ChargingStartDateTime']], start, time_interval),
-    "che" = convert_datetime_to_timeslot(sessions[['ChargingEndDateTime']], start, time_interval),
-    "coe" = convert_datetime_to_timeslot(sessions[['ConnectionEndDateTime']], start, time_interval),
-    "p" = sessions[["Power"]]
+normalize_sessions <- function (sessions, start, time_interval) {
+  sessions_norm <- tibble(
+    Session = as.character(sessions[["Session"]]),
+    Profile = as.character(sessions[["Profile"]]),
+    cos = convert_datetime_to_timeslot(sessions[["ConnectionStartDateTime"]], start, time_interval),
+    chs = convert_datetime_to_timeslot(sessions[["ChargingStartDateTime"]], start, time_interval),
+    che = convert_datetime_to_timeslot(sessions[["ChargingEndDateTime"]], start, time_interval),
+    coe = convert_datetime_to_timeslot(sessions[["ConnectionEndDateTime"]], start, time_interval),
+    p = sessions[["Power"]]
   )
-  # Only session after the starting datetime value and with a proper order of time variables
-  sessions_data <- sessions_data[
-    (sessions_data['cos'] >= 0) & (sessions_data['chs'] >= sessions_data['cos']) &
-      (sessions_data['che'] >= sessions_data['chs']) & (sessions_data['coe'] >= sessions_data['che']),
-  ]
-
-  # Build energy vector
-  sessions_data[['e']] <- get_energy(sessions_data[['p']], sessions_data[['chs']], sessions_data[['che']], time_interval)
-
-  # Check if energy charged is feasible (sum == 0)
-  check <- round(sum((sessions_data[['che']] - sessions_data[['chs']])*time_interval*sessions_data[['p']] - sessions_data[['e']]))
-  if (check == 0) {
-    return(sessions_data)
-  }
-  else {
-    message(paste("Error: sum of energy values doesn't match sum of power*time product. The difference is", check))
-    return(NULL)
-  }
+  sessions_norm[["e"]] <- sessions_norm[["p"]]* (sessions_norm[["che"]] - sessions_norm[["chs"]])
+  return( sessions_norm )
 }
 
 
 #' Denormalize sessions (from timeslot to datetime)
 #'
-#' @param sessions_norm normalized sessions data set
-#' @param start first value of the normalization datetime sequence
-#' @param time_interval interval of time (minutes)
+#' @param sessions_norm tibble, normalized sessions data set
+#' @param start datetime, start datetime value
+#' @param time_interval integer, interval of time between time slots (minutes)
 #'
 #' @return tibble
-# #' @export
+#' @export
 #'
 #' @importFrom rlang .data
-#' @importFrom tibble as_tibble
-#' @importFrom lubridate minutes
-#' @importFrom dplyr %>% mutate rename select arrange
+#' @importFrom dplyr %>% mutate rename select
 #'
-denormalize_sessions <- function(sessions_norm, start, time_interval) {
-  # Normalization: The index must be from 0 to 96 (if 15 minutes interval) instead of a datetime vector.
+denormalize_sessions <- function (sessions_norm, start, time_interval) {
   sessions_norm %>%
-    as_tibble() %>%
     mutate(
-      ConnectionStartDateTime = start + minutes(.data$cos*time_interval),
-      ConnectionEndDateTime = start + minutes(.data$coe*time_interval),
-      ChargingStartDateTime = start + minutes(.data$chs*time_interval),
-      ChargingEndDateTime = start + minutes(.data$che*time_interval),
-      ConnectionHours = as.numeric(.data$ConnectionEndDateTime - .data$ConnectionStartDateTime, units='hours'),
-      ChargingHours = as.numeric(.data$ChargingEndDateTime - .data$ChargingStartDateTime, units='hours'),
-      ShiftHours = .data$shifted*time_interval/60,
-      Energy = .data$e/60, # From kW·min to kW·h
+      ConnectionStartDateTime = convert_timeslot_to_datetime(.data$cos, start, time_interval),
+      ConnectionEndDateTime = convert_timeslot_to_datetime(.data$coe, start, time_interval),
+      ChargingStartDateTime = convert_timeslot_to_datetime(.data$chs, start, time_interval),
+      ChargingEndDateTime = convert_timeslot_to_datetime(.data$che, start, time_interval),
+      ConnectionHours = as.numeric(.data$ConnectionEndDateTime - .data$ConnectionStartDateTime, units = "hours"),
+      ChargingHours = as.numeric(.data$ChargingEndDateTime - .data$ChargingStartDateTime, units = "hours"),
+      Energy = .data$e/(60/time_interval),
       FlexibilityHours = .data$ConnectionHours - .data$ChargingHours
     ) %>%
-    rename(
-      Profile = .data$prof,
-      Power = .data$p
-    ) %>%
-    select('Profile', 'Session', 'ConnectionStartDateTime', 'ConnectionEndDateTime',
-           'ChargingStartDateTime', 'ChargingEndDateTime', 'Power', 'Energy',
-           'ConnectionHours', 'ChargingHours', 'FlexibilityHours', 'ShiftHours') %>%
-    arrange(.data$ConnectionStartDateTime)
+    rename(Power = .data$p) %>%
+    select(-c("cos", "coe", "chs", "che", "e"))
+}
+
+
+#' Denormalize time-series (from timeslot to demand)
+#'
+#' @param df tibble or data.frame with first column being `timeslot`
+#' @param start datetime, start datetime value
+#' @param time_interval integer, interval of time between time slots (minutes)
+#'
+#' @return tibble with first column being `datetime`
+#' @export
+#'
+denormalize_timeseries <- function(df, start, time_interval) {
+  df %>%
+    mutate(datetime = convert_timeslot_to_datetime(.data$timeslot, start, time_interval)) %>%
+    select(.data$datetime, everything(), -.data$timeslot)
 }
 
 
 # Sessions demand ---------------------------------------------------------
 
-
-#' Get schedule
+#' Obtain demand from a starting dttm value and certain duration interval
 #'
-#' @param sessions_norm dataframe of normalized sessions
-#' @param window vector with time window's indices
+#' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
+#' @param timeslot datetime, time slot of the requested demand
+#' @param by character, being 'Profile' or 'Session'. When `by='Profile'` each column corresponds to an EV user profile.
+#' @param normalized logical, whether the `sessions` datetime columns are time-slot values
 #'
-#' @importFrom reticulate import_from_path
+#' @return tibble
 #'
-#' @return data.frame
+#' @importFrom dplyr %>% filter group_by summarise mutate sym
+#' @importFrom rlang .data
 #'
-get_schedule <- function(sessions_norm, window) {
-
-  if (!pyenv.exists()) load.pyenv()
-  pyenv$get_schedule(sessions_norm, window)
-
+get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
+  if (normalized) {
+    return(
+      sessions %>%
+        filter(.data$chs <= timeslot, timeslot < .data$che) %>%
+        group_by(!!sym(by)) %>%
+        summarise(Power = sum(.data$p)) %>%
+        mutate(datetime = timeslot)
+    )
+  } else {
+    return(
+      sessions %>%
+        filter(.data$ChargingStartDateTime <= timeslot, timeslot < .data$ChargingEndDateTime) %>%
+        group_by(!!sym(by)) %>%
+        summarise(Power = sum(.data$Power)) %>%
+        mutate(datetime = timeslot)
+    )
+  }
 }
 
 
-#' Get demand
+#' Obtain timeseries demand from sessions dataset
 #'
-#' @param sessions sessions data set
-#' @param dttm_seq vector with a sequence of datetime values
-#' @param aggregated single "Demand" column or one column for each profile
-#' @param stacked single "Profile" column or one column for each profile
-#' @param normalized True if sessions datatset is normalized (timeslots instead of datetimes)
+#' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
+#' @param dttm_seq sequence of datetime values that will be the datetime variable of the returned time-series data frame
+#' @param by character, being 'Profile' or 'Session'. When `by='Profile'` each column corresponds to an EV user profile.
+#' @param normalized logical, whether the `sessions` datetime columns are time-slot values
 #'
-#' @importFrom dplyr %>% filter mutate_if mutate select everything
-#' @importFrom tibble column_to_rownames as_tibble
-#' @importFrom rlang .data
-#' @importFrom reticulate import_from_path
-#'
-#' @return data.frame
+#' @return tibble
 #' @export
 #'
-get_demand <- function(sessions, dttm_seq, aggregated = FALSE, stacked = FALSE, normalized = FALSE) {
-
-  if (!pyenv.exists()) load.pyenv()
-
-  time_interval <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
-  start <- dttm_seq[1]
-  end <- dttm_seq[length(dttm_seq)]
-  window <- c(0, length(dttm_seq)) %>% as.integer
-
-  if (normalized) {
-    sessions_norm <- sessions
-  } else {
-    sessions_norm <- normalize_sessions(sessions, start, time_interval)
-  }
-
-  demand_df <- pyenv$get_demand(sessions_norm, window, aggregated = reticulate::r_to_py(aggregated), stacked = reticulate::r_to_py(stacked))
-
-  demand_df %>%
-    as_tibble() %>%
-    mutate(datetime = dttm_seq) %>%
-    select(.data$datetime, everything())
+#' @importFrom dplyr left_join tibble sym
+#' @importFrom rlang .data
+#' @importFrom tidyr pivot_wider
+#' @importFrom purrr map_dfr
+#'
+#' @details This function is only valid if charging start/end times of sessions are aligned to a specific time-interval.
+#' For this purpose use `approximate_sessions` function.
+#'
+get_sessions_demand <- function(sessions, dttm_seq, by = "Profile", normalized = F) {
+  demand <- left_join(
+    tibble(datetime = dttm_seq),
+    map_dfr(dttm_seq, ~ get_sessions_interval_demand(sessions, .x, by, normalized)) %>%
+      pivot_wider(names_from = !!sym(by), values_from = .data$Power, values_fill = 0),
+    by = 'datetime'
+  )
+  return( replace(demand, is.na(demand), 0) )
 }
 
 
 
+get_all_sessions_interval_demand_fast <- function(sessions, slot) {
+  dplyr::tibble(
+    timeslot = slot,
+    dplyr::summarise(
+      dplyr::filter(
+        sessions,
+        rlang::.data$chs <= slot, slot < rlang::.data$che
+      ),
+      demand = sum(rlang::.data$p)
+    )
+  )
+}
 
-
-
-
+get_all_sessions_demand_fast <- function(sessions, timeslot_seq) {
+  demand <- dplyr::left_join(
+    dplyr::tibble(timeslot = timeslot_seq),
+    purrr::map_dfr(
+      timeslot_seq,
+      ~get_all_sessions_interval_demand_fast(sessions, .x)
+    ), by = 'timeslot'
+  )
+  return( replace(demand, is.na(demand), 0) )
+}
 

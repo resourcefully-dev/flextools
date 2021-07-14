@@ -9,9 +9,12 @@ normalize_sessions(sessions, start, time_interval)
 \arguments{
 \item{sessions}{sessions data set}
 
-\item{start}{first value of the normalization datetime sequence}
+\item{start}{datetime, start datetime value}
 
-\item{time_interval}{interval of time (minutes)}
+\item{time_interval}{integer, interval of time between time slots (minutes)}
+}
+\value{
+tibble
 }
 \description{
 Normalize sessions (from datetime to timeslots)

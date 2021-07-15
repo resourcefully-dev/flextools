@@ -305,16 +305,6 @@ postpone_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessio
 }
 
 
-get_sessions_schedule <- function(sessions, start, end) {
-  connection_seq <- start:end
-  demand <- rep(0, length(connection_seq))
-  for (s in 1:nrow(sessions)) {
-    demand[(connection_seq >= sessions$chs[s]) & (connection_seq < sessions$che[s])] <- sessions$p[s]
-  }
-  return(demand)
-}
-
-
 curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessions, flex_timeslot_req, power_th, power_min, demand_prof, log, include_log = F) {
   for (s in 1:nrow(flex_timeslot_sessions)) {
     session <- flex_timeslot_sessions[s, ]
@@ -345,44 +335,15 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
     if (flex_timeslot == session$chs) {
       # 1. Session starts when flexibility is required
 
-      if (curtail$full) {
-        # 1.1. Full session curtailment: change of charging power and charging time
-        session_curtail <- session
-        session_curtail$p <- curtail$power
-        session_curtail$che <- session_curtail$chs + curtail$timeslots
-        session_curtail$f <- 0
-        sessions_prof[session_idx, ] <- session_curtail
-        if (include_log) log <- c(log, paste('Curtailment type 1.1 for session', session$Session))
+      session_curtail <- session
+      session_curtail$p <- curtail$power
+      session_curtail$che <- session_curtail$chs + curtail$timeslots
+      session_curtail$f <- 0
+      sessions_prof[session_idx, ] <- session_curtail
+      if (include_log) log <- c(log, paste('Full curtailment for session', session$Session))
 
-        demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
-          get_sessions_schedule(session_curtail, session$cos, session$coe)
-
-      } else {
-        # 1.2. Session returns to the original charging power by the end of session
-        # Curtailed part: change of power, charging/connection end times
-        session_curtail <- session
-        session_curtail$p <- curtail$power
-        session_curtail$che <- flex_timeslot + curtail$timeslots
-        session_curtail$coe <- session_curtail$che
-        session_curtail$e <- session_curtail$p*(session_curtail$che - session_curtail$chs)
-        session_curtail$f <- 0
-        sessions_prof[session_idx, ] <- session_curtail
-
-        # Second original part: change of charging start/end times, connection start time and session part
-        session_original2 <- session
-        session_original2$cos <- session_curtail$coe
-        session_original2$chs <- session_curtail$coe
-        session_original2$che <- session_original2$coe
-        session_original2$e <- session_original2$p*(session_original2$che - session_original2$chs)
-        session_original2$f <- 0
-        session_original2$Part <- 2
-        sessions_prof <- dplyr::bind_rows(sessions_prof, session_original2)
-        if (include_log) log <- c(log, paste('Curtailment type 1.2 for session', session$Session))
-
-        demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
-          get_sessions_schedule(dplyr::bind_rows(session_curtail, session_original2), session$cos, session$coe)
-
-      }
+      demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
+        get_sessions_schedule(session_curtail, session$cos, session$coe)
 
     } else {
       # 2. Session started before flexibility requirement
@@ -395,54 +356,20 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
       session_original$f <- 0
       sessions_prof[session_idx, ] <- session_original
 
-      if (curtail$full) {
-        # 2.1. Curtailment within the connection time
-        # Curtailed part: change of power, charging/connection start and session part
-        session_curtail <- session
-        session_curtail$p <- curtail$power
-        session_curtail$cos <- flex_timeslot
-        session_curtail$chs <- flex_timeslot
-        session_curtail$che <- flex_timeslot + curtail$timeslots
-        session_curtail$e <- session_curtail$p*(session_curtail$che - session_curtail$chs)
-        session_curtail$f <- 0
-        session_curtail$Part <- 2
-        sessions_prof <- dplyr::bind_rows(sessions_prof, session_curtail)
-        if (include_log) log <- c(log, paste('Curtailment type 2.1 for session', session$Session))
+      # Curtailed part: change of power, charging/connection start and session part
+      session_curtail <- session
+      session_curtail$p <- curtail$power
+      session_curtail$cos <- flex_timeslot
+      session_curtail$chs <- flex_timeslot
+      session_curtail$che <- flex_timeslot + curtail$timeslots
+      session_curtail$e <- session_curtail$p*(session_curtail$che - session_curtail$chs)
+      session_curtail$f <- 0
+      session_curtail$Part <- 2
+      sessions_prof <- dplyr::bind_rows(sessions_prof, session_curtail)
+      if (include_log) log <- c(log, paste('Partial curtailment for session', session$Session))
 
-        demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
-          get_sessions_schedule(dplyr::bind_rows(session_original, session_curtail), session$cos, session$coe)
-
-      } else {
-        # 2.2. Curtailed but returned to the original power by the end of connection
-        # Curtailed part: change of power, charging/connection start and session part
-        session_curtail <- session
-        session_curtail$p <- curtail$power
-        session_curtail$cos <- flex_timeslot
-        session_curtail$chs <- flex_timeslot
-        session_curtail$che <- flex_timeslot + curtail$timeslots
-        session_curtail$coe <- session_curtail$che
-        session_curtail$e <- session_curtail$p*(session_curtail$che - session_curtail$chs)
-        session_curtail$f <- 0
-        session_curtail$Part <- 2
-        sessions_prof <- dplyr::bind_rows(sessions_prof, session_curtail)
-
-        # Second original part: change of charging start/end times, connection start time and session part
-        session_original2 <- session
-        session_original2$cos <- session_curtail$coe
-        session_original2$chs <- session_curtail$coe
-        session_original2$che <- session_original2$coe
-        session_original2$e <- session_original2$p*(session_original2$che - session_original2$chs)
-        session_original2$f <- 0
-        session_original2$Part <- 3
-        sessions_prof <- dplyr::bind_rows(sessions_prof, session_original2)
-        if (include_log) log <- c(log, paste('Curtailment type 2.2 for session', session$Session))
-
-        demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
-          get_sessions_schedule(
-            dplyr::bind_rows(session_original, session_curtail, session_original2),
-            session$cos, session$coe
-          )
-      }
+      demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
+        get_sessions_schedule(dplyr::bind_rows(session_original, session_curtail), session$cos, session$coe)
     }
 
     # Update flexibility requirement
@@ -465,30 +392,28 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
 
 
 # Define the time and power of the curtailment to fit the time resolution of the schedule
-get_curtail_parameters <- function(power_original, power_minimum, energy, length_timeslots) {
-  if (energy/power_minimum < length_timeslots) {
-    # Full session curtailment
-    curtail_timeslots <- energy/power_minimum
-    curtail_timeslots_int <- trunc(curtail_timeslots)
-    curtail_power <- energy/curtail_timeslots_int
-    return(list(
-      full = TRUE,
-      power = curtail_power,
-      timeslots = curtail_timeslots_int
-    ))
-  } else {
-    # Partial curtailment
-    curtail_timeslots <- (energy - power_original*length_timeslots)/(power_minimum - power_original)
-    curtail_timeslots_int <- trunc(curtail_timeslots)
-    original_power_timeslots <- length_timeslots - curtail_timeslots_int
-    curtail_power <- (energy - power_original*original_power_timeslots)/curtail_timeslots_int
-    return(list(
-      full = FALSE,
-      power = curtail_power,
-      timeslots = curtail_timeslots_int
-    ))
-  }
+get_curtail_parameters <- function(energy, available_timeslots, power_minimum) {
+  curtail_timeslots <- energy/power_minimum
+  # Curtailment length must be integer and higher than available time slots
+  curtail_timeslots_int <- pmax(trunc(curtail_timeslots), available_timeslots)
+  curtail_power <- energy/curtail_timeslots_int
+  return(list(
+    power = curtail_power,
+    timeslots = curtail_timeslots_int
+  ))
 }
+
+
+get_sessions_schedule <- function(sessions, start, end) {
+  connection_seq <- start:end
+  demand <- rep(0, length(connection_seq))
+  for (s in 1:nrow(sessions)) {
+    demand[(connection_seq >= sessions$chs[s]) & (connection_seq < sessions$che[s])] <- sessions$p[s]
+  }
+  return(demand)
+}
+
+
 
 
 # # DR potential ---------------------------------------------------------------

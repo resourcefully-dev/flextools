@@ -74,7 +74,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       other_profiles_load <- rowSums(select(setpoints, any_of(other_profiles)))
     }
     O <- minimize_grid_flow(
-      w = 1,
+      w = opt_weights[[profile]],
       G = fitting_data_norm[['solar']],
       LF = setpoints[[profile]],
       LS = other_profiles_load + L_fixed,

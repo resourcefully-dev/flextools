@@ -319,10 +319,9 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
     }
 
     curtail <- get_curtail_parameters(
-      power_original = session$p,
-      power_minimum = power_min,
       energy = (session$che - flex_timeslot)*session$p,
-      length_timeslots = session$coe - flex_timeslot
+      available_timeslots = session$coe - flex_timeslot,
+      power_minimum = power_min
     )
 
     # Remove original session demand

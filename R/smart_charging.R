@@ -394,7 +394,7 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
 get_curtail_parameters <- function(energy, available_timeslots, power_minimum) {
   curtail_timeslots <- energy/power_minimum
   # Curtailment length must be integer and higher than available time slots
-  curtail_timeslots_int <- pmax(trunc(curtail_timeslots), available_timeslots)
+  curtail_timeslots_int <- pmin(trunc(curtail_timeslots), available_timeslots)
   curtail_power <- energy/curtail_timeslots_int
   return(list(
     power = curtail_power,

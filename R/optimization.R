@@ -259,7 +259,7 @@ add_battery_window <- function (w, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini) {
 
   # Objective function terms
   P <- 2*identityMat
-  q <- 2*(w*(L - G))
+  q <- 2*w*(L - G)
 
   # Lower and upper bounds
   ## General bounds
@@ -285,7 +285,7 @@ add_battery_window <- function (w, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini) {
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
   B <- solver$Solve()
-  return( abs(round(B$x, 2)) )
+  return( round(B$x, 2) )
 }
 
 

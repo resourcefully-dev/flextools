@@ -26,7 +26,7 @@ round_to_interval <- function (dbl, interval) {
 #' @importFrom rlang .data
 #' @importFrom lubridate round_date
 #'
-approximate_sessions <- function(sessions, time_interval = 15, power_interval = 1) {
+approximate_sessions <- function(sessions, time_interval = 15, power_interval = 0.1) {
   sessions %>%
     mutate(
       ConnectionStartDateTime = round_date(.data$ConnectionStartDateTime, paste(time_interval, "minutes")),
@@ -185,15 +185,36 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
 #' @return tibble
 #' @export
 #'
-#' @importFrom dplyr left_join tibble sym
+#' @importFrom dplyr left_join tibble sym mutate_if
+#' @importFrom lubridate floor_date days is.timepoint
 #' @importFrom rlang .data
 #' @importFrom tidyr pivot_wider
 #' @importFrom purrr map_dfr
 #'
-#' @details This function is only valid if charging start/end times of sessions are aligned to a specific time-interval.
-#' For this purpose use `approximate_sessions` function.
-#'
-get_sessions_demand <- function(sessions, dttm_seq, by = "Profile", normalized = F) {
+get_sessions_demand <- function(sessions, dttm_seq = NULL, by = "Profile", normalized = F) {
+
+  if (nrow(sessions) == 0) {
+    if (is.null(dttm_seq)) {
+      message("Must provide sessions or dttm_seq parameter")
+      return( NULL )
+    } else {
+      return( tibble(datetime = dttm_seq, demand = 0) )
+    }
+  } else {
+    if (is.null(dttm_seq)) {
+      dttm_seq <- seq.POSIXt(
+        from = floor_date(min(sessions$ConnectionStartDateTime), 'day'),
+        to = floor_date(max(sessions$ConnectionEndDateTime), 'day') + days(1),
+        by = paste(resolution, 'min')
+      )
+    } else {
+      resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = 'mins')
+    }
+  }
+
+  sessions_aligned <- sessions %>%
+    mutate_if(is.timepoint, floor_date, paste(resolution, 'min'))
+
   demand <- left_join(
     tibble(datetime = dttm_seq),
     map_dfr(dttm_seq, ~ get_sessions_interval_demand(sessions, .x, by, normalized)) %>%

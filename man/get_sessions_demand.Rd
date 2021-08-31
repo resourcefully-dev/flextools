@@ -4,7 +4,7 @@
 \alias{get_sessions_demand}
 \title{Obtain timeseries demand from sessions dataset}
 \usage{
-get_sessions_demand(sessions, dttm_seq, by = "Profile", normalized = F)
+get_sessions_demand(sessions, dttm_seq = NULL, by = "Profile", normalized = F)
 }
 \arguments{
 \item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package}
@@ -20,8 +20,4 @@ tibble
 }
 \description{
 Obtain timeseries demand from sessions dataset
-}
-\details{
-This function is only valid if charging start/end times of sessions are aligned to a specific time-interval.
-For this purpose use \code{approximate_sessions} function.
 }

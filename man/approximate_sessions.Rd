@@ -4,7 +4,7 @@
 \alias{approximate_sessions}
 \title{Approximate sessions to perfect power steps}
 \usage{
-approximate_sessions(sessions, time_interval = 15, power_interval = 1)
+approximate_sessions(sessions, time_interval = 15, power_interval = 0.1)
 }
 \arguments{
 \item{sessions}{sessions data set}

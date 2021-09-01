@@ -135,7 +135,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       }
 
       sessions_prof_opt <- results$sessions
-      print(paste("Putting", length(results$log), "elements in", profile, paste0('t_', window[1])))
+      # print(paste("Putting", length(results$log), "elements in", profile, paste0('t_', window[1])))
       log[[profile]][[paste0('t_', window[1])]] <- results$log
 
       # Update original profile sessions set

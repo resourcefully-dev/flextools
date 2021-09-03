@@ -17,7 +17,7 @@
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param power_min numeric, minimum power to charge vehicles using curtailment method
 #'
-#' @importFrom dplyr %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample
+#' @importFrom dplyr %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample pull
 #' @importFrom lubridate hour minute
 #' @importFrom rlang .data
 #'
@@ -39,6 +39,11 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
   # Normalize sessions
   sessions_norm <- normalize_sessions(sessions, start, time_interval)
+  if (method == 'curtail') {
+    sessions_norm[['Part']] <- 1
+  } else {
+    sessions_norm[['Shifted']] <- 0
+  }
 
   # Get user profiles demand
   profiles_demand <- get_sessions_demand(sessions_norm, 1:length(dttm_seq), normalized = T) %>%
@@ -50,107 +55,106 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     mutate(timeslot = row_number()) %>%
     select(.data$timeslot, everything(), -.data$datetime)
 
-  if ('fixed' %in% colnames(fitting_data_norm)) {
-    L_fixed <- fitting_data_norm[['fixed']]
-  } else {
-    L_fixed <- rep(0, nrow(fitting_data_norm))
-  }
-
-  # Profiles subjected to optimization
+  # Profiles subjected to optimization:
   #   1. appearing in the sessions set
-  #   2. responsive values higher than 1
-  opt_profiles <- names(opt_weights)[
-    (names(opt_weights) %in% unique(sessions_norm[['Profile']])) &
-      (names(opt_weights) %in% names(responsive)[as.numeric(responsive) > 0])
+  #   2. responsive values higher than 0
+  #   3. optimization weight higher than 0
+  opt_profiles <- names(responsive)[
+    (names(responsive) %in% unique(sessions_norm[['Profile']])) &
+      (names(responsive) %in% names(responsive)[as.numeric(responsive) > 0]) &
+      (names(responsive) %in% names(opt_weights)[as.numeric(opt_weights) > 0])
   ]
 
-  # OPTIMIZATION (SETPOINTS)
-  setpoints <- profiles_demand
-  for (profile in opt_profiles) {
-    other_profiles <- unique(sessions_norm[['Profile']])[unique(sessions_norm[['Profile']]) != profile]
-    if (length(other_profiles) == 0) {
-      other_profiles_load <- rep(0, nrow(setpoints))
-    } else {
-      other_profiles_load <- rowSums(select(setpoints, any_of(other_profiles)))
-    }
-    O <- minimize_grid_flow(
-      w = opt_weights[[profile]],
-      G = fitting_data_norm[['solar']],
-      LF = setpoints[[profile]],
-      LS = other_profiles_load + L_fixed,
-      direction = 'forward',
-      time_horizon = NULL,
-      up_to_G = up_to_G,
-      window_length = window_length
-    )
-    setpoints[[profile]] <- O
-  }
-
   # SMART CHARGING
-  sessions_norm_opt <- sessions_norm
   log <- list()
-  # For each optimization profile
-  for (profile in opt_profiles) {
+  setpoints <- profiles_demand
 
-    sessions_prof <- sessions_norm[sessions_norm[['Profile']] == profile, ]
-    if (include_log) message(paste("Optimizing", profile, "sessions"))
+  # For each optimization window
+  for (i in seq(1, length(dttm_seq), window_length)) {
+    window <- c(i, i+window_length-1)
 
-    # For each optimization window
-    for (i in seq(1, nrow(setpoints), window_length)) {
-      window <- c(i, i+window_length-1)
-      setpoint_prof <- tibble(timeslot = seq(window[1], window[2]), setpoint = setpoints[[profile]][.data$timeslot])
+    # Filter only sessions that start and finish CHARGING within the time window
+    sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$che < window[2])
 
-      # Filter only sessions that start and finish charging within the time window
-      sessions_prof_window <- filter(sessions_prof, .data$chs >= window[1], .data$che < window[2])
+    # For each optimization profile
+    for (profile in opt_profiles) {
 
-      # Limit sessions End time to the windows's end timeslot
+      sessions_prof_window <- sessions_window %>% filter(.data$Profile == profile)
+
+      # Limit the CONNECTION end time to the windows's end timeslot
       sessions_prof_window[['coe']][(sessions_prof_window[['coe']] > window[2])] <- window[2]
       sessions_prof_window[['f']] <- (sessions_prof_window[['coe']] - sessions_prof_window[['chs']]) - (sessions_prof_window[['che']] - sessions_prof_window[['chs']])
 
-      # Select responsive sessions
+      # OPTIMIZATION
+      # The optimization static load consists on:
+      #   - Environment fixed load (buildings, lightning, etc)
+      if ('fixed' %in% colnames(fitting_data_norm)) {
+        L_fixed <- fitting_data_norm[['fixed']][window[1]:window[2]]
+      } else {
+        L_fixed <- rep(0, window_length)
+      }
+      #   - Other profiles load
+      other_profiles <- unique(sessions_norm[['Profile']])[unique(sessions_norm[['Profile']]) != profile]
+      if (length(other_profiles) > 0) {
+        other_profiles_load <- rowSums(select(setpoints[window[1]:window[2], ], any_of(other_profiles)))
+      } else {
+        other_profiles_load <- rep(0, window_length)
+      }
+      #   - Profile sessions that don't respond to DR program
       set.seed(1234)
-      sessions_prof_window_responsive <- slice_sample(sessions_prof_window, prop = responsive[[profile]])
+      non_responsive_sessions <- sessions_norm %>%
+        filter(.data$Profile == profile) %>%
+        slice_sample(prop = (1 - responsive[[profile]]))
+      if (nrow(non_responsive_sessions) > 0) {
+        L_fixed_prof <- non_responsive_sessions %>%
+          get_sessions_demand(window[1]:window[2], normalized = T) %>%
+          pull(profile)
+      } else {
+        L_fixed_prof <- rep(0, window_length)
+      }
 
-      if (nrow(sessions_prof_window_responsive) == 0) next
+      # Optimize the flexible profile's load
+      O <- minimize_grid_flow_window_osqp(
+        w = opt_weights[[profile]],
+        G = fitting_data_norm[['solar']][window[1]:window[2]],
+        LF = setpoints[[profile]][window[1]:window[2]] - L_fixed_prof,
+        LS = L_fixed + other_profiles_load + L_fixed_prof,
+        direction = 'forward',
+        time_horizon = NULL,
+        up_to_G = up_to_G
+      )
+      setpoints[[profile]][window[1]:window[2]] <- O + L_fixed_prof
 
-      # Re-scheduling
+      # SCHEDULING
+      setpoint_prof <- tibble(timeslot = window[1]:window[2], setpoint = setpoints[[profile]][window[1]:window[2]])
+
       if (method == 'curtail') {
         # Curtail strategy
-        sessions_norm_opt[['Part']] <- 1
-        sessions_prof[['Part']] <- 1
-        sessions_prof_window_responsive[['Part']] <- 1
         results <- schedule_sessions(
-          sessions_prof = sessions_prof_window_responsive, setpoint_prof = setpoint_prof,
+          sessions_prof = sessions_prof_window, setpoint_prof = setpoint_prof,
           method = method, power_th = power_th, include_log = include_log, power_min = power_min
         )
       } else if (method == 'postpone') {
         # Curtail strategy
-        sessions_norm_opt[['Shifted']] <- 1
-        sessions_prof[['Shifted']] <- 1
-        sessions_prof_window_responsive[['Shifted']] <- 1
         results <- schedule_sessions(
-          sessions_prof = sessions_prof_window_responsive, setpoint_prof = setpoint_prof,
+          sessions_prof = sessions_prof_window, setpoint_prof = setpoint_prof,
           method = method, power_th = power_th, include_log = include_log
         )
       }
 
-      sessions_prof_opt <- results$sessions
+      sessions_prof_window_opt <- results$sessions
       # print(paste("Putting", length(results$log), "elements in", profile, paste0('t_', window[1])))
       log[[profile]][[paste0('t_', window[1])]] <- results$log
 
-      # Update original profile sessions set
-      sessions_prof <- sessions_prof %>% filter(!(.data$Session %in% sessions_prof_opt$Session))
-      sessions_prof <- bind_rows(sessions_prof, sessions_prof_opt)
+      # Update original sessions set
+      sessions_norm <- sessions_norm[!(sessions_norm$Session %in% sessions_prof_window_opt$Session), ]
+      sessions_norm <- bind_rows(sessions_norm, sessions_prof_window_opt)
     }
-
-    # Update original sessions set
-    sessions_norm_opt <- sessions_norm_opt %>% filter(.data$Profile != profile)
-    sessions_norm_opt <- bind_rows(sessions_norm_opt, sessions_prof)
   }
 
   sessions_opt <- left_join(
     sessions['Session'],
-    denormalize_sessions(sessions_norm_opt, start, time_interval),
+    denormalize_sessions(sessions_norm, start, time_interval),
     by = 'Session'
   ) %>% select('Profile', everything())
 

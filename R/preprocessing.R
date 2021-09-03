@@ -180,6 +180,7 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
 #' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
 #' @param dttm_seq sequence of datetime values that will be the datetime variable of the returned time-series data frame
 #' @param by character, being 'Profile' or 'Session'. When `by='Profile'` each column corresponds to an EV user profile.
+#' @param resolution integer, time resolution (in minutes) of the output demand time-series. If `dttm_seq` is defined this parameter is ignored.
 #' @param normalized logical, whether the `sessions` datetime columns are time-slot values
 #'
 #' @return tibble
@@ -191,7 +192,7 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
 #' @importFrom tidyr pivot_wider
 #' @importFrom purrr map_dfr
 #'
-get_sessions_demand <- function(sessions, dttm_seq = NULL, by = "Profile", normalized = F) {
+get_sessions_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 15, normalized = F) {
 
   if (nrow(sessions) == 0) {
     if (is.null(dttm_seq)) {

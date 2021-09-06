@@ -73,19 +73,19 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
   for (i in seq(1, length(dttm_seq), window_length)) {
     window <- c(i, i+window_length-1)
 
-    # Filter only sessions that start and finish CHARGING within the time window
-    sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$che < window[2])
-
     # For each optimization profile
     for (profile in opt_profiles) {
 
-      sessions_prof_window <- sessions_window %>% filter(.data$Profile == profile)
+      # Filter only Profile's sessions that start and finish CHARGING within the time window
+      sessions_prof_window <- sessions_norm %>% filter(.data$Profile == profile, .data$chs >= window[1], .data$che < window[2])
 
       # Limit the CONNECTION end time to the windows's end timeslot
       sessions_prof_window$coe[(sessions_prof_window$coe > window[2])] <- window[2]
       sessions_prof_window$f <- (sessions_prof_window$coe - sessions_prof_window$chs) - (sessions_prof_window$che - sessions_prof_window$chs)
 
       # Re-define window to profile's connection window
+      print(sessions_prof_window)
+      print(paste('Minimum:', min(sessions_prof_window$cos), '---- Maximum:', max(sessions_prof_window$coe)))
       window_prof <- c(min(sessions_prof_window$cos), max(sessions_prof_window$coe))
       window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
       window_prof_length <- window_prof[2] - window_prof[1] + 1

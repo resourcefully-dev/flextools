@@ -27,7 +27,7 @@
 smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, up_to_G = TRUE, power_th = 0, include_log = FALSE, power_min = 3.7) {
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
-  dttm_seq_original <- fitting_data[['datetime']]
+  dttm_seq_original <- fitting_data$datetime
   dttm_seq_window_start <- dttm_seq_original[
     dttm_seq_original >= dttm_seq_original[which((hour(dttm_seq_original) == window_start_hour) & (minute(dttm_seq_original) == 0))[1]]
   ]
@@ -82,23 +82,28 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       sessions_prof_window <- sessions_window %>% filter(.data$Profile == profile)
 
       # Limit the CONNECTION end time to the windows's end timeslot
-      sessions_prof_window[['coe']][(sessions_prof_window[['coe']] > window[2])] <- window[2]
-      sessions_prof_window[['f']] <- (sessions_prof_window[['coe']] - sessions_prof_window[['chs']]) - (sessions_prof_window[['che']] - sessions_prof_window[['chs']])
+      sessions_prof_window$coe[(sessions_prof_window$coe > window[2])] <- window[2]
+      sessions_prof_window$f <- (sessions_prof_window$coe - sessions_prof_window$chs) - (sessions_prof_window$che - sessions_prof_window$chs)
+
+      # Re-define window to profile's connection window
+      window_prof <- c(min(sessions_prof_window$cos), max(sessions_prof_window$coe))
+      window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
+      window_prof_length <- window_prof[2] - window_prof[1] + 1
 
       # OPTIMIZATION
       # The optimization static load consists on:
       #   - Environment fixed load (buildings, lightning, etc)
       if ('fixed' %in% colnames(fitting_data_norm)) {
-        L_fixed <- fitting_data_norm[['fixed']][window[1]:window[2]]
+        L_fixed <- fitting_data_norm$fixed[window_prof_idxs]
       } else {
-        L_fixed <- rep(0, window_length)
+        L_fixed <- rep(0, window_prof_length)
       }
       #   - Other profiles load
-      other_profiles <- unique(sessions_norm[['Profile']])[unique(sessions_norm[['Profile']]) != profile]
+      other_profiles <- unique(sessions_norm$Profile)[unique(sessions_norm$Profile) != profile]
       if (length(other_profiles) > 0) {
-        other_profiles_load <- rowSums(select(setpoints[window[1]:window[2], ], any_of(other_profiles)))
+        other_profiles_load <- rowSums(select(setpoints[window_prof_idxs, ], any_of(other_profiles)))
       } else {
-        other_profiles_load <- rep(0, window_length)
+        other_profiles_load <- rep(0, window_prof_length)
       }
       #   - Profile sessions that don't respond to DR program
       set.seed(1234)
@@ -107,26 +112,26 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
         slice_sample(prop = (1 - responsive[[profile]]))
       if (nrow(non_responsive_sessions) > 0) {
         L_fixed_prof <- non_responsive_sessions %>%
-          get_sessions_demand(window[1]:window[2], normalized = T) %>%
+          get_sessions_demand(window_prof[1]:window_prof[2], normalized = T) %>%
           pull(profile)
       } else {
-        L_fixed_prof <- rep(0, window_length)
+        L_fixed_prof <- rep(0, window_prof_length)
       }
 
       # Optimize the flexible profile's load
       O <- minimize_grid_flow_window_osqp(
         w = opt_weights[[profile]],
-        G = fitting_data_norm[['solar']][window[1]:window[2]],
-        LF = setpoints[[profile]][window[1]:window[2]] - L_fixed_prof,
+        G = fitting_data_norm$solar[window_prof_idxs],
+        LF = setpoints[[profile]][window_prof_idxs] - L_fixed_prof,
         LS = L_fixed + other_profiles_load + L_fixed_prof,
         direction = 'forward',
         time_horizon = NULL,
         up_to_G = up_to_G
       )
-      setpoints[[profile]][window[1]:window[2]] <- O + L_fixed_prof
+      setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
 
       # SCHEDULING
-      setpoint_prof <- tibble(timeslot = window[1]:window[2], setpoint = setpoints[[profile]][window[1]:window[2]])
+      setpoint_prof <- setpoints[window_prof_idxs, c('timestlot', profile)]
 
       if (method == 'curtail') {
         # Curtail strategy

@@ -120,7 +120,7 @@ denormalize_sessions <- function (sessions_norm, start, time_interval) {
       FlexibilityHours = .data$ConnectionHours - .data$ChargingHours
     ) %>%
     rename(Power = .data$p) %>%
-    select(-c("cos", "coe", "chs", "che", "e"))
+    select(-c("cos", "coe", "chs", "che", "e", "f"))
 }
 
 

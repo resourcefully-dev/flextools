@@ -88,7 +88,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       # Re-define window to profile's connection window
       # Find the End time for at least 75% of sessions
       ss_ecdf <- ecdf(sessions_prof_window$coe)
-      ss_coe_75 <- as.numeric(quantile(ss_ecdf)[4])
+      ss_coe_75 <- as.integer(quantile(ss_ecdf)[4])
       # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
       # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
       window_prof <- c(min(sessions_prof_window$cos), ss_coe_75)

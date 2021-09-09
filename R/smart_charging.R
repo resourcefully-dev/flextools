@@ -42,7 +42,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
   sessions_norm <- normalize_sessions(sessions, start, time_interval)
   sessions_norm[['Part']] <- 1
   sessions_norm[['Shifted']] <- 0
-  sessions_norm[['Responsive']] <- TRUE
+  sessions_norm[['Responsive']] <- FALSE
 
   # Get user profiles demand
   profiles_demand <- get_sessions_demand(sessions_norm, 1:length(dttm_seq), normalized = T) %>%

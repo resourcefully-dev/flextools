@@ -8,7 +8,7 @@ schedule_sessions(
   sessions_prof,
   setpoint_prof,
   method,
-  power_th = 1,
+  power_th = 0,
   include_log = F,
   power_min = 3.7
 )
@@ -20,7 +20,7 @@ schedule_sessions(
 
 \item{method}{character, being \code{postpone} or \code{curtail}}
 
-\item{power_th}{power threshold from to consider flexibility required}
+\item{power_th}{power threshold accepted from setpoint, in percentage}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 

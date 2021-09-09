@@ -37,7 +37,7 @@ Only sessions starting within the time sequence of column \code{datetime} will b
 
 \item{up_to_G}{logical, whether to limit the flexible EV demand up to renewable Generation}
 
-\item{power_th}{power threshold from to consider flexibility required}
+\item{power_th}{power threshold accepted from setpoint, in percentage}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 

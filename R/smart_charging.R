@@ -13,7 +13,7 @@
 #' @param opt_weights Named list with the optimization weight `w` of the `minimize_grid_flow` function. The names of the list must exactly match the user profiles names.
 #' @param responsive Named list with the ratio of sessions responsive to smart charging program for each profile. The names of the list must exactly match the user profiles names.
 #' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
-#' @param power_th power threshold from to consider flexibility required
+#' @param power_th power threshold accepted from setpoint, in percentage
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param power_min numeric, minimum power to charge vehicles using curtailment method
 #'
@@ -180,7 +180,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 #' @param sessions_prof tibble, sessions data set normalized from `normalize_sessions` function
 #' @param setpoint_prof tibble, first column being `datetime` and rest of columns being the names of user profiles
 #' @param method character, being `postpone` or `curtail`
-#' @param power_th power threshold from to consider flexibility required
+#' @param power_th power threshold accepted from setpoint, in percentage
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param power_min numeric, minimum power to charge vehicles using curtailment method
 #'
@@ -190,12 +190,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 #' @importFrom dplyr tibble %>% filter pull arrange desc bind_rows
 #' @importFrom rlang .data
 #'
-schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 1, include_log = F, power_min = 3.7) {
+schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0, include_log = F, power_min = 3.7) {
   timeslots_blacklist <- c()
   log <- c()
-
-  # Power threshold must be at least 1 kW
-  if (power_th <= 0) power_th <- 1
 
   # Calculate demand of profiles
   demand_prof <- get_all_sessions_demand_fast(sessions_prof, setpoint_prof$timeslot)
@@ -206,7 +203,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 1
     flex_req <- filter(
       tibble(
         timeslot = setpoint_prof$timeslot,
-        power = demand_prof$demand - setpoint_prof$setpoint
+        power = demand_prof$demand - setpoint_prof$setpoint*(1 + power_th/100)
       ),
       .data$power > power_th,
       !(.data$timeslot %in% timeslots_blacklist)
@@ -262,7 +259,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 1
 
       reschedule <- curtail_sessions(
         sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions,
-        flex_timeslot_req = flex_timeslot_req, power_th = power_th, power_min = power_min, demand_prof = demand_prof,
+        flex_timeslot_req = flex_timeslot_req, power_th = 0, power_min = power_min, demand_prof = demand_prof,
         log = log, include_log = include_log
       )
       sessions_prof <- reschedule$sessions
@@ -284,7 +281,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 1
 
       reschedule <- postpone_sessions(
         sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions,
-        flex_timeslot_req = flex_timeslot_req, power_th = power_th, demand_prof = demand_prof, log = log, include_log = include_log
+        flex_timeslot_req = flex_timeslot_req, power_th = 0, demand_prof = demand_prof, log = log, include_log = include_log
       )
       sessions_prof <- reschedule$sessions
       log <- reschedule$log
@@ -304,7 +301,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 1
 
         reschedule_curtail <- curtail_sessions(
           sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions_curtail,
-          flex_timeslot_req = flex_timeslot_req, power_th = power_th, power_min = power_min, demand_prof = demand_prof,
+          flex_timeslot_req = flex_timeslot_req, power_th = 0, power_min = power_min, demand_prof = demand_prof,
           log = log, include_log = include_log
         )
         sessions_prof <- reschedule_curtail$sessions
@@ -332,7 +329,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 1
 
         reschedule_postpone <- postpone_sessions(
           sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions_postpone,
-          flex_timeslot_req = flex_timeslot_req, power_th = power_th, demand_prof = demand_prof,
+          flex_timeslot_req = flex_timeslot_req, power_th = 0, demand_prof = demand_prof,
           log = log, include_log = include_log
         )
         sessions_prof <- reschedule_postpone$sessions

@@ -78,7 +78,8 @@ convert_timeslot_to_datetime <- function(timeslot, start, time_interval) {
 #' @return tibble
 #' @export
 #'
-#' @importFrom dplyr tibble mutate_if
+#' @importFrom dplyr tibble mutate
+#' @importFrom rlang .data
 #'
 normalize_sessions <- function (sessions, start, time_interval) {
   sessions_norm <- tibble(
@@ -89,8 +90,11 @@ normalize_sessions <- function (sessions, start, time_interval) {
     che = convert_datetime_to_timeslot(sessions[["ChargingEndDateTime"]], start, time_interval),
     coe = convert_datetime_to_timeslot(sessions[["ConnectionEndDateTime"]], start, time_interval),
     p = sessions[["Power"]]
-  )
-  sessions_norm[["e"]] <- sessions_norm[["p"]]* (sessions_norm[["che"]] - sessions_norm[["chs"]])
+  ) %>%
+    mutate(
+      e = .data$p*(.data$che - .data$chs),
+      f = (.data$coe - .data$chs) - (.data$che - .data$chs)
+    )
   return( sessions_norm )
 }
 

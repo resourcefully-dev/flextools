@@ -80,6 +80,21 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       # Filter only Profile's sessions that start and finish CHARGING within the time window
       sessions_window_prof <- sessions_window %>% filter(.data$Profile == profile)
 
+      # Re-define window to profile's connection window
+      # Find the End time for at least 75% of sessions
+      ss_ecdf <- ecdf(sessions_window_prof$coe)
+      ss_coe_75 <- pmin(as.integer(quantile(ss_ecdf)[4]), window[2])
+      # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
+      # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
+      window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
+      # window_prof <- c(min(sessions_window_prof$cos), max(sessions_window_prof$coe))
+      window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
+      window_prof_length <- window_prof[2] - window_prof[1] + 1
+
+      # Limit the CONNECTION end time to the windows's end timeslot
+      sessions_window_prof$coe[(sessions_window_prof$coe > window_prof[2])] <- window_prof[2]
+      sessions_window_prof$f <- (sessions_window_prof$coe - sessions_window_prof$chs) - (sessions_window_prof$che - sessions_window_prof$chs)
+
       # Separate between responsive sessions or not
       set.seed(1234)
       sessions_window_prof <- sessions_window_prof %>%
@@ -88,21 +103,6 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
         )
       sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive, .data$f > 0)
       non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f == 0)
-
-      # Re-define window to profile's connection window
-      # Find the End time for at least 75% of sessions
-      ss_ecdf <- ecdf(sessions_window_prof_flex$coe)
-      ss_coe_75 <- pmin(as.integer(quantile(ss_ecdf)[4]), window[2])
-      # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
-      # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
-      window_prof <- c(min(sessions_window_prof_flex$cos), ss_coe_75)
-      # window_prof <- c(min(sessions_window_prof_flex$cos), max(sessions_window_prof_flex$coe))
-      window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
-      window_prof_length <- window_prof[2] - window_prof[1] + 1
-
-      # Limit the CONNECTION end time to the windows's end timeslot
-      sessions_window_prof_flex$coe[(sessions_window_prof_flex$coe > window_prof[2])] <- window_prof[2]
-      sessions_window_prof_flex$f <- (sessions_window_prof_flex$coe - sessions_window_prof_flex$chs) - (sessions_window_prof_flex$che - sessions_window_prof_flex$chs)
 
       # OPTIMIZATION
       # The optimization static load consists on:

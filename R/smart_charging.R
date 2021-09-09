@@ -86,25 +86,23 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
         mutate(
           Responsive = sample(c(T, F), nrow(sessions_window_prof), replace = T, prob = c(responsive[[profile]], (1-responsive[[profile]])))
         )
-      sessions_prof_window <- sessions_window_prof %>% filter(.data$Responsive)
-      non_responsive_sessions <- sessions_window_prof %>% filter(!.data$Responsive)
-      # sessions_prof_window <- sessions_window_prof %>% slice_sample(prop = responsive[[profile]])
-      # non_responsive_sessions <- sessions_window_prof %>% filter(!(.data$Session %in% sessions_prof_window$Session))
+      sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive, .data$f > 0)
+      non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f == 0)
 
       # Re-define window to profile's connection window
       # Find the End time for at least 75% of sessions
-      ss_ecdf <- ecdf(sessions_prof_window$coe)
+      ss_ecdf <- ecdf(sessions_window_prof_flex$coe)
       ss_coe_75 <- pmin(as.integer(quantile(ss_ecdf)[4]), window[2])
       # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
       # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
-      window_prof <- c(min(sessions_prof_window$cos), ss_coe_75)
-      # window_prof <- c(min(sessions_prof_window$cos), max(sessions_prof_window$coe))
+      window_prof <- c(min(sessions_window_prof_flex$cos), ss_coe_75)
+      # window_prof <- c(min(sessions_window_prof_flex$cos), max(sessions_window_prof_flex$coe))
       window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
       window_prof_length <- window_prof[2] - window_prof[1] + 1
 
       # Limit the CONNECTION end time to the windows's end timeslot
-      sessions_prof_window$coe[(sessions_prof_window$coe > window_prof[2])] <- window_prof[2]
-      sessions_prof_window$f <- (sessions_prof_window$coe - sessions_prof_window$chs) - (sessions_prof_window$che - sessions_prof_window$chs)
+      sessions_window_prof_flex$coe[(sessions_window_prof_flex$coe > window_prof[2])] <- window_prof[2]
+      sessions_window_prof_flex$f <- (sessions_window_prof_flex$coe - sessions_window_prof_flex$chs) - (sessions_window_prof_flex$che - sessions_window_prof_flex$chs)
 
       # OPTIMIZATION
       # The optimization static load consists on:
@@ -121,9 +119,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       } else {
         L_others <- rep(0, window_prof_length)
       }
-      #   - Profile sessions that don't respond to DR program
-      if (nrow(non_responsive_sessions) > 0) {
-        L_fixed_prof <- non_responsive_sessions %>%
+      #   - Profile sessions that can't provide flexibility
+      if (nrow(non_flexible_sessions) > 0) {
+        L_fixed_prof <- non_flexible_sessions %>%
           get_sessions_demand(window_prof[1]:window_prof[2], normalized = T) %>%
           pull(profile)
       } else {
@@ -148,16 +146,16 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       setpoint_prof <- tibble(timeslot = window_prof[1]:window_prof[2], setpoint = O)
 
       results <- schedule_sessions(
-        sessions_prof = sessions_prof_window, setpoint_prof = setpoint_prof,
+        sessions_prof = sessions_window_prof_flex, setpoint_prof = setpoint_prof,
         method = method, power_th = power_th, include_log = include_log, power_min = power_min
       )
 
-      sessions_prof_window_opt <- results$sessions
+      sessions_window_prof_flex_opt <- results$sessions
       log[[paste('timeslots', window[1], window[2], sep = '_')]][[profile]] <- results$log
 
       # Update original sessions set
-      sessions_norm <- sessions_norm[!(sessions_norm$Session %in% sessions_prof_window_opt$Session), ]
-      sessions_norm <- bind_rows(sessions_norm, sessions_prof_window_opt)
+      sessions_norm <- sessions_norm[!(sessions_norm$Session %in% sessions_window_prof_flex_opt$Session), ]
+      sessions_norm <- bind_rows(sessions_norm, sessions_window_prof_flex_opt)
     }
   }
 

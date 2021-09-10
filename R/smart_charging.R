@@ -207,7 +207,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
         timeslot = setpoint_prof$timeslot,
         power = demand_prof$demand - setpoint_prof$setpoint*(1 + power_th/100)
       ),
-      .data$power > power_th,
+      .data$power > 0,
       !(.data$timeslot %in% timeslots_blacklist)
     )
     if (nrow(flex_req) == 0) {

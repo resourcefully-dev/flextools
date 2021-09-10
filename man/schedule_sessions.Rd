@@ -16,11 +16,11 @@ schedule_sessions(
 \arguments{
 \item{sessions_prof}{tibble, sessions data set normalized from \code{normalize_sessions} function}
 
-\item{setpoint_prof}{tibble, first column being \code{datetime} and rest of columns being the names of user profiles}
+\item{setpoint_prof}{tibble with columns \code{datetime}, \code{timeslot} and rest of columns being the names of user profiles}
 
 \item{method}{character, being \code{postpone} or \code{curtail}}
 
-\item{power_th}{power threshold accepted from setpoint, in percentage}
+\item{power_th}{numeric, power threshold accepted from setpoint, in percentage}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 

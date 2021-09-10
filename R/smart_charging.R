@@ -61,7 +61,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
   # For each optimization window
   for (i in seq(1, length(dttm_seq), window_length)) {
     window <- c(i, i+window_length-1)
-
+    log_window_name <- as.character(date(dttm_seq[window[1]]))
+    log[[log_window_name]] <- list()
     sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$che < window[2])
 
     # Profiles subjected to optimization:
@@ -155,7 +156,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       )
 
       sessions_window_prof_flex_opt <- results$sessions
-      log[[as.character(date(dttm_seq[window[1]]))]][[profile]] <- results$log
+      log[[log_window_name]][[profile]] <- results$log
 
       # Update original sessions set
       sessions_norm <- sessions_norm[!(sessions_norm$Session %in% sessions_window_prof_flex_opt$Session), ]
@@ -357,6 +358,7 @@ postpone_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessio
     sessions_prof$che[session_idx] <- session$che + 1
     sessions_prof$f[session_idx] <- session$f - 1
     sessions_prof$Shifted[session_idx] <- session$Shifted + 1
+    if (include_log) log <- c(log, paste('Postponing session', session$Session))
 
     # Update flexibility requirement and demand
     flex_timeslot_req <- flex_timeslot_req - session$p
@@ -367,10 +369,10 @@ postpone_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessio
 
     # If the session power is lower than the curtailment power skip this session
     if (flex_timeslot_req <= power_th) {
-      if (include_log) log <- c(log, "Setpoint achieved.")
+      if (include_log) log <- c(log, "Setpoint achieved")
       break
     } else {
-      if (include_log) log <- c(log, paste(round(flex_timeslot_req, 2), "kW of flexibility still required."))
+      if (include_log) log <- c(log, paste(round(flex_timeslot_req, 2), "kW of flexibility still required"))
     }
   }
   if (flex_timeslot_req > power_th) {
@@ -460,10 +462,10 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
 
     # If the session power is lower than the curtailment power skip this session
     if (flex_timeslot_req <= power_th) {
-      if (include_log) log <- c(log, "Setpoint achieved.")
+      if (include_log) log <- c(log, "Setpoint achieved")
       break
     } else {
-      if (include_log) log <- c(log, paste(round(flex_timeslot_req, 2), "kW of flexibility still required."))
+      if (include_log) log <- c(log, paste(round(flex_timeslot_req, 2), "kW of flexibility still required"))
     }
   }
   if (flex_timeslot_req > power_th) {

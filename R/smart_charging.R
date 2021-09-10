@@ -233,13 +233,6 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
     flex_timeslot <- flex_req$timeslot[1]
     flex_timeslot_req <- filter(flex_req, .data$timeslot == flex_timeslot) %>% pull(.data$power)
 
-    flex_timeslot_sessions_curtail <- flex_sessions %>%
-      filter(.data$chs <= flex_timeslot, .data$che > flex_timeslot, .data$p > power_min) %>%
-      arrange(desc(.data$f))
-    flex_timeslot_sessions_postpone <- flex_sessions %>%
-      filter(.data$chs == flex_timeslot) %>%
-      arrange(desc(.data$f))
-
     if (flex_timeslot == setpoint_prof$timeslot[nrow(setpoint_prof)]) {
       if (include_log) log <- c(log, "Can't expand sessions outside the optimization window")
       break
@@ -322,7 +315,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
       } else {
         partial_sessions <- unique(reschedule_curtail$sessions$Session[reschedule_curtail$sessions$Part > 1])
         flex_timeslot_sessions_postpone <- reschedule_curtail$sessions %>%
-          filter(!(.data$Session %in% partial_sessions), .data$chs == flex_timeslot) %>%
+          filter(!(.data$Session %in% partial_sessions), .data$chs == flex_timeslot, .data$f > 0) %>%
           arrange(desc(.data$f))
       }
 

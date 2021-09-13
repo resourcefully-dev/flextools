@@ -49,10 +49,12 @@ approximate_sessions <- function(sessions, time_interval = 15, power_interval = 
 #' @param start datetime, start datetime value
 #' @param time_interval integer, interval of time between time slots (minutes)
 #'
-#' @importFrom lubridate day hour minute
+#' @importFrom lubridate day hour minute with_tz
 #'
 convert_datetime_to_timeslot <- function(dttm, start, time_interval) {
-  as.integer(as.numeric(dttm - start, unit = 'hours')*60/time_interval) + 1
+  start_utc <- with_tz(start, 'UTC')
+  dttm_utc <- with_tz(dttm, 'UTC')
+  as.integer(as.numeric(dttm_utc - start_utc, unit = 'hours')*60/time_interval) + 1
 }
 
 
@@ -62,10 +64,12 @@ convert_datetime_to_timeslot <- function(dttm, start, time_interval) {
 #' @param start datetime, start datetime value
 #' @param time_interval integer, interval of time between time slots (minutes)
 #'
-#' @importFrom lubridate minutes
+#' @importFrom lubridate minutes with_tz tz
 #'
 convert_timeslot_to_datetime <- function(timeslot, start, time_interval) {
-  start + minutes((timeslot - 1) * time_interval)
+  start_utc <- with_tz(start, 'UTC')
+  dttm_utc <- start_utc + minutes((timeslot - 1) * time_interval)
+  with_tz(dttm_utc, tz(start))
 }
 
 

@@ -168,7 +168,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     sessions['Session'],
     denormalize_sessions(sessions_norm, start, time_interval),
     by = 'Session'
-  ) #%>% select('Profile', everything())
+  ) %>%
+    select(names(sessions), everything())
 
   return(list(
     setpoints = denormalize_timeseries(setpoints, start, time_interval),

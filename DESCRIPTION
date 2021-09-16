@@ -21,6 +21,7 @@ Depends:
 Imports: 
     dplyr,
     dtplyr,
+    data.table,
     lubridate,
     reticulate,
     rlang,

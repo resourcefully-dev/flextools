@@ -208,9 +208,11 @@ get_sessions_demand <- function(sessions, dttm_seq, by = "Profile", normalized =
     return( NULL )
   }
 
+  sessions_dt <- lazy_dt(sessions)
+
   demand <- as_tibble(left_join(
     lazy_dt(tibble(datetime = dttm_seq)),
-    lazy_dt(map_dfr(dttm_seq, ~ get_sessions_interval_demand(lazy_dt(sessions), .x, by, normalized)) %>%
+    lazy_dt(map_dfr(dttm_seq, ~ get_sessions_interval_demand(sessions_dt, .x, by, normalized)) %>%
       pivot_wider(names_from = !!sym(by), values_from = .data$Power, values_fill = 0)),
     by = 'datetime'
   ))

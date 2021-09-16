@@ -188,48 +188,29 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
 #' Obtain timeseries demand from sessions dataset
 #'
 #' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
-#' @param dttm_seq sequence of datetime values that will be the datetime variable of the returned time-series data frame
+#' @param dttm_seq sequence of datetime values that will be the datetime variable of the returned time-series data frame.
+#' This can be an integer sequence as well if `normalized = TRUE`.
 #' @param by character, being 'Profile' or 'Session'. When `by='Profile'` each column corresponds to an EV user profile.
-#' @param resolution integer, time resolution (in minutes) of the output demand time-series. If `dttm_seq` is defined this parameter is ignored.
 #' @param normalized logical, whether the `sessions` datetime columns are time-slot values
 #'
 #' @return tibble
 #' @export
 #'
-#' @importFrom dplyr left_join tibble sym mutate_if as_tibble
-#' @importFrom lubridate floor_date days is.timepoint
+#' @importFrom dplyr left_join tibble sym as_tibble
 #' @importFrom rlang .data
 #' @importFrom tidyr pivot_wider
 #' @importFrom purrr map_dfr
 #' @importFrom dtplyr lazy_dt
 #'
-get_sessions_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 15, normalized = F) {
+get_sessions_demand <- function(sessions, dttm_seq, by = "Profile", normalized = F) {
 
-  if (nrow(sessions) == 0) {
-    if (is.null(dttm_seq)) {
-      message("Must provide sessions or dttm_seq parameter")
-      return( NULL )
-    } else {
-      return( tibble(datetime = dttm_seq, demand = 0) )
-    }
-  } else {
-    if (is.null(dttm_seq)) {
-      dttm_seq <- seq.POSIXt(
-        from = floor_date(min(sessions$ConnectionStartDateTime), 'day'),
-        to = floor_date(max(sessions$ConnectionEndDateTime), 'day') + days(1),
-        by = paste(resolution, 'min')
-      )
-    } else {
-      resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = 'mins')
-    }
+  if (nrow(sessions) == 0 | length(dttm_seq) == 0) {
+    return( NULL )
   }
-
-  sessions_aligned <- sessions %>%
-    mutate_if(is.timepoint, floor_date, paste(resolution, 'min'))
 
   demand <- as_tibble(left_join(
     lazy_dt(tibble(datetime = dttm_seq)),
-    lazy_dt(map_dfr(dttm_seq, ~ get_sessions_interval_demand(lazy_dt(sessions_aligned), .x, by, normalized)) %>%
+    lazy_dt(map_dfr(dttm_seq, ~ get_sessions_interval_demand(lazy_dt(sessions), .x, by, normalized)) %>%
       pivot_wider(names_from = !!sym(by), values_from = .data$Power, values_fill = 0)),
     by = 'datetime'
   ))

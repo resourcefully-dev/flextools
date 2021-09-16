@@ -201,6 +201,7 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
 #' @importFrom tidyr pivot_wider
 #' @importFrom purrr map_dfr
 #' @importFrom dtplyr lazy_dt
+#' @importFrom data.table as.data.table
 #'
 get_sessions_demand <- function(sessions, dttm_seq, by = "Profile", normalized = F) {
 

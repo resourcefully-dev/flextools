@@ -159,7 +159,7 @@ denormalize_timeseries <- function(df, start, time_interval) {
 #'
 #' @return tibble
 #'
-#' @importFrom dplyr %>% filter group_by summarise mutate sym
+#' @importFrom dplyr %>% filter group_by summarise mutate sym as_tibble
 #' @importFrom rlang .data
 #'
 get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
@@ -169,7 +169,8 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
         filter(.data$chs <= timeslot, timeslot < .data$che) %>%
         group_by(!!sym(by)) %>%
         summarise(Power = sum(.data$p)) %>%
-        mutate(datetime = timeslot)
+        mutate(datetime = timeslot) %>%
+        as_tibble()
     )
   } else {
     return(
@@ -177,7 +178,8 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
         filter(.data$ChargingStartDateTime <= timeslot, timeslot < .data$ChargingEndDateTime) %>%
         group_by(!!sym(by)) %>%
         summarise(Power = sum(.data$Power)) %>%
-        mutate(datetime = timeslot)
+        mutate(datetime = timeslot) %>%
+        as_tibble()
     )
   }
 }
@@ -194,11 +196,12 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
 #' @return tibble
 #' @export
 #'
-#' @importFrom dplyr left_join tibble sym mutate_if
+#' @importFrom dplyr left_join tibble sym mutate_if as_tibble
 #' @importFrom lubridate floor_date days is.timepoint
 #' @importFrom rlang .data
 #' @importFrom tidyr pivot_wider
 #' @importFrom purrr map_dfr
+#' @importFrom dtplyr lazy_dt
 #'
 get_sessions_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 15, normalized = F) {
 
@@ -224,20 +227,19 @@ get_sessions_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resol
   sessions_aligned <- sessions %>%
     mutate_if(is.timepoint, floor_date, paste(resolution, 'min'))
 
-  demand <- left_join(
-    tibble(datetime = dttm_seq),
-    map_dfr(dttm_seq, ~ get_sessions_interval_demand(sessions, .x, by, normalized)) %>%
-      pivot_wider(names_from = !!sym(by), values_from = .data$Power, values_fill = 0),
+  demand <- as_tibble(left_join(
+    lazy_dt(tibble(datetime = dttm_seq)),
+    lazy_dt(map_dfr(dttm_seq, ~ get_sessions_interval_demand(lazy_dt(sessions_aligned), .x, by, normalized)) %>%
+      pivot_wider(names_from = !!sym(by), values_from = .data$Power, values_fill = 0)),
     by = 'datetime'
-  )
+  ))
   return( replace(demand, is.na(demand), 0) )
 }
 
 
 
 get_all_sessions_interval_demand_fast <- function(sessions, slot) {
-  dplyr::tibble(
-    timeslot = slot,
+  dplyr::as_tibble(
     dplyr::summarise(
       dplyr::filter(sessions, .data$chs <= slot, slot < .data$che),
       demand = sum(.data$p)
@@ -246,13 +248,15 @@ get_all_sessions_interval_demand_fast <- function(sessions, slot) {
 }
 
 get_all_sessions_demand_fast <- function(sessions, timeslot_seq) {
-  demand <- dplyr::left_join(
-    dplyr::tibble(timeslot = timeslot_seq),
-    purrr::map_dfr(
-      timeslot_seq,
-      ~get_all_sessions_interval_demand_fast(sessions, .x)
-    ), by = 'timeslot'
-  )
+  demand <- dplyr::as_tibble(dplyr::left_join(
+    dtplyr::lazy_dt(dplyr::tibble(timeslot = timeslot_seq)),
+    dplyr::mutate(dtplyr::lazy_dt(purrr::map_dfr(
+      purrr::set_names(timeslot_seq, timeslot_seq),
+      ~ get_all_sessions_interval_demand_fast(dtplyr::lazy_dt(sessions), .x),
+      .id = 'timeslot'
+    )), timeslot = as.numeric(.data$timeslot)),
+    by = 'timeslot'
+  ))
   return( replace(demand, is.na(demand), 0) )
 }
 

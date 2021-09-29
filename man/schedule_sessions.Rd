@@ -10,7 +10,8 @@ schedule_sessions(
   method,
   power_th = 0,
   include_log = F,
-  power_min = 3.7
+  charging_power_min = 3.7,
+  charging_slots_min = 2
 )
 }
 \arguments{
@@ -24,7 +25,9 @@ schedule_sessions(
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
-\item{power_min}{numeric, minimum power to charge vehicles using curtailment method}
+\item{charging_power_min}{numeric, minimum power to charge vehicles using curtailment method}
+
+\item{charging_slots_min}{integer, minimum time slots that the vehicle must be charging before interruptions}
 }
 \value{
 list of two elements \code{sessions} and \code{log}

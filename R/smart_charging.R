@@ -15,7 +15,8 @@
 #' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
 #' @param power_th numeric, power threshold accepted from setpoint, in percentage
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
-#' @param power_min numeric, minimum power to charge vehicles using curtailment method
+#' @param charging_power_min numeric, minimum power to charge vehicles using curtailment method
+#' @param charging_minutes_min integer, minimum time (in minutes) that the vehicle must be charging before interruptions
 #'
 #' @importFrom dplyr %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample pull
 #' @importFrom lubridate hour minute date
@@ -25,7 +26,7 @@
 #' @return a list with two elements: optimization setpoints and coordinated sessions schedule
 #' @export
 #'
-smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, up_to_G = TRUE, power_th = 0, include_log = FALSE, power_min = 3.7) {
+smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, up_to_G = TRUE, power_th = 0, include_log = FALSE, charging_power_min = 3.7, charging_minutes_min = 30) {
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
   dttm_seq_original <- fitting_data$datetime
@@ -63,7 +64,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     window <- c(i, i+window_length-1)
     log_window_name <- as.character(date(dttm_seq[window[1]]))
     log[[log_window_name]] <- list()
-    sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$che < window[2])
+    sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs < window[2])
 
     # Profiles subjected to optimization:
     #   1. appearing in the sessions set for this optimization window
@@ -93,16 +94,16 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       window_prof_length <- window_prof[2] - window_prof[1] + 1
 
       # Limit the CONNECTION end time to the windows's end timeslot
-      sessions_window_prof$coe[(sessions_window_prof$coe > window_prof[2])] <- window_prof[2]
+      sessions_window_prof$coe[(sessions_window_prof$coe > window_prof[2]+1) & (sessions_window_prof$che < window_prof[2]+1)] <- window_prof[2]+1
       sessions_window_prof$f <- (sessions_window_prof$coe - sessions_window_prof$chs) - (sessions_window_prof$che - sessions_window_prof$chs)
 
-      # Separate between responsive sessions or not
+      # Discard flexibility of sessions that remain charging outside the optimization window
+      sessions_window_prof$f[sessions_window_prof$che > window_prof[2]] <- 0
+
+      # Separate between flexible sessions or not
       set.seed(1234)
-      sessions_window_prof <- sessions_window_prof %>%
-        mutate(
-          Responsive = sample(c(T, F), nrow(sessions_window_prof), replace = T, prob = c(responsive[[profile]], (1-responsive[[profile]])))
-        )
-      sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive, .data$f > 0)
+      sessions_window_prof[["Responsive"]] <- sample(c(T, F), nrow(sessions_window_prof), replace = T, prob = c(responsive[[profile]], (1-responsive[[profile]])))
+      sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive & .data$f > 0)
       non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f == 0)
 
       # OPTIMIZATION
@@ -123,9 +124,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       }
       #   - Profile sessions that can't provide flexibility
       if (nrow(non_flexible_sessions) > 0) {
-        L_fixed_prof <- non_flexible_sessions %>%
-          get_sessions_demand(window_prof[1]:window_prof[2], normalized = T) %>%
-          pull(profile)
+        L_fixed_prof <-  get_all_sessions_demand_fast(
+          non_flexible_sessions, window_prof[1]:window_prof[2]
+        )[["demand"]]
       } else {
         L_fixed_prof <- rep(0, window_prof_length)
       }
@@ -153,7 +154,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
       results <- schedule_sessions(
         sessions_prof = sessions_window_prof_flex, setpoint_prof = setpoint_prof,
-        method = method, power_th = power_th, include_log = include_log, power_min = power_min
+        method = method, power_th = power_th, include_log = include_log,
+        charging_power_min = charging_power_min, charging_slots_min = round(charging_minutes_min/time_interval)
       )
 
       sessions_window_prof_flex_opt <- results$sessions
@@ -187,7 +189,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 #' @param method character, being `postpone` or `curtail`
 #' @param power_th numeric, power threshold accepted from setpoint, in percentage
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
-#' @param power_min numeric, minimum power to charge vehicles using curtailment method
+#' @param charging_power_min numeric, minimum power to charge vehicles using curtailment method
+#' @param charging_slots_min integer, minimum time slots that the vehicle must be charging before interruptions
 #'
 #' @return list of two elements `sessions` and `log`
 #' @export
@@ -195,7 +198,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 #' @importFrom dplyr tibble %>% filter pull arrange desc bind_rows
 #' @importFrom rlang .data
 #'
-schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0, include_log = F, power_min = 3.7) {
+schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0, include_log = F, charging_power_min = 3.7, charging_slots_min = 2) {
   timeslots_blacklist <- c()
   log <- c()
 
@@ -205,14 +208,10 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
   # Loop
   while (TRUE) {
     # Flexibility requirements
-    flex_req <- filter(
-      tibble(
-        timeslot = setpoint_prof$timeslot,
-        power = demand_prof$demand - setpoint_prof$setpoint*(1 + power_th/100)
-      ),
-      .data$power > 0,
-      !(.data$timeslot %in% timeslots_blacklist)
-    )
+    flex_req <- tibble(
+      timeslot = setpoint_prof$timeslot,
+      power = round(demand_prof$demand - setpoint_prof$setpoint*(1 + power_th/100), 1)
+    ) %>% filter(.data$power > 0, !(.data$timeslot %in% timeslots_blacklist))
 
     if (nrow(flex_req) == 0) {
       if (include_log) log <- c(log, "No more flexibility requirements or they can not be satisfied.")
@@ -221,7 +220,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
 
     # Select the first time slot with flexibility requirements
     flex_timeslot <- flex_req$timeslot[1]
-    flex_timeslot_req <- filter(flex_req, .data$timeslot == flex_timeslot) %>% pull(.data$power)
+    flex_timeslot_req <- flex_req %>% filter(.data$timeslot == flex_timeslot) %>% pull(.data$power)
 
     if (flex_timeslot == setpoint_prof$timeslot[nrow(setpoint_prof)]) {
       if (include_log) log <- c(log, "Can't expand sessions outside the optimization window")
@@ -231,36 +230,8 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
     if (include_log) log <- c(log, paste("---------- Flexibility requirement of", flex_timeslot_req, "kW on",
                                          setpoint_prof$datetime[which(setpoint_prof$timeslot == flex_timeslot)], "----------"))
 
-    if (method == 'curtail') {
 
-      # Curtailable sessions:
-      #   - at least 1 flexible timeslot (f > 0)
-      #   - flex_timeslot in the middle or beginning of the charging time
-      #   - power higher than minimum power
-      #   - energy from flex_timeslot can be divided to at least 2 timeslots charging at minimum power
-      flex_timeslot_sessions <- sessions_prof %>%
-        filter(.data$f > 0, .data$chs <= flex_timeslot, .data$che > flex_timeslot, .data$p > power_min,
-               (.data$che - flex_timeslot)*.data$p >= power_min*2) %>%
-        arrange(.data$chs, desc(.data$f))
-
-      if (nrow(flex_timeslot_sessions) == 0) {
-        if (include_log) log <- c(log, "No Curtailment flexibility available.")
-        timeslots_blacklist <- c(timeslots_blacklist, flex_timeslot)
-        next
-      }
-
-      reschedule <- curtail_sessions(
-        sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions,
-        flex_timeslot_req = flex_timeslot_req, power_th = 0, power_min = power_min, demand_prof = demand_prof,
-        log = log, include_log = include_log
-      )
-
-      sessions_prof <- reschedule$sessions
-      log <- reschedule$log
-      demand_prof <- reschedule$demand
-    }
-
-    if (method == 'postpone') {
+    if (method %in% c('postpone', 'postpone_interrupt', 'postpone_curtail', 'postpone_interrupt_curtail')) {
 
       # Postponable sessions:
       #   - at least 1 flexible timeslot (f > 0)
@@ -284,62 +255,63 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
       demand_prof <- reschedule$demand
     }
 
-    if (method == 'curtail_postpone') {
+    if (method %in% c('postpone_interrupt', 'postpone_interrupt_curtail')) {
 
-      flex_timeslot_sessions_curtail <- sessions_prof %>%
-        filter(.data$f > 0, .data$chs <= flex_timeslot, .data$che > flex_timeslot, .data$p > power_min, (.data$che - flex_timeslot)*.data$p >= power_min*2) %>%
+      # Interruptable sessions:
+      #   - at least 1 flexible timeslot (f > 0)
+      #   - flex_timeslot is at least charging_slots_min later than charging start time and
+      #       charging_slots_min earlier than charging end time
+      #   - Interrupted less than 3 times
+      max_interrupted_sessions <- sessions_prof %>%
+        filter(.data$Part >= 5) %>%
+        pull(.data$Session) %>%
+        unique()
+      flex_timeslot_sessions <- sessions_prof %>%
+        filter(.data$f > 0, flex_timeslot >= (.data$chs + charging_slots_min), flex_timeslot <= (.data$che - charging_slots_min), !(.data$Session %in% max_interrupted_sessions)) %>%
         arrange(.data$chs, desc(.data$f))
 
-      if (nrow(flex_timeslot_sessions_curtail) > 0) {
-
-        if (include_log) log <- c(log, "---------- Curtail method:")
-
-        reschedule_curtail <- curtail_sessions(
-          sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions_curtail,
-          flex_timeslot_req = flex_timeslot_req, power_th = 0, power_min = power_min, demand_prof = demand_prof,
-          log = log, include_log = include_log
-        )
-
-        sessions_prof <- reschedule_curtail$sessions
-        log <- reschedule_curtail$log
-        demand_prof <- reschedule_curtail$demand
-      } else {
-        if (include_log) log <- c(log, "No Curtailment flexibility available. Let's try with Postpone.")
-        reschedule_curtail <- NULL
+      if (nrow(flex_timeslot_sessions) == 0) {
+        if (include_log) log <- c(log, "No Interrupting flexibility available.")
+        timeslots_blacklist <- c(timeslots_blacklist, flex_timeslot)
+        next
       }
 
-      if (is.null(reschedule_curtail)) {
-        flex_timeslot_sessions_postpone <- sessions_prof %>%
-          filter(.data$f > 0, .data$chs == flex_timeslot) %>%
-          arrange(.data$chs, desc(.data$f))
-      } else {
-        # After curtailment only full sessions can be postponed to avoid charging interruptions
-        partial_sessions <- unique(reschedule_curtail$sessions$Session[reschedule_curtail$sessions$Part > 1])
-        flex_timeslot_sessions_postpone <- reschedule_curtail$sessions %>%
-          filter(.data$f > 0, .data$chs == flex_timeslot, !(.data$Session %in% partial_sessions)) %>%
-          arrange(.data$chs, desc(.data$f))
+      reschedule <- interrupt_sessions(
+        sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions,
+        flex_timeslot_req = flex_timeslot_req, power_th = 0, demand_prof = demand_prof, log = log, include_log = include_log
+      )
+      sessions_prof <- reschedule$sessions
+      log <- reschedule$log
+      demand_prof <- reschedule$demand
+    }
+
+    if (method %in% c('curtail', 'postpone_curtail', 'postpone_interrupt_curtail')) {
+
+      # Curtailable sessions:
+      #   - at least 1 flexible timeslot (f > 0)
+      #   - flex_timeslot in the middle or beginning of the charging time
+      #   - power higher than minimum power
+      #   - energy from flex_timeslot can be divided to at least 2 timeslots charging at minimum power
+      flex_timeslot_sessions <- sessions_prof %>%
+        filter(.data$f > 0, .data$chs <= flex_timeslot, .data$che > flex_timeslot, .data$p > charging_power_min,
+               (.data$che - flex_timeslot)*.data$p >= charging_power_min*2) %>%
+        arrange(.data$chs, desc(.data$f))
+
+      if (nrow(flex_timeslot_sessions) == 0) {
+        if (include_log) log <- c(log, "No Curtailment flexibility available.")
+        timeslots_blacklist <- c(timeslots_blacklist, flex_timeslot)
+        next
       }
 
-      if (nrow(flex_timeslot_sessions_postpone) > 0) {
+      reschedule <- curtail_sessions(
+        sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions,
+        flex_timeslot_req = flex_timeslot_req, power_th = 0, charging_power_min = charging_power_min, demand_prof = demand_prof,
+        log = log, include_log = include_log
+      )
 
-        if (include_log) log <- c(log, "---------- Postpone method:")
-
-        reschedule_postpone <- postpone_sessions(
-          sessions_prof = sessions_prof, flex_timeslot = flex_timeslot, flex_timeslot_sessions = flex_timeslot_sessions_postpone,
-          flex_timeslot_req = flex_timeslot_req, power_th = 0, demand_prof = demand_prof,
-          log = log, include_log = include_log
-        )
-        sessions_prof <- reschedule_postpone$sessions
-        log <- reschedule_postpone$log
-        demand_prof <- reschedule_postpone$demand
-
-      } else {
-        if (include_log) log <- c(log, "No Postponing flexibility available.")
-        if (is.null(reschedule_curtail)) {
-          timeslots_blacklist <- c(timeslots_blacklist, flex_timeslot)
-          next
-        }
-      }
+      sessions_prof <- reschedule$sessions
+      log <- reschedule$log
+      demand_prof <- reschedule$demand
     }
   }
 
@@ -353,12 +325,12 @@ postpone_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessio
     session <- flex_timeslot_sessions[s, ]
 
     # Update session features
-    session_idx <- which(sessions_prof$Session == session$Session)
+    session_idx <- which(sessions_prof$Session == session$Session & sessions_prof$Part == session$Part)
     sessions_prof$chs[session_idx] <- session$chs + 1
     sessions_prof$che[session_idx] <- session$che + 1
     sessions_prof$f[session_idx] <- session$f - 1
     sessions_prof$Shifted[session_idx] <- session$Shifted + 1
-    if (include_log) log <- c(log, paste('Postponing session', session$Session))
+    if (include_log) log <- c(log, paste('Postponing session', session$Session, 'part', session$Part))
 
     # Update flexibility requirement and demand
     flex_timeslot_req <- round(flex_timeslot_req - session$p, 1)
@@ -376,13 +348,13 @@ postpone_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessio
     }
   }
   if (flex_timeslot_req > power_th) {
-    if (include_log) log <- c(log, "All sessions exploited")
+    if (include_log) log <- c(log, "All postponable sessions exploited")
   }
   return(list(sessions = sessions_prof, log = log, demand = demand_prof))
 }
 
 
-curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessions, flex_timeslot_req, power_th, power_min, demand_prof, log, include_log = F) {
+curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessions, flex_timeslot_req, power_th, charging_power_min, demand_prof, log, include_log = F) {
   for (s in 1:nrow(flex_timeslot_sessions)) {
     session <- flex_timeslot_sessions[s, ]
     session_idx <- which((sessions_prof$Session == session$Session) & (sessions_prof$Part == session$Part))
@@ -398,21 +370,16 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
     curtail <- get_curtail_parameters(
       energy = (session$che - flex_timeslot)*session$p,
       available_timeslots = session$coe - flex_timeslot,
-      power_minimum = power_min
+      power_minimum = charging_power_min
     )
 
     # Remove original session demand
-    original_session_connection <- (demand_prof$timeslot >= session$cos) & (demand_prof$timeslot <= session$coe)
-    # original_session_connection <- dplyr::between(demand_prof$timeslot, session$cos, session$coe)
-    session_demand_schedule <- get_sessions_schedule(session, session$cos, session$coe)
-    # print(demand_prof$timeslot)
-    # print(session)
-    # print(paste('object of length', length(demand_prof$demand[original_session_connection]), 'with another of length', length(session_demand_schedule)))
-    demand_prof$demand[original_session_connection] <-
-      demand_prof$demand[original_session_connection] - session_demand_schedule
+    original_session_connection_idx <- (demand_prof$timeslot >= session$cos) & (demand_prof$timeslot < session$coe)
+    session_demand_schedule <- get_sessions_schedule(session, session$cos, session$coe-1)
+    demand_prof$demand[original_session_connection_idx] <-
+      demand_prof$demand[original_session_connection_idx] - session_demand_schedule
 
     # Multiple curtailment types
-
     if (flex_timeslot == session$chs) {
       # 1. Session starts when flexibility is required
 
@@ -423,8 +390,8 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
       sessions_prof[session_idx, ] <- session_curtail
       if (include_log) log <- c(log, paste('Full curtailment for session', session$Session, 'from', session$p, 'to', curtail$power, 'kW'))
 
-      demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
-        get_sessions_schedule(session_curtail, session$cos, session$coe)
+      demand_prof$demand[original_session_connection_idx] <- demand_prof$demand[original_session_connection_idx] +
+        get_sessions_schedule(session_curtail, session$cos, session$coe-1)
 
     } else {
       # 2. Session started before flexibility requirement
@@ -449,8 +416,8 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
       sessions_prof <- dplyr::bind_rows(sessions_prof, session_curtail)
       if (include_log) log <- c(log, paste('Partial curtailment for session', session$Session, 'from', session$p, 'to', curtail$power, 'kW'))
 
-      demand_prof$demand[original_session_connection] <- demand_prof$demand[original_session_connection] +
-        get_sessions_schedule(dplyr::bind_rows(session_original, session_curtail), session$cos, session$coe)
+      demand_prof$demand[original_session_connection_idx] <- demand_prof$demand[original_session_connection_idx] +
+        get_sessions_schedule(dplyr::bind_rows(session_original, session_curtail), session$cos, session$coe-1)
     }
 
     # Update flexibility requirement
@@ -465,7 +432,7 @@ curtail_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_session
     }
   }
   if (flex_timeslot_req > power_th) {
-    if (include_log) log <- c(log, "All sessions exploited")
+    if (include_log) log <- c(log, "All curtailable sessions exploited")
   }
   return(list(sessions = sessions_prof, log = log, demand = demand_prof))
 }
@@ -493,6 +460,59 @@ get_sessions_schedule <- function(sessions, start, end) {
   }
   return(demand)
 }
+
+
+interrupt_sessions <- function (sessions_prof, flex_timeslot, flex_timeslot_sessions,
+                                flex_timeslot_req, power_th, demand_prof, log, include_log = F) {
+  for (s in 1:nrow(flex_timeslot_sessions)) {
+    session <- flex_timeslot_sessions[s, ]
+    session_idx <- which(sessions_prof$Session == session$Session & sessions_prof$Part == session$Part)
+
+    session_first <- session
+    session_first$che <- flex_timeslot
+    session_first$coe <- flex_timeslot
+    session_first$e <- session_first$p * (session_first$che - session_first$chs)
+    session_first$f <- 0
+    sessions_prof[session_idx, ] <- session_first
+
+    session_second <- session
+    session_second$cos <- flex_timeslot + 1
+    session_second$chs <- flex_timeslot + 1
+    session_second$che <- session$che + 1
+    session_second$e <- session_second$p * (session_second$che - session_second$chs)
+    session_second$f <- session_second$coe - session_second$che
+    session_second$Shifted <- session$Shifted + 1
+    session_second$Part <- session$Part + 1
+    sessions_prof <- dplyr::bind_rows(sessions_prof, session_second)
+
+    if (include_log)
+      log <- c(log, paste("Interrupting session", session$Session, "part", session$Part))
+
+    flex_timeslot_req <- round(flex_timeslot_req - session$p, 1)
+    timeslot_idx_less <- which(demand_prof$timeslot == flex_timeslot)
+    timeslot_idx_more <- which(demand_prof$timeslot == session$che)
+    demand_prof$demand[timeslot_idx_less] <- demand_prof$demand[timeslot_idx_less] - session$p
+    demand_prof$demand[timeslot_idx_more] <- demand_prof$demand[timeslot_idx_more] + session$p
+
+    if (flex_timeslot_req <= power_th) {
+      if (include_log)
+        log <- c(log, "Setpoint achieved")
+      break
+    }
+    else {
+      if (include_log)
+        log <- c(log, paste(flex_timeslot_req, "kW of flexibility still required"))
+    }
+  }
+  if (flex_timeslot_req > power_th) {
+    if (include_log)
+      log <- c(log, "All interruptable sessions exploited")
+  }
+
+  return(list(sessions = sessions_prof, log = log, demand = demand_prof))
+}
+
+
 
 
 

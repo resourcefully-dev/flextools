@@ -193,7 +193,7 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
 #'
 add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL, window_length = NULL) {
   # Parameters check
-  if (w == 0) {
+  if (w == 0 | Bcap == 0 | Bc == 0 | Bd == 0 | SOCmin == SOCmax) {
     return( rep(0, length(G)) )
   }
   if (w > 1) {

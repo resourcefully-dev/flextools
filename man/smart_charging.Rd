@@ -15,7 +15,8 @@ smart_charging(
   up_to_G = TRUE,
   power_th = 0,
   include_log = FALSE,
-  power_min = 3.7
+  charging_power_min = 3.7,
+  charging_minutes_min = 30
 )
 }
 \arguments{
@@ -41,7 +42,9 @@ Only sessions starting within the time sequence of column \code{datetime} will b
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
-\item{power_min}{numeric, minimum power to charge vehicles using curtailment method}
+\item{charging_power_min}{numeric, minimum power to charge vehicles using curtailment method}
+
+\item{charging_minutes_min}{integer, minimum time (in minutes) that the vehicle must be charging before interruptions}
 }
 \value{
 a list with two elements: optimization setpoints and coordinated sessions schedule

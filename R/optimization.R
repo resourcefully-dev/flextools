@@ -159,8 +159,8 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- c(lb_general, lb_cumsum, lb_energy)
-  ub <- c(ub_general, ub_cumsum, ub_energy)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 3)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 3)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))

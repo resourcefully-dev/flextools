@@ -12,6 +12,24 @@ triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
   }
 }
 
+#' Cut the dateteime sequence according to the optimizion window start hour and length
+#'
+#' @param dttm_seq_original datetime sequence of the original timeseries data
+#' @param window_start_hour integer, hour to start the optimization window
+#' @param window_length integer, number of data points of the optimization window (not in hours)
+#'
+#' @return datetime sequence
+#' @export
+#'
+#' @importFrom lubridate hour minute
+adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, window_length) {
+  dttm_seq_window_start <- dttm_seq_original[
+    dttm_seq_original >= dttm_seq_original[which((hour(dttm_seq_original) == window_start_hour) & (minute(dttm_seq_original) == 0))[1]]
+  ]
+  n_windows <- length(dttm_seq_window_start) %/% window_length
+  dttm_seq <- dttm_seq_window_start[1:(n_windows*window_length)]
+  return(dttm_seq)
+}
 
 # Optimization of load ------------------------------------------------------------
 

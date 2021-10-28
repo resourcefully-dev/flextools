@@ -29,12 +29,14 @@
 smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, up_to_G = TRUE, power_th = 0, include_log = FALSE, charging_power_min = 3.7, charging_minutes_min = 30) {
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
-  dttm_seq_original <- fitting_data$datetime
-  dttm_seq_window_start <- dttm_seq_original[
-    dttm_seq_original >= dttm_seq_original[which((hour(dttm_seq_original) == window_start_hour) & (minute(dttm_seq_original) == 0))[1]]
-  ]
-  n_windows <- length(dttm_seq_window_start) %/% window_length
-  dttm_seq <- dttm_seq_window_start[1:(n_windows*window_length)]
+  window_start_hour <- as.integer(window_start_hour)
+  # dttm_seq_original <- fitting_data$datetime
+  # dttm_seq_window_start <- dttm_seq_original[
+  #   dttm_seq_original >= dttm_seq_original[which((hour(dttm_seq_original) == window_start_hour) & (minute(dttm_seq_original) == 0))[1]]
+  # ]
+  # n_windows <- length(dttm_seq_window_start) %/% window_length
+  # dttm_seq <- dttm_seq_window_start[1:(n_windows*window_length)]
+  dttm_seq <- adapt_dttm_seq_to_opt_windows(fitting_data$datetime, window_start_hour, window_length)
   time_interval <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
   start <- dttm_seq[1]
   end <- dttm_seq[length(dttm_seq)]

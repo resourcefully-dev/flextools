@@ -18,7 +18,7 @@
 #' @param charging_power_min numeric, minimum power to charge vehicles using curtailment method
 #' @param charging_minutes_min integer, minimum time (in minutes) that the vehicle must be charging before interruptions
 #'
-#' @importFrom dplyr %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample pull
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample pull
 #' @importFrom lubridate hour minute date
 #' @importFrom rlang .data
 #' @importFrom stats ecdf quantile

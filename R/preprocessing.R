@@ -205,8 +205,18 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized) {
 #'
 get_sessions_demand <- function(sessions, dttm_seq, by = "Profile", normalized = F) {
 
-  if (nrow(sessions) == 0 | length(dttm_seq) == 0) {
+  if (length(dttm_seq) == 0 | is.null(dttm_seq)) {
+    message("Datetime sequence must be valid")
     return( NULL )
+  }
+
+  if (is.null(sessions)) {
+    message("Sessions parameter must be a tibble")
+    return( NULL )
+  }
+
+  if (nrow(sessions) == 0) {
+    return( tibble(datetime = dttm_seq) )
   }
 
   sessions_dt <- lazy_dt(sessions)

@@ -27,6 +27,12 @@
 #' @export
 #'
 smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, up_to_G = TRUE, power_th = 0, include_log = FALSE, charging_power_min = 3.7, charging_minutes_min = 30) {
+  # Check input sessions
+  if (is.null(sessions) | nrow(sessions) == 0) {
+    message("sessions object is empty.")
+    return(NULL)
+  }
+
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
   window_start_hour <- as.integer(window_start_hour)

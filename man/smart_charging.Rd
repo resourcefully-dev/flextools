@@ -24,7 +24,8 @@ smart_charging(
 
 \item{fitting_data}{tibble, optimization fitting data, first column being \code{datetime}.
 The other columns could be \code{solar} (solar generation) and \code{fixed} (static demand from other sectors like buildings, offices, ...).
-Only sessions starting within the time sequence of column \code{datetime} will be shifted.}
+Only sessions starting within the time sequence of column \code{datetime} will be shifted.
+If columns of \code{fitting_data} are user profiles names, these are used as setpoints and no optimization is performed.}
 
 \item{method}{character, smart charging method being \code{postpone} or \code{curtail}}
 

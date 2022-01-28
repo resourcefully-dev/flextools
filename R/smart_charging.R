@@ -118,8 +118,17 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f == 0)
 
       # SETPOINTS
+      #   Profile sessions that can't provide flexibility are not part of the setpoint
+      if (nrow(non_flexible_sessions) > 0) {
+        L_fixed_prof <-  get_all_sessions_demand_fast(
+          non_flexible_sessions, window_prof[1]:window_prof[2]
+        )[["demand"]]
+      } else {
+        L_fixed_prof <- rep(0, window_prof_length)
+      }
+
+      # OPTIMIZATION (if required)
       if (do_opt) {
-        # OPTIMIZATION
         # The optimization static load consists on:
         #   - Environment fixed load (buildings, lightning, etc)
         if ('fixed' %in% colnames(fitting_data_norm)) {
@@ -134,14 +143,6 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
           rowSums()
         if (length(L_others) == 0) {
           L_others <- rep(0, window_prof_length)
-        }
-        #   - Profile sessions that can't provide flexibility
-        if (nrow(non_flexible_sessions) > 0) {
-          L_fixed_prof <-  get_all_sessions_demand_fast(
-            non_flexible_sessions, window_prof[1]:window_prof[2]
-          )[["demand"]]
-        } else {
-          L_fixed_prof <- rep(0, window_prof_length)
         }
         # The optimization flexible load is the load of the responsive sessions
         L_prof <- setpoints[[profile]][window_prof_idxs] - L_fixed_prof
@@ -163,7 +164,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       setpoint_prof <- tibble(
         datetime = dttm_seq[window_prof[1]:window_prof[2]],
         timeslot = window_prof[1]:window_prof[2],
-        setpoint = setpoints[[profile]][window_prof_idxs] # O # Per què no hi tenia `O + L_fixed_prof` ?
+        setpoint = setpoints[[profile]][window_prof_idxs] - L_fixed_prof
       )
 
       results <- schedule_sessions(

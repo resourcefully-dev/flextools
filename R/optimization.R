@@ -100,38 +100,43 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
 #' @param LS numeric vector, being the static load profile
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
-#' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
+#' @param only_above_G logical, optimize only the part of flexible load that surpasses Generation.
+#' If all demand is lower than Generation the optimization is skipped.
+#' @param up_to_G logical, limit the flexible load up to Generation.
 #'
 #' @return numeric vector
 #'
 #' @importFrom osqp osqp osqpSettings
 #'
-minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "forward", time_horizon = NULL, up_to_G = TRUE) {
+minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "forward", time_horizon = NULL, only_above_G = FALSE, up_to_G = FALSE) {
 
   if (is.null(time_horizon)) {
     time_horizon <- length(G)
   }
 
-  # LF must remain static when there is G
+  # Must LF remain static when there is G?
   LF_static <- rep(0, length(LF)) # LF static vector
-  static_idx <- G >= (LS + LF)
-  semi_static_idx <- (G < (LS + LF)) & (LF > 0) & (LS < G) # LF static and shiftable for the same timeslot
+  if (only_above_G) {
+    static_idx <- G >= (LS + LF)
+    semi_static_idx <- (G < (LS + LF)) & (LF > 0) & (LS < G) # LF static and shiftable for the same timeslot
 
-  # If all demand is lower than solar then skip optimization
-  if (all(static_idx)) {
-    return( LF )
-  }
-  if (any(static_idx)) {
-    LF_static[static_idx] <- LF[static_idx]
-  }
-  if (any(semi_static_idx)) {
-    LF_rest <- G[semi_static_idx] - LS[semi_static_idx]
-    LF_static[semi_static_idx] <- LF_rest
+    # If all demand is lower than Generation then skip optimization
+    if (all(static_idx)) {
+      return( LF )
+    }
+    if (any(static_idx)) {
+      LF_static[static_idx] <- LF[static_idx]
+    }
+    if (any(semi_static_idx)) {
+      LF_rest <- G[semi_static_idx] - LS[semi_static_idx]
+      LF_static[semi_static_idx] <- LF_rest
+    }
+
+    # Update LF and LS
+    LS <- LS + LF_static
+    LF <- LF - LF_static
   }
 
-  # Update LF and LS
-  LS <- LS + LF_static
-  LF <- LF - LF_static
 
   # Optimization parameters
   time_slots <- length(LF)

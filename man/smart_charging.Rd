@@ -12,7 +12,8 @@ smart_charging(
   window_start_hour,
   opt_weights,
   responsive,
-  up_to_G = TRUE,
+  only_above_G = FALSE,
+  up_to_G = FALSE,
   power_th = 0,
   include_log = FALSE,
   charging_power_min = 3.7,
@@ -36,6 +37,9 @@ If columns of \code{fitting_data} are user profiles names, these are used as set
 \item{opt_weights}{Named list with the optimization weight \code{w} of the \code{minimize_grid_flow} function. The names of the list must exactly match the user profiles names.}
 
 \item{responsive}{Named list with the ratio of sessions responsive to smart charging program for each profile. The names of the list must exactly match the user profiles names.}
+
+\item{only_above_G}{logical, optimize only the part of flexible load that surpasses Generation.
+If all demand is lower than Generation the optimization is skipped.}
 
 \item{up_to_G}{logical, whether to limit the flexible EV demand up to renewable Generation}
 

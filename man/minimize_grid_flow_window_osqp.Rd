@@ -11,7 +11,8 @@ minimize_grid_flow_window_osqp(
   LS = NULL,
   direction = "forward",
   time_horizon = NULL,
-  up_to_G = TRUE
+  only_above_G = FALSE,
+  up_to_G = FALSE
 )
 }
 \arguments{
@@ -27,7 +28,10 @@ minimize_grid_flow_window_osqp(
 
 \item{time_horizon}{integer, maximum number of positions to shift energy from}
 
-\item{up_to_G}{logical, whether to limit the flexible EV demand up to renewable Generation}
+\item{only_above_G}{logical, optimize only the part of flexible load that surpasses Generation.
+If all demand is lower than Generation the optimization is skipped.}
+
+\item{up_to_G}{logical, limit the flexible load up to Generation.}
 }
 \value{
 numeric vector

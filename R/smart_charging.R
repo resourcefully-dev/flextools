@@ -13,6 +13,8 @@
 #' @param window_start_hour integer, hour to start the optimization window. If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
 #' @param opt_weights Named list with the optimization weight `w` of the `minimize_grid_flow` function. The names of the list must exactly match the user profiles names.
 #' @param responsive Named list with the ratio of sessions responsive to smart charging program for each profile. The names of the list must exactly match the user profiles names.
+#' @param only_above_G logical, optimize only the part of flexible load that surpasses Generation.
+#' If all demand is lower than Generation the optimization is skipped.
 #' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
 #' @param power_th numeric, power threshold accepted from setpoint, in percentage
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
@@ -27,7 +29,7 @@
 #' @return a list with two elements: optimization setpoints and coordinated sessions schedule
 #' @export
 #'
-smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, up_to_G = TRUE, power_th = 0, include_log = FALSE, charging_power_min = 3.7, charging_minutes_min = 30) {
+smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, only_above_G = FALSE, up_to_G = FALSE, power_th = 0, include_log = FALSE, charging_power_min = 3.7, charging_minutes_min = 30) {
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {
     message("sessions object is empty.")
@@ -63,7 +65,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
   # If fitting data contains user profile's name this is considered to be a setpoint (skip optimization)
   if (any(colnames(profiles_demand[-1]) %in% colnames(fitting_data[-1]))) {
     do_opt <- FALSE
-    setpoints <- fitting_data
+    setpoints <- fitting_data_norm
   } else {
     do_opt <- TRUE
     setpoints <- profiles_demand
@@ -100,7 +102,6 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
       # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
       window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
-      # window_prof <- c(min(sessions_window_prof$cos), max(sessions_window_prof$coe))
       window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
       window_prof_length <- window_prof[2] - window_prof[1] + 1
 
@@ -155,6 +156,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
           LS = L_fixed + L_others + L_fixed_prof,
           direction = 'forward',
           time_horizon = NULL,
+          only_above_G = only_above_G,
           up_to_G = up_to_G
         )
         setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
@@ -164,7 +166,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       setpoint_prof <- tibble(
         datetime = dttm_seq[window_prof[1]:window_prof[2]],
         timeslot = window_prof[1]:window_prof[2],
-        setpoint = setpoints[[profile]][window_prof_idxs] - L_fixed_prof
+        setpoint = setpoints[[profile]][window_prof[1]:window_prof[2]] - L_fixed_prof
       )
 
       results <- schedule_sessions(

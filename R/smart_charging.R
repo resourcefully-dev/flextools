@@ -51,6 +51,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
   sessions_norm[['Responsive']] <- FALSE
 
   # Get user profiles demand
+  if (include_log) message("Getting EV demand profiles")
   profiles_demand <- get_sessions_demand(sessions_norm, 1:length(dttm_seq), normalized = T) %>%
     rename(timeslot = .data$datetime)
 
@@ -73,9 +74,11 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
 
   # For each optimization window
+  if (include_log) message("Smart charging:")
   for (i in seq(1, length(dttm_seq), window_length)) {
     window <- c(i, i+window_length-1)
     log_window_name <- as.character(date(dttm_seq[window[1]]))
+    if (include_log) message(paste("--", log_window_name))
     log[[log_window_name]] <- list()
     sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs < window[2])
 
@@ -91,6 +94,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
     # For each optimization profile
     for (profile in opt_profiles) {
+
+      if (include_log) message(paste("----", profile))
 
       # Filter only Profile's sessions that start and finish CHARGING within the time window
       sessions_window_prof <- sessions_window %>% filter(.data$Profile == profile)
@@ -130,6 +135,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
       # OPTIMIZATION (if required)
       if (do_opt) {
+
+        if (include_log) message("------ Optimization")
+
         # The optimization static load consists on:
         #   - Environment fixed load (buildings, lightning, etc)
         if ('fixed' %in% colnames(fitting_data_norm)) {
@@ -168,6 +176,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
         timeslot = window_prof[1]:window_prof[2],
         setpoint = setpoints[[profile]][window_prof[1]:window_prof[2]] - L_fixed_prof
       )
+
+      if (include_log) message("------ Scheduling")
 
       results <- schedule_sessions(
         sessions_prof = sessions_window_prof_flex, setpoint_prof = setpoint_prof,

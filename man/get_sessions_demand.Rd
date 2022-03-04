@@ -4,7 +4,13 @@
 \alias{get_sessions_demand}
 \title{Obtain timeseries demand from sessions dataset}
 \usage{
-get_sessions_demand(sessions, dttm_seq, by = "Profile", normalized = F)
+get_sessions_demand(
+  sessions,
+  dttm_seq = NULL,
+  by = "Profile",
+  normalized = F,
+  resolution = 15
+)
 }
 \arguments{
 \item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package}
@@ -15,6 +21,8 @@ This can be an integer sequence as well if \code{normalized = TRUE}.}
 \item{by}{character, being 'Profile' or 'Session'. When \code{by='Profile'} each column corresponds to an EV user profile.}
 
 \item{normalized}{logical, whether the \code{sessions} datetime columns are time-slot values}
+
+\item{resolution}{integer, time resolution (in minutes) of the sessions datetime variables. If \code{dttm_seq} is defined this parameter is ignored.}
 }
 \value{
 tibble

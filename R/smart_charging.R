@@ -294,7 +294,11 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
         pull(.data$Session) %>%
         unique()
       flex_timeslot_sessions <- sessions_prof %>%
-        filter(.data$f > 0, flex_timeslot >= (.data$chs + charging_slots_min), flex_timeslot <= (.data$che - charging_slots_min), !(.data$Session %in% max_interrupted_sessions)) %>%
+        filter(
+          .data$f > 0, flex_timeslot >= (.data$chs + charging_slots_min),
+          flex_timeslot <= (.data$che - charging_slots_min),
+          !(.data$Session %in% max_interrupted_sessions)
+        ) %>%
         arrange(.data$chs, desc(.data$f))
 
       if (nrow(flex_timeslot_sessions) == 0) {
@@ -320,8 +324,12 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
       #   - power higher than minimum power
       #   - energy from flex_timeslot can be divided to at least 2 timeslots charging at minimum power
       flex_timeslot_sessions <- sessions_prof %>%
-        filter(.data$f > 0, .data$chs <= flex_timeslot, .data$che > flex_timeslot, .data$p > charging_power_min,
-               (.data$che - flex_timeslot)*.data$p >= charging_power_min*2) %>%
+        filter(
+          .data$f > 0, .data$chs <= flex_timeslot,
+          .data$che > flex_timeslot,
+          .data$p > charging_power_min,
+          (.data$che - flex_timeslot)*.data$p >= charging_power_min*2
+        ) %>%
         arrange(.data$chs, desc(.data$f))
 
       if (nrow(flex_timeslot_sessions) == 0) {

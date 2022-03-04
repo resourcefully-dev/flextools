@@ -283,7 +283,8 @@ get_all_sessions_interval_demand_fast <- function(sessions, timeslot) {
   dplyr::as_tibble(
     dplyr::summarise(
       dplyr::filter(
-        # sessions, .data$chs <= timeslot, timeslot < .data$che
+        sessions,
+        # .data$chs <= timeslot, timeslot < .data$che
         (.data$chs <= timeslot & timeslot < .data$che) |
           (.data$chs == timeslot & timeslot == .data$che)
       ),

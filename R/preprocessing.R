@@ -237,8 +237,8 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized, res
         dplyr::group_by(!!dplyr::sym(by)) %>%
         # dplyr::summarise(demand = sum(.data$p)) %>%
         dplyr::summarise(demand = sum(
-          pmin(.data$che - timeslot, resolution/60)*.data$p*
-            60/resolution # This last term is to convert kWh to average kW
+          pmin(.data$che - timeslot, 1)*.data$p*
+            1 # This last term is to convert kWtimeslot (not kWh) to average kW -> P=E(kWtimeslot)/t(timeslots of a timeslot)=E/1
         )) %>%
         dplyr::mutate(datetime = timeslot) %>%
         dplyr::as_tibble()
@@ -255,7 +255,7 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized, res
         # dplyr::summarise(demand = sum(.data$Power)) %>%
         dplyr::summarise(demand = sum(
           pmin(as.numeric(.data$ChargingEndDateTime - timeslot, unit = 'hours'), resolution/60)*.data$Power*
-            60/resolution # This last term is to convert kWh to average kW
+            60/resolution # This last term is to convert kWh to average kW -> P=E(kWh)/t(hours of a timeslot)=E/(resolution/60)
         )) %>%
         dplyr::mutate(datetime = timeslot) %>%
         dplyr::as_tibble()
@@ -279,11 +279,18 @@ get_all_sessions_demand_fast <- function(sessions, timeslot_seq) {
 }
 
 
-get_all_sessions_interval_demand_fast <- function(sessions, slot) {
+get_all_sessions_interval_demand_fast <- function(sessions, timeslot) {
   dplyr::as_tibble(
     dplyr::summarise(
-      dplyr::filter(sessions, .data$chs <= slot, slot < .data$che),
-      demand = sum(.data$p)
+      dplyr::filter(
+        # sessions, .data$chs <= timeslot, timeslot < .data$che
+        (.data$chs <= timeslot & timeslot < .data$che) |
+          (.data$chs == timeslot & timeslot == .data$che)
+      ),
+      # demand = sum(.data$p)
+      demand = sum(
+        pmin(.data$che - timeslot, 1)*.data$p
+      )
     )
   )
 }

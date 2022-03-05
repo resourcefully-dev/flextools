@@ -174,19 +174,6 @@ denormalize_timeseries <- function(df, start, time_interval) {
 #'
 get_sessions_demand <- function(sessions, dttm_seq = NULL, by = "Profile", normalized = F, resolution = 15) {
 
-  # if (length(dttm_seq) == 0 | is.null(dttm_seq)) {
-  #   message("Datetime sequence must be valid")
-  #   return( NULL )
-  # }
-  #
-  # if (is.null(sessions)) {
-  #   message("Sessions parameter must be a tibble")
-  #   return( NULL )
-  # }
-  #
-  # if (nrow(sessions) == 0) {
-  #   return( tibble(datetime = dttm_seq) )
-  # }
   if (nrow(sessions) == 0) {
     if (is.null(dttm_seq)) {
       message("Must provide sessions or dttm_seq parameter")
@@ -229,13 +216,11 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized, res
   if (normalized) {
     return(
       sessions %>%
-        # dplyr::filter(.data$chs <= timeslot, timeslot < .data$che) %>%
         dplyr::filter(
           (.data$chs <= timeslot & timeslot < .data$che) |
             (.data$chs == timeslot & timeslot == .data$che)
         ) %>%
         dplyr::group_by(!!dplyr::sym(by)) %>%
-        # dplyr::summarise(demand = sum(.data$p)) %>%
         dplyr::summarise(demand = sum(
           pmin(.data$che - timeslot, 1)*.data$p*
             1 # This last term is to convert kWtimeslot (not kWh) to average kW -> P=E(kWtimeslot)/t(timeslots of a timeslot)=E/1
@@ -246,13 +231,11 @@ get_sessions_interval_demand <- function(sessions, timeslot, by, normalized, res
   } else {
     return(
       sessions %>%
-        # dplyr::filter(.data$ChargingStartDateTime <= timeslot, timeslot < .data$ChargingEndDateTime) %>%
         dplyr::filter(
           (.data$ChargingStartDateTime <= timeslot & timeslot < .data$ChargingEndDateTime) |
             (.data$ChargingStartDateTime == timeslot & timeslot == .data$ChargingEndDateTime)
         ) %>%
         dplyr::group_by(!!dplyr::sym(by)) %>%
-        # dplyr::summarise(demand = sum(.data$Power)) %>%
         dplyr::summarise(demand = sum(
           pmin(as.numeric(.data$ChargingEndDateTime - timeslot, unit = 'hours'), resolution/60)*.data$Power*
             60/resolution # This last term is to convert kWh to average kW -> P=E(kWh)/t(hours of a timeslot)=E/(resolution/60)
@@ -284,11 +267,9 @@ get_all_sessions_interval_demand_fast <- function(sessions, timeslot) {
     dplyr::summarise(
       dplyr::filter(
         sessions,
-        # .data$chs <= timeslot, timeslot < .data$che
         (.data$chs <= timeslot & timeslot < .data$che) |
           (.data$chs == timeslot & timeslot == .data$che)
       ),
-      # demand = sum(.data$p)
       demand = sum(
         pmin(.data$che - timeslot, 1)*.data$p
       )

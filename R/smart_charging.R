@@ -61,7 +61,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     mutate(timeslot = row_number()) %>%
     select(.data$timeslot, everything(), -.data$datetime)
 
-  # SMART CHARGING
+
+  # SMART CHARGING ----------------------------------------------------------
   log <- list()
   # If fitting data contains user profile's name this is considered to be a setpoint (skip optimization)
   if (any(colnames(profiles_demand[-1]) %in% colnames(fitting_data[-1]))) {
@@ -80,7 +81,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     log_window_name <- as.character(date(dttm_seq[window[1]]))
     if (include_log) message(paste("--", log_window_name))
     log[[log_window_name]] <- list()
-    sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs < window[2])
+
+    # Filter only sessions that START CHARGING within the time window
+    sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs <= window[2])
 
     # Profiles subjected to optimization:
     #   1. appearing in the sessions set for this optimization window
@@ -97,25 +100,30 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
       if (include_log) message(paste("----", profile))
 
-      # Filter only Profile's sessions that start and finish CHARGING within the time window
+      # Filter only sessions of this Profile
       sessions_window_prof <- sessions_window %>% filter(.data$Profile == profile)
 
-      # Re-define window to profile's connection window
-      # Find the End time for at least 75% of sessions
-      ss_ecdf <- ecdf(sessions_window_prof$coe)
-      ss_coe_75 <- pmin(as.integer(quantile(ss_ecdf)[4]), window[2])
-      # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
-      # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
-      window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
+      # The smart charging algorithm only allows moving demand within the
+      # time-window, so the flexible demand of time-slot `window[2]+1` must be 0
+      # Then:
+      #   1. Limit the CONNECTION END TIME of sessions that FINISH CHARGING BEFORE the window end
+      sessions_window_prof$coe[(sessions_window_prof$coe > window[2]+1) & (sessions_window_prof$che < window[2]+1)] <- window[2]+1
+      #   2. Recalculate flexibility with new end connection times
+      sessions_window_prof$f <- sessions_window_prof$coe  - sessions_window_prof$che
+      #   3. Discard flexibility of sessions that FINISH CHARGING AFTER the window end
+      sessions_window_prof$f[sessions_window_prof$che >= window[2]+1] <- 0
+
+      # # Re-define window to profile's connection window
+      # # Find the End time for at least 75% of sessions
+      # ss_ecdf <- ecdf(sessions_window_prof$coe)
+      # ss_coe_75 <- pmin(as.integer(quantile(ss_ecdf)[4]), window[2])
+      # # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
+      # # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
+      # window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
+      window_prof <- c(min(sessions_window_prof$cos), max(sessions_window_prof$coe))
       window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
       window_prof_length <- window_prof[2] - window_prof[1] + 1
 
-      # Limit the CONNECTION end time to the windows's end timeslot
-      sessions_window_prof$coe[(sessions_window_prof$coe > window_prof[2]+1) & (sessions_window_prof$che < window_prof[2]+1)] <- window_prof[2]+1
-      sessions_window_prof$f <- (sessions_window_prof$coe - sessions_window_prof$chs) - (sessions_window_prof$che - sessions_window_prof$chs)
-
-      # Discard flexibility of sessions that remain charging outside the optimization window
-      sessions_window_prof$f[sessions_window_prof$che > window_prof[2]] <- 0
 
       # Separate between flexible sessions or not
       set.seed(1234)
@@ -123,7 +131,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive & .data$f > 0)
       non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f == 0)
 
-      # SETPOINTS
+      # SETPOINTS ----------------------------------------------------------
       #   Profile sessions that can't provide flexibility are not part of the setpoint
       if (nrow(non_flexible_sessions) > 0) {
         L_fixed_prof <-  get_all_sessions_demand_fast(
@@ -170,7 +178,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
         setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
       }
 
-      # SCHEDULING
+      # SCHEDULING ----------------------------------------------------------
       setpoint_prof <- tibble(
         datetime = dttm_seq[window_prof[1]:window_prof[2]],
         timeslot = window_prof[1]:window_prof[2],

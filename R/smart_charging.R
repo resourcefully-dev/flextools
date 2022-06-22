@@ -120,7 +120,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       # # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
       # # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
       # window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
-      window_prof <- c(min(sessions_window_prof$cos), max(sessions_window_prof$coe))
+      window_prof <- c(min(sessions_window_prof$cos), pmin(max(sessions_window_prof$coe), window[2]))
       window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
       window_prof_length <- window_prof[2] - window_prof[1] + 1
 

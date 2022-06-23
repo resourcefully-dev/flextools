@@ -538,13 +538,20 @@ interrupt_sessions <- function (sessions_prof, flex_timeslot, flex_timeslot_sess
     if (include_log)
       log <- c(log, paste("Interrupting session", session$Session, "part", session$Part))
 
+    # Update flexibility requirement
     flex_timeslot_req <- round(flex_timeslot_req - session$p, 1)
-    timeslot_idx_less <- which(demand_prof$timeslot == session$chs)
-    timeslot_idx_more <- which(demand_prof$timeslot == trunc(session$che))
-    demand_prof$demand[timeslot_idx_less] <- demand_prof$demand[timeslot_idx_less] - session$p
-    demand_prof$demand[timeslot_idx_more] <- demand_prof$demand[timeslot_idx_more] +
-      pmin(session$che - trunc(session$che), 1)*session$p # che - trunc(che) will never be 0 because if che is integer will be trunc(che)+1
 
+    # Reduce demand in the interruption time slot
+    timeslot_idx_interruption <- which(demand_prof$timeslot == flex_timeslot)
+    demand_prof$demand[timeslot_idx_interruption] <- demand_prof$demand[timeslot_idx_interruption] - session$p
+
+    # Increase demand in old charging end time slot
+    # Sessions ending between time slots suppose an extra-demand at charging end time slot
+    extra_demand <- session$p*(session$che %% 1)
+    timeslot_idx_was_ending <- which(demand_prof$timeslot == trunc(session$che))
+    timeslot_idx_is_ending <- timeslot_idx_was_ending + 1
+    demand_prof$demand[timeslot_idx_was_ending] <- demand_prof$demand[timeslot_idx_was_ending] - extra_demand + session$p
+    demand_prof$demand[timeslot_idx_is_ending] <- demand_prof$demand[timeslot_idx_is_ending] + extra_demand
 
     if (flex_timeslot_req <= power_th) {
       if (include_log)

@@ -55,7 +55,7 @@ convert_datetime_to_timeslot <- function(dttm, start, time_interval) {
   start_utc <- with_tz(start, 'UTC')
   dttm_utc <- with_tz(dttm, 'UTC')
   # as.integer(as.numeric(dttm_utc - start_utc, unit = 'hours')*60/time_interval) + 1
-  round(as.numeric(dttm_utc - start_utc, unit = 'minutes'))/time_interval + 1
+  round(as.numeric(dttm_utc - start_utc, unit = 'mins'))/time_interval + 1
 }
 
 

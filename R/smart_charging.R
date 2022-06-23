@@ -104,16 +104,15 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       sessions_window_prof <- sessions_window %>% filter(.data$Profile == profile)
 
       # The smart charging algorithm only allows moving demand within the
-      # time-window, so the flexible demand of time-slot `window[2]+1` must be 0
-      # Then:
+      # time-window, so:
       #   1. Limit the CONNECTION END TIME of sessions that FINISH CHARGING BEFORE the window end
-      sessions_window_prof$coe[(sessions_window_prof$coe > window[2]+1) & (sessions_window_prof$che < window[2]+1)] <- window[2]+1
+      sessions_window_prof$coe[(sessions_window_prof$coe > window[2]) & (sessions_window_prof$che < window[2])] <- window[2]
       #   2. Recalculate flexibility with new end connection times
       sessions_window_prof$f <- sessions_window_prof$coe  - sessions_window_prof$che
       #   3. Discard flexibility of sessions that FINISH CHARGING AFTER the window end
-      sessions_window_prof$f[sessions_window_prof$che >= window[2]+1] <- 0
+      sessions_window_prof$f[sessions_window_prof$che >= window[2]] <- 0
 
-      # # Re-define window to profile's connection window
+      # Re-define window to profile's connection window
       # # Find the End time for at least 75% of sessions
       # ss_ecdf <- ecdf(sessions_window_prof$coe)
       # ss_coe_75 <- pmin(as.integer(quantile(ss_ecdf)[4]), window[2])
@@ -375,13 +374,20 @@ postpone_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessio
     sessions_prof$Shifted[session_idx] <- session$Shifted + 1
     if (include_log) log <- c(log, paste('Postponing session', session$Session, 'part', session$Part))
 
-    # Update flexibility requirement and demand
+    # Update flexibility requirement
     flex_timeslot_req <- round(flex_timeslot_req - session$p, 1)
-    timeslot_idx_less <- which(demand_prof$timeslot == session$chs)
-    timeslot_idx_more <- which(demand_prof$timeslot == trunc(session$che))
-    demand_prof$demand[timeslot_idx_less] <- demand_prof$demand[timeslot_idx_less] - session$p
-    demand_prof$demand[timeslot_idx_more] <- demand_prof$demand[timeslot_idx_more] +
-      pmin(session$che - trunc(session$che), 1)*session$p # che - trunc(che) will never be 0 because if che is integer will be trunc(che)+1
+
+    # Reduce demand in old charging start time slot
+    timeslot_idx_was_starting <- which(demand_prof$timeslot == session$chs)
+    demand_prof$demand[timeslot_idx_was_starting] <- demand_prof$demand[timeslot_idx_was_starting] - session$p
+
+    # Increase demand in old charging end time slot
+    # Sessions ending between time slots suppose an extra-demand at charging end time slot
+    extra_demand <- session$p*(session$che %% 1)
+    timeslot_idx_was_ending <- which(demand_prof$timeslot == trunc(session$che))
+    timeslot_idx_is_ending <- timeslot_idx_was_ending + 1
+    demand_prof$demand[timeslot_idx_was_ending] <- demand_prof$demand[timeslot_idx_was_ending] - extra_demand + session$p
+    demand_prof$demand[timeslot_idx_is_ending] <- demand_prof$demand[timeslot_idx_is_ending] + extra_demand
 
     # If the session power is lower than the curtailment power skip this session
     if (flex_timeslot_req <= power_th) {
@@ -533,10 +539,12 @@ interrupt_sessions <- function (sessions_prof, flex_timeslot, flex_timeslot_sess
       log <- c(log, paste("Interrupting session", session$Session, "part", session$Part))
 
     flex_timeslot_req <- round(flex_timeslot_req - session$p, 1)
-    timeslot_idx_less <- which(demand_prof$timeslot == flex_timeslot)
-    timeslot_idx_more <- which(demand_prof$timeslot == session$che)
+    timeslot_idx_less <- which(demand_prof$timeslot == session$chs)
+    timeslot_idx_more <- which(demand_prof$timeslot == trunc(session$che))
     demand_prof$demand[timeslot_idx_less] <- demand_prof$demand[timeslot_idx_less] - session$p
-    demand_prof$demand[timeslot_idx_more] <- demand_prof$demand[timeslot_idx_more] + session$p
+    demand_prof$demand[timeslot_idx_more] <- demand_prof$demand[timeslot_idx_more] +
+      pmin(session$che - trunc(session$che), 1)*session$p # che - trunc(che) will never be 0 because if che is integer will be trunc(che)+1
+
 
     if (flex_timeslot_req <= power_th) {
       if (include_log)

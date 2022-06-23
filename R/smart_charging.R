@@ -378,9 +378,10 @@ postpone_sessions <- function(sessions_prof, flex_timeslot, flex_timeslot_sessio
     # Update flexibility requirement and demand
     flex_timeslot_req <- round(flex_timeslot_req - session$p, 1)
     timeslot_idx_less <- which(demand_prof$timeslot == session$chs)
-    timeslot_idx_more <- which(demand_prof$timeslot == session$che)
+    timeslot_idx_more <- which(demand_prof$timeslot == trunc(session$che))
     demand_prof$demand[timeslot_idx_less] <- demand_prof$demand[timeslot_idx_less] - session$p
-    demand_prof$demand[timeslot_idx_more] <- demand_prof$demand[timeslot_idx_more] + session$p
+    demand_prof$demand[timeslot_idx_more] <- demand_prof$demand[timeslot_idx_more] +
+      pmin(session$che - trunc(session$che), 1)*session$p # che - trunc(che) will never be 0 because if che is integer will be trunc(che)+1
 
     # If the session power is lower than the curtailment power skip this session
     if (flex_timeslot_req <= power_th) {

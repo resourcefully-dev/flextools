@@ -127,8 +127,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       # Separate between flexible sessions or not
       set.seed(1234)
       sessions_window_prof[["Responsive"]] <- sample(c(T, F), nrow(sessions_window_prof), replace = T, prob = c(responsive[[profile]], (1-responsive[[profile]])))
-      sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive & .data$f > 0)
-      non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f == 0)
+      sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive & .data$f >= 1)
+      non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f < 1)
 
       # SETPOINTS ----------------------------------------------------------
       #   Profile sessions that can't provide flexibility are not part of the setpoint
@@ -268,10 +268,10 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
     if (method %in% c('postpone', 'postpone_interrupt', 'postpone_curtail', 'postpone_interrupt_curtail')) {
 
       # Postponable sessions:
-      #   - at least 1 flexible timeslot (f > 0)
+      #   - at least 1 flexible timeslot (f >= 1)
       #   - flex_timeslot must be the charging start time
       flex_timeslot_sessions <- sessions_prof %>%
-        filter(.data$f > 0, .data$chs == flex_timeslot) %>%
+        filter(.data$f >= 1, .data$chs == flex_timeslot) %>%
         arrange(.data$chs, desc(.data$f))
 
       if (nrow(flex_timeslot_sessions) == 0) {
@@ -292,7 +292,7 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
     if (method %in% c('postpone_interrupt', 'postpone_interrupt_curtail')) {
 
       # Interruptable sessions:
-      #   - at least 1 flexible timeslot (f > 0)
+      #   - at least 1 flexible timeslot (f >= 1)
       #   - flex_timeslot is at least charging_slots_min later than charging start time and
       #       charging_slots_min earlier than charging end time
       #   - Interrupted less than 3 times
@@ -302,7 +302,8 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
         unique()
       flex_timeslot_sessions <- sessions_prof %>%
         filter(
-          .data$f > 0, flex_timeslot >= (.data$chs + charging_slots_min),
+          .data$f >= 1,
+          flex_timeslot >= (.data$chs + charging_slots_min),
           flex_timeslot <= (.data$che - charging_slots_min),
           !(.data$Session %in% max_interrupted_sessions)
         ) %>%
@@ -326,13 +327,13 @@ schedule_sessions <- function(sessions_prof, setpoint_prof, method, power_th = 0
     if (method %in% c('curtail', 'postpone_curtail', 'postpone_interrupt_curtail')) {
 
       # Curtailable sessions:
-      #   - at least 1 flexible timeslot (f > 0)
+      #   - at least 1 flexible timeslot (f >= 1)
       #   - flex_timeslot in the middle or beginning of the charging time
       #   - power higher than minimum power
       #   - energy from flex_timeslot can be divided to at least 2 timeslots charging at minimum power
       flex_timeslot_sessions <- sessions_prof %>%
         filter(
-          .data$f > 0, .data$chs <= flex_timeslot,
+          .data$f >= 1, .data$chs <= flex_timeslot,
           .data$che > flex_timeslot,
           .data$p > charging_power_min,
           (.data$che - flex_timeslot)*.data$p >= charging_power_min*2

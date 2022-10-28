@@ -151,8 +151,6 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
   # Matrices for constraints
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
-  horizonMat_forward <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l', -time_horizon)
-  horizonMat_backward <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l', time_horizon)
 
   # Objective function terms
   P <- 2*identityMat
@@ -165,14 +163,37 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
   ub_general <- LFmax
 
   ## Shifting bounds
-  cumsumLF <- cumsumMat %*% LF
   Amat_cumsum <- cumsumMat
   if (direction == 'forward') {
-    lb_cumsum <- horizonMat_forward %*% LF
+    if (time_horizon == time_slots) {
+      horizonMat_cumsum <- matrix(0, time_slots, time_slots)
+    } else {
+      horizonMat_cumsum <- triangulate_matrix(matrix(1, time_slots, time_slots), "l", -time_horizon)
+    }
+    horizonMat_identity <- triangulate_matrix(triangulate_matrix(matrix(1, time_slots, time_slots), "l"), "u", -time_horizon)
+
+    # Cumulative sum bounds
+    lb_cumsum <- horizonMat_cumsum %*% LF
     ub_cumsum <- cumsumMat %*% LF
-  } else {
+
+    # Identity bounds
+    ub_shift <- horizonMat_identity %*% LF
+    ub_general <- pmin(ub_shift, LFmax)  # Update general bound with the minimum of both bounds
+
+  } else if (direction == 'backward') {
+    horizonMat_cumsum <- triangulate_matrix(matrix(1, time_slots, time_slots), "l", time_horizon)
+    horizonMat_identity <- triangulate_matrix(triangulate_matrix(matrix(1, time_slots, time_slots), "u"), "l", time_horizon)
+
+    # Cumulative sum bounds
     lb_cumsum <- cumsumMat %*% LF
-    ub_cumsum <- horizonMat_backward %*% LF
+    ub_cumsum <- horizonMat_cumsum %*% LF
+
+    # Identity bounds
+    ub_shift <- horizonMat_identity %*% LF
+    ub_general <- pmin(ub_shift, LFmax) # Update general bound with the minimum of both bounds
+  } else {
+    message("Error: direction name not valid")
+    return( NULL )
   }
 
   ## Total sum of O == E

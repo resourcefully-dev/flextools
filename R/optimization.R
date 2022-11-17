@@ -42,7 +42,9 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
-#' @param window_length integer, window length. If `NULL`, the window length will be the length of `G`
+#' @param window_length integer, window length in time slots (not hours). If `NULL`, the window length will be the length of `G`
+#' @param flex_window_length integer, flexibility window length in time slots (not hours).
+#' This optional feature lets you apply flexibility only during few hours from the start of the window.
 #'
 #' @return numeric vector
 #' @export
@@ -50,13 +52,13 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
 #' @importFrom dplyr tibble %>%
 #' @importFrom purrr map
 #'
-minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_horizon = NULL, up_to_G = TRUE, window_length = NULL) {
+minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_horizon = NULL, up_to_G = TRUE, window_length = NULL, flex_window_length = window_length) {
   # Parameters check
   if (w == 0) {
     return( LF )
   }
   if (w > 1) {
-    message("Error: Objective must be lower of equal to 1.")
+    message("Error: Objective must be lower or equal to 1.")
     return( NULL )
   }
 
@@ -75,19 +77,32 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
     return( NULL )
   }
 
-  if (is.null(window_length)) {
-    window_length <- length(G)
+  if (((length(G)/window_length) %% 1) > 0) {
+    message("Error: The length of vector G must be multiple of window_length")
+    return( NULL )
   }
 
-  O <- tibble(G, LF, LS) %>%
-    split(rep(1:(length(G)/window_length), each = window_length)) %>%
-    map(
-      ~ minimize_grid_flow_window_osqp(
-        w = w, G = .x$G, LF = .x$LF, LS = .x$LS, direction = direction,
-        time_horizon = time_horizon, up_to_G = up_to_G
-      )
+  if (is.null(window_length)) {
+    window_length <- length(G)
+    flex_window_length <- window_length
+  }
+
+  flex_windows_idxs <- tibble(
+    flex_start = seq(1, length(G), window_length),
+    flex_end = flex_start + flex_window_length - 1,
+    flex_idx = map2(flex_start, flex_end, ~ seq(.x, .y))
+  )
+
+  O <- LF
+  for (window_idxs in flex_windows_idxs$flex_idx) {
+    O_window <- my_minimize_grid_flow_window_osqp(
+      w = w, G = G[window_idxs], LF = LF[window_idxs], LS = LS[window_idxs],
+      direction = direction, time_horizon = time_horizon, up_to_G = up_to_G
     )
-  return( as.numeric(unlist(O)) )
+    O[window_idxs] <- O_window
+  }
+
+  return( O )
 }
 
 

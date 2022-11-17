@@ -50,7 +50,8 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
 #' @export
 #'
 #' @importFrom dplyr tibble %>%
-#' @importFrom purrr map
+#' @importFrom purrr map2
+#' @importFrom rlang .data
 #'
 minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_horizon = NULL, up_to_G = TRUE, window_length = NULL, flex_window_length = window_length) {
   # Parameters check
@@ -89,13 +90,13 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
 
   flex_windows_idxs <- tibble(
     flex_start = seq(1, length(G), window_length),
-    flex_end = flex_start + flex_window_length - 1,
-    flex_idx = map2(flex_start, flex_end, ~ seq(.x, .y))
+    flex_end = .data$flex_start + flex_window_length - 1,
+    flex_idx = map2(.data$flex_start, .data$flex_end, ~ seq(.x, .y))
   )
 
   O <- LF
   for (window_idxs in flex_windows_idxs$flex_idx) {
-    O_window <- my_minimize_grid_flow_window_osqp(
+    O_window <- minimize_grid_flow_window_osqp(
       w = w, G = G[window_idxs], LF = LF[window_idxs], LS = LS[window_idxs],
       direction = direction, time_horizon = time_horizon, up_to_G = up_to_G
     )

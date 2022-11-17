@@ -12,7 +12,8 @@ minimize_grid_flow(
   direction = "forward",
   time_horizon = NULL,
   up_to_G = TRUE,
-  window_length = NULL
+  window_length = NULL,
+  flex_window_length = window_length
 )
 }
 \arguments{
@@ -30,7 +31,10 @@ minimize_grid_flow(
 
 \item{up_to_G}{logical, whether to limit the flexible EV demand up to renewable Generation}
 
-\item{window_length}{integer, window length. If \code{NULL}, the window length will be the length of \code{G}}
+\item{window_length}{integer, window length in time slots (not hours). If \code{NULL}, the window length will be the length of \code{G}}
+
+\item{flex_window_length}{integer, flexibility window length in time slots (not hours).
+This optional feature lets you apply flexibility only during few hours from the start of the window.}
 }
 \value{
 numeric vector

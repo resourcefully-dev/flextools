@@ -11,8 +11,10 @@
 #' @param method character, smart charging method being `postpone` or `curtail`
 #' @param window_length integer, number of data points of the optimization window (not in hours)
 #' @param window_start_hour integer, hour to start the optimization window. If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
-#' @param opt_weights Named list with the optimization weight `w` of the `minimize_grid_flow` function. The names of the list must exactly match the user profiles names.
-#' @param responsive Named list with the ratio of sessions responsive to smart charging program for each profile. The names of the list must exactly match the user profiles names.
+#' @param opt_weights Named list with the optimization weight `w` of the `minimize_grid_flow` function.
+#' The names of the list must exactly match the Time-cycle and User profiles names, for example: list(Monday = list(Worktime = 1, Shortstay = 0.1))
+#' @param responsive Named two-layer list with the ratio of sessions responsive to smart charging program.
+#' The names of the list must exactly match the Time-cycle and User profiles names, for example: list(Monday = list(Worktime = 1, Shortstay = 0.1))
 #' @param only_above_G logical, optimize only the part of flexible load that surpasses Generation.
 #' If all demand is lower than Generation the optimization is skipped.
 #' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
@@ -85,14 +87,24 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     # Filter only sessions that START CHARGING within the time window
     sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs <= window[2])
 
+    # Window's features
+    window_timecycle <- sessions_window %>%
+      group_by(Timecycle) %>%
+      summarise(n = n()) %>%
+      arrange(desc(n)) %>%
+      slice_head(n = 1) %>%
+      pull(.data$Timecycle)
+    window_responsive <- responsive[[window_timecycle]]
+    window_opt_weights <- opt_weights[[window_timecycle]]
+
     # Profiles subjected to optimization:
     #   1. appearing in the sessions set for this optimization window
     #   2. responsive values higher than 0
     #   3. optimization weight higher than 0
-    opt_profiles <- names(responsive)[
-      (names(responsive) %in% unique(sessions_window$Profile)) &
-        (names(responsive) %in% names(responsive)[as.numeric(responsive) > 0]) &
-        (names(responsive) %in% names(opt_weights)[as.numeric(opt_weights) > 0])
+    opt_profiles <- names(window_responsive)[
+      (names(window_responsive) %in% unique(sessions_window$Profile)) &
+        (names(window_responsive) %in% names(window_responsive)[as.numeric(window_responsive) > 0]) &
+        (names(window_responsive) %in% names(window_opt_weights)[as.numeric(window_opt_weights) > 0])
     ]
 
     # For each optimization profile
@@ -126,7 +138,12 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
       # Separate between flexible sessions or not
       set.seed(1234)
-      sessions_window_prof[["Responsive"]] <- sample(c(T, F), nrow(sessions_window_prof), replace = T, prob = c(responsive[[profile]], (1-responsive[[profile]])))
+      sessions_window_prof[["Responsive"]] <- sample(
+        c(T, F),
+        nrow(sessions_window_prof),
+        replace = T,
+        prob = c(window_responsive[[profile]], (1-window_responsive[[profile]]))
+      )
       sessions_window_prof_flex <- sessions_window_prof %>% filter(.data$Responsive & .data$f >= 1)
       non_flexible_sessions <- sessions_window_prof %>% filter(!.data$Responsive | .data$f < 1)
 
@@ -165,7 +182,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
         # Optimize the flexible profile's load
         O <- minimize_grid_flow_window_osqp(
-          w = opt_weights[[profile]],
+          w = window_opt_weights[[profile]],
           G = fitting_data_norm$solar[window_prof_idxs],
           LF = L_prof,
           LS = L_fixed + L_others + L_fixed_prof,

@@ -89,6 +89,7 @@ convert_timeslot_to_datetime <- function(timeslot, start, time_interval) {
 normalize_sessions <- function (sessions, start, time_interval) {
   sessions_norm <- tibble(
     Session = as.character(sessions[["Session"]]),
+    Timecycle = as.character(sessions[["Timecycle"]]),
     Profile = as.character(sessions[["Profile"]]),
     cos = convert_datetime_to_timeslot(sessions[["ConnectionStartDateTime"]], start, time_interval),
     chs = convert_datetime_to_timeslot(sessions[["ChargingStartDateTime"]], start, time_interval),

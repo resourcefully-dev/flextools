@@ -24,7 +24,7 @@
 #' @param charging_power_min numeric, minimum power to charge vehicles using curtailment method
 #' @param charging_minutes_min integer, minimum time (in minutes) that the vehicle must be charging before interruptions
 #'
-#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample pull group_by summarise n slice_head
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of
 #' @importFrom lubridate hour minute date
 #' @importFrom rlang .data
 #' @importFrom stats ecdf quantile
@@ -91,12 +91,8 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs <= window[2])
 
     # Window's features
-    window_timecycle <- sessions_window %>%
-      group_by(.data$Timecycle) %>%
-      summarise(n = n()) %>%
-      arrange(desc(.data$n)) %>%
-      slice_head(n = 1) %>%
-      pull(.data$Timecycle)
+    window_timecycle <- names(sort(table(sessions_window$Timecycle), decreasing = TRUE))[1]
+    print(paste(log_window_name, "-", window_timecycle))
     window_responsive <- responsive[[window_timecycle]]
     window_opt_weights <- opt_weights[[window_timecycle]]
 

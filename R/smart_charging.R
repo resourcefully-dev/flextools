@@ -84,8 +84,10 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
   for (i in seq(1, length(dttm_seq), window_length)) {
     window <- c(i, i+window_length-1)
     log_window_name <- as.character(date(dttm_seq[window[1]]))
-    if (include_log) message(paste("--", log_window_name))
-    log[[log_window_name]] <- list()
+    if (include_log) {
+      message(paste("--", log_window_name))
+      log[[log_window_name]] <- list()
+    }
 
     # Filter only sessions that START CHARGING within the time window
     sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs <= window[2])
@@ -210,7 +212,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
         )
 
         sessions_window_prof_flex_opt <- results$sessions
-        log[[log_window_name]][[profile]] <- results$log
+        if (include_log) {
+          log[[log_window_name]][[profile]] <- results$log
+        }
 
         # Update original sessions set
         sessions_norm <- sessions_norm[!(sessions_norm$Session %in% sessions_window_prof_flex_opt$Session), ]

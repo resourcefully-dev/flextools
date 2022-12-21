@@ -8,7 +8,8 @@
 #' The other columns could be `solar` (solar generation) and `fixed` (static demand from other sectors like buildings, offices, ...).
 #' Only sessions starting within the time sequence of column `datetime` will be shifted.
 #' If columns of `fitting_data` are user profiles names, these are used as setpoints and no optimization is performed.
-#' @param method character, smart charging method being `postpone` or `curtail`
+#' @param method character, smart charging method being `none` or `postpone`.
+#' If `none`, the scheduling part is skipped and the sessions returned in the results will be identical to the original parameter.
 #' @param window_length integer, number of data points of the optimization window (not in hours)
 #' @param window_start_hour integer, hour to start the optimization window. If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
 #' @param opt_weights Named list with the optimization weight `w` of the `minimize_grid_flow` function.
@@ -23,7 +24,7 @@
 #' @param charging_power_min numeric, minimum power to charge vehicles using curtailment method
 #' @param charging_minutes_min integer, minimum time (in minutes) that the vehicle must be charging before interruptions
 #'
-#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample pull
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of slice_sample pull group_by summarise n slice_head
 #' @importFrom lubridate hour minute date
 #' @importFrom rlang .data
 #' @importFrom stats ecdf quantile
@@ -31,7 +32,9 @@
 #' @return a list with two elements: optimization setpoints and coordinated sessions schedule
 #' @export
 #'
-smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive, only_above_G = FALSE, up_to_G = FALSE, power_th = 0, include_log = FALSE, charging_power_min = 3.7, charging_minutes_min = 30) {
+smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive,
+                           only_above_G = FALSE, up_to_G = FALSE, power_th = 0, include_log = FALSE,
+                           charging_power_min = 3.7, charging_minutes_min = 30) {
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {
     message("sessions object is empty.")
@@ -89,9 +92,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
     # Window's features
     window_timecycle <- sessions_window %>%
-      group_by(Timecycle) %>%
+      group_by(.data$Timecycle) %>%
       summarise(n = n()) %>%
-      arrange(desc(n)) %>%
+      arrange(desc(.data$n)) %>%
       slice_head(n = 1) %>%
       pull(.data$Timecycle)
     window_responsive <- responsive[[window_timecycle]]
@@ -195,26 +198,28 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       }
 
       # SCHEDULING ----------------------------------------------------------
-      setpoint_prof <- tibble(
-        datetime = dttm_seq[window_prof[1]:window_prof[2]],
-        timeslot = window_prof[1]:window_prof[2],
-        setpoint = setpoints[[profile]][window_prof[1]:window_prof[2]] - L_fixed_prof
-      )
+      if (method != "none") {
+        setpoint_prof <- tibble(
+          datetime = dttm_seq[window_prof[1]:window_prof[2]],
+          timeslot = window_prof[1]:window_prof[2],
+          setpoint = setpoints[[profile]][window_prof[1]:window_prof[2]] - L_fixed_prof
+        )
 
-      if (include_log) message("------ Scheduling")
+        if (include_log) message("------ Scheduling")
 
-      results <- schedule_sessions(
-        sessions_prof = sessions_window_prof_flex, setpoint_prof = setpoint_prof,
-        method = method, power_th = power_th, include_log = include_log,
-        charging_power_min = charging_power_min, charging_slots_min = round(charging_minutes_min/time_interval)
-      )
+        results <- schedule_sessions(
+          sessions_prof = sessions_window_prof_flex, setpoint_prof = setpoint_prof,
+          method = method, power_th = power_th, include_log = include_log,
+          charging_power_min = charging_power_min, charging_slots_min = round(charging_minutes_min/time_interval)
+        )
 
-      sessions_window_prof_flex_opt <- results$sessions
-      log[[log_window_name]][[profile]] <- results$log
+        sessions_window_prof_flex_opt <- results$sessions
+        log[[log_window_name]][[profile]] <- results$log
 
-      # Update original sessions set
-      sessions_norm <- sessions_norm[!(sessions_norm$Session %in% sessions_window_prof_flex_opt$Session), ]
-      sessions_norm <- bind_rows(sessions_norm, sessions_window_prof_flex_opt)
+        # Update original sessions set
+        sessions_norm <- sessions_norm[!(sessions_norm$Session %in% sessions_window_prof_flex_opt$Session), ]
+        sessions_norm <- bind_rows(sessions_norm, sessions_window_prof_flex_opt)
+      }
     }
   }
 

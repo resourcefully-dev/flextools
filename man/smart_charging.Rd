@@ -28,15 +28,18 @@ The other columns could be \code{solar} (solar generation) and \code{fixed} (sta
 Only sessions starting within the time sequence of column \code{datetime} will be shifted.
 If columns of \code{fitting_data} are user profiles names, these are used as setpoints and no optimization is performed.}
 
-\item{method}{character, smart charging method being \code{postpone} or \code{curtail}}
+\item{method}{character, smart charging method being \code{none} or \code{postpone}.
+If \code{none}, the scheduling part is skipped and the sessions returned in the results will be identical to the original parameter.}
 
 \item{window_length}{integer, number of data points of the optimization window (not in hours)}
 
 \item{window_start_hour}{integer, hour to start the optimization window. If \code{window_start = 6} the EV sessions are optimized from 6:00 to 6:00.}
 
-\item{opt_weights}{Named list with the optimization weight \code{w} of the \code{minimize_grid_flow} function. The names of the list must exactly match the user profiles names.}
+\item{opt_weights}{Named list with the optimization weight \code{w} of the \code{minimize_grid_flow} function.
+The names of the list must exactly match the Time-cycle and User profiles names, for example: list(Monday = list(Worktime = 1, Shortstay = 0.1))}
 
-\item{responsive}{Named list with the ratio of sessions responsive to smart charging program for each profile. The names of the list must exactly match the user profiles names.}
+\item{responsive}{Named two-layer list with the ratio of sessions responsive to smart charging program.
+The names of the list must exactly match the Time-cycle and User profiles names, for example: list(Monday = list(Worktime = 1, Shortstay = 0.1))}
 
 \item{only_above_G}{logical, optimize only the part of flexible load that surpasses Generation.
 If all demand is lower than Generation the optimization is skipped.}

@@ -89,10 +89,10 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
 
     # Filter only sessions that START CHARGING within the time window
     sessions_window <- sessions_norm %>% filter(.data$chs >= window[1], .data$chs <= window[2])
+    if (nrow(sessions_window) == 0) next
 
     # Window's features
     window_timecycle <- names(sort(table(sessions_window$Timecycle), decreasing = TRUE))[1]
-    print(paste(log_window_name, "-", window_timecycle))
     window_responsive <- responsive[[window_timecycle]]
     window_opt_weights <- opt_weights[[window_timecycle]]
 

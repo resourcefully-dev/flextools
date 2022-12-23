@@ -228,10 +228,11 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
   } else {
     denormalized_sessions <- denormalize_sessions(sessions_norm, start, time_interval)
     sessions_opt <- left_join(
-      select(denormalized_sessions, any_of(names(sessions)), everything()),
       select(sessions, 'Session', !any_of(names(denormalized_sessions))),
+      denormalized_sessions,
       by = 'Session'
-    )
+    ) %>%
+      select(any_of(names(sessions)), everything())
   }
 
   return(list(

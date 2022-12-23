@@ -223,7 +223,7 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     }
   }
 
-  if (method != "none") {
+  if (method == "none") {
     sessions_opt <- sessions
   } else {
     denormalized_sessions <- denormalize_sessions(sessions_norm, start, time_interval)

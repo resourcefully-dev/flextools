@@ -119,11 +119,11 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       # The smart charging algorithm only allows moving demand within the
       # time-window, so:
       #   1. Limit the CONNECTION END TIME of sessions that FINISH CHARGING BEFORE the window end
-      sessions_window_prof$coe[(sessions_window_prof$coe > window[2]) & (sessions_window_prof$che < window[2])] <- window[2]
+      sessions_window_prof$coe[(sessions_window_prof$coe > (window[2]+1)) & (sessions_window_prof$che < (window[2]+1))] <- window[2]+1
       #   2. Recalculate flexibility with new end connection times
       sessions_window_prof$f <- sessions_window_prof$coe  - sessions_window_prof$che
       #   3. Discard flexibility of sessions that FINISH CHARGING AFTER the window end
-      sessions_window_prof$f[sessions_window_prof$che >= window[2]] <- 0
+      sessions_window_prof$f[sessions_window_prof$che >= (window[2]+1)] <- 0
 
       # Re-define window to profile's connection window
       # # Find the End time for at least 75% of sessions
@@ -135,7 +135,6 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       window_prof <- c(min(sessions_window_prof$cos), pmin(max(sessions_window_prof$coe), window[2]))
       window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
       window_prof_length <- window_prof[2] - window_prof[1] + 1
-
 
       # Separate between flexible sessions or not
       set.seed(1234)

@@ -176,7 +176,7 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
   ## General bounds
   Amat_general <- identityMat
   lb_general <- rep(0, time_slots)
-  ub_general <- roud(LFmax, 2) # To avoid UB < LB for near-zero values
+  ub_general <- round(LFmax, 2) # To avoid UB < LB for near-zero values
 
   ## Shifting bounds
   Amat_cumsum <- cumsumMat

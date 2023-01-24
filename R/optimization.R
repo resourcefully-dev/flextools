@@ -176,7 +176,7 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
   ## General bounds
   Amat_general <- identityMat
   lb_general <- rep(0, time_slots)
-  ub_general <- round(LFmax, 2) # To avoid UB < LB for near-zero values
+  ub_general <- LFmax
 
   ## Shifting bounds
   Amat_cumsum <- cumsumMat
@@ -219,8 +219,8 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- round(c(lb_general, lb_cumsum, lb_energy), 3)
-  ub <- round(c(ub_general, ub_cumsum, ub_energy), 3)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))

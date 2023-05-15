@@ -12,7 +12,9 @@ minimize_grid_flow_window_osqp(
   direction = "forward",
   time_horizon = NULL,
   only_above_G = FALSE,
-  up_to_G = FALSE
+  up_to_G = FALSE,
+  min_demand = NULL,
+  grid_capacity = NULL
 )
 }
 \arguments{
@@ -32,6 +34,10 @@ minimize_grid_flow_window_osqp(
 If all demand is lower than Generation the optimization is skipped.}
 
 \item{up_to_G}{logical, limit the flexible load up to Generation.}
+
+\item{min_demand}{numeric, minimum optimized demand}
+
+\item{grid_capacity}{numeric, grid maximum power capacity that will limit the maximum optimized demand}
 }
 \value{
 numeric vector

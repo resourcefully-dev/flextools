@@ -17,7 +17,8 @@ smart_charging(
   power_th = 0,
   include_log = FALSE,
   charging_power_min = 3.7,
-  charging_minutes_min = 30
+  charging_minutes_min = 30,
+  grid_capacity = NULL
 )
 }
 \arguments{
@@ -53,6 +54,8 @@ If all demand is lower than Generation the optimization is skipped.}
 \item{charging_power_min}{numeric, minimum power to charge vehicles using curtailment method}
 
 \item{charging_minutes_min}{integer, minimum time (in minutes) that the vehicle must be charging before interruptions}
+
+\item{grid_capacity}{numeric, grid maximum power capacity that will limit the aggregated optimized demand}
 }
 \value{
 a list with two elements: optimization setpoints and coordinated sessions schedule

@@ -45,6 +45,8 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
 #' @param window_length integer, window length in time slots (not hours). If `NULL`, the window length will be the length of `G`
 #' @param flex_window_length integer, flexibility window length in time slots (not hours).
 #' This optional feature lets you apply flexibility only during few hours from the start of the window.
+#' @param min_demand numeric, minimum optimized demand
+#' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @return numeric vector
 #' @export
@@ -53,7 +55,7 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
 #' @importFrom purrr map2
 #' @importFrom rlang .data
 #'
-minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_horizon = NULL, up_to_G = TRUE, window_length = NULL, flex_window_length = window_length) {
+minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_horizon = NULL, up_to_G = TRUE, window_length = NULL, flex_window_length = window_length, min_demand = NULL, grid_capacity = NULL) {
   # Parameters check
   if (w == 0) {
     return( LF )
@@ -98,7 +100,8 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
   for (window_idxs in flex_windows_idxs$flex_idx) {
     O_window <- minimize_grid_flow_window_osqp(
       w = w, G = G[window_idxs], LF = LF[window_idxs], LS = LS[window_idxs],
-      direction = direction, time_horizon = time_horizon, up_to_G = up_to_G
+      direction = direction, time_horizon = time_horizon, up_to_G = up_to_G,
+      min_demand = min_demand, grid_capacity = grid_capacity
     )
     O[window_idxs] <- O_window
   }
@@ -119,12 +122,14 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
 #' @param only_above_G logical, optimize only the part of flexible load that surpasses Generation.
 #' If all demand is lower than Generation the optimization is skipped.
 #' @param up_to_G logical, limit the flexible load up to Generation.
+#' @param min_demand numeric, minimum optimized demand
+#' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @return numeric vector
 #'
 #' @importFrom osqp osqp osqpSettings
 #'
-minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "forward", time_horizon = NULL, only_above_G = FALSE, up_to_G = FALSE) {
+minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "forward", time_horizon = NULL, only_above_G = FALSE, up_to_G = FALSE, min_demand = NULL, grid_capacity = NULL) {
 
   if (is.null(time_horizon)) {
     time_horizon <- length(G)
@@ -158,7 +163,12 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
   time_slots <- length(LF)
   E <- sum(LF)
   # Upper limit for optimal LF
-  grid_limit <- rep(max(G+LF+LS)*10, time_slots) # No limit by default
+  if (is.null(grid_capacity)) {
+    grid_limit <- rep(max(G+LF+LS)*10, time_slots) # No limit by default
+  } else {
+    grid_limit <- grid_capacity
+  }
+
   if (up_to_G) {
     grid_limit[G > (LS + LF)] <- 0
   }
@@ -175,7 +185,11 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
   # Lower and upper bounds
   ## General bounds
   Amat_general <- identityMat
-  lb_general <- rep(0, time_slots)
+  if (is.null(min_demand)) {
+    lb_general <- rep(0, time_slots)
+  } else {
+    lb_general <- rep(min_demand, time_slots)
+  }
   ub_general <- LFmax
 
   ## Shifting bounds

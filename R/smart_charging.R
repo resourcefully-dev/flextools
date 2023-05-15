@@ -23,6 +23,7 @@
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param charging_power_min numeric, minimum power to charge vehicles using curtailment method
 #' @param charging_minutes_min integer, minimum time (in minutes) that the vehicle must be charging before interruptions
+#' @param grid_capacity numeric, grid maximum power capacity that will limit the aggregated optimized demand
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of
 #' @importFrom lubridate hour minute date
@@ -34,7 +35,7 @@
 #'
 smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive,
                            only_above_G = FALSE, up_to_G = FALSE, power_th = 0, include_log = FALSE,
-                           charging_power_min = 3.7, charging_minutes_min = 30) {
+                           charging_power_min = 3.7, charging_minutes_min = 30, grid_capacity = NULL) {
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {
     message("sessions object is empty.")
@@ -126,11 +127,10 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
       sessions_window_prof$f[sessions_window_prof$che >= (window[2]+1)] <- 0
 
       # Re-define window to profile's connection window
-      # # Find the End time for at least 75% of sessions
+      # # Find the End time for at least 95% of sessions
       # ss_ecdf <- ecdf(sessions_window_prof$coe)
-      # ss_coe_75 <- pmin(as.integer(quantile(ss_ecdf)[4]), window[2])
-      # # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
-      # # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.9][1] # For the 90%
+      # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
+      # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.95][1]
       # window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
       window_prof <- c(min(sessions_window_prof$cos), pmin(max(sessions_window_prof$coe), window[2]+1))
       window_prof_idxs <- (fitting_data_norm$timeslot >= window_prof[1]) & (fitting_data_norm$timeslot <= window_prof[2])
@@ -189,7 +189,9 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
           direction = 'forward',
           time_horizon = NULL,
           only_above_G = only_above_G,
-          up_to_G = up_to_G
+          up_to_G = up_to_G,
+          min_demand = max(sessions_window_prof_flex$p),
+          grid_capacity = grid_capacity
         )
         setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
       }

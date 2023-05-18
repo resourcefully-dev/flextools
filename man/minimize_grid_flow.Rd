@@ -14,7 +14,6 @@ minimize_grid_flow(
   up_to_G = TRUE,
   window_length = NULL,
   flex_window_length = window_length,
-  min_demand = NULL,
   grid_capacity = NULL
 )
 }
@@ -37,8 +36,6 @@ minimize_grid_flow(
 
 \item{flex_window_length}{integer, flexibility window length in time slots (not hours).
 This optional feature lets you apply flexibility only during few hours from the start of the window.}
-
-\item{min_demand}{numeric, minimum optimized demand}
 
 \item{grid_capacity}{numeric, grid maximum power capacity that will limit the maximum optimized demand}
 }

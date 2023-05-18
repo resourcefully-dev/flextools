@@ -95,8 +95,11 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     if (nrow(sessions_window) == 0) next
 
     # Window's features
+    # Find most common time-cycle in this window
     window_timecycle <- names(sort(table(sessions_window$Timecycle), decreasing = TRUE))[1]
+    # Responsiveness of the user profiles in this time-cycle
     window_responsive <- responsive[[window_timecycle]]
+    # Optimization weights of the user profiles in this time-cycle
     window_opt_weights <- opt_weights[[window_timecycle]]
 
     # Profiles subjected to optimization:
@@ -190,7 +193,6 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
           time_horizon = NULL,
           only_above_G = only_above_G,
           up_to_G = up_to_G,
-          min_demand = max(sessions_window_prof_flex$p),
           grid_capacity = grid_capacity
         )
         setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof

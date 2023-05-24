@@ -4,18 +4,12 @@
 \alias{adapt_dttm_seq_to_opt_windows}
 \title{Cut the dateteime sequence according to the optimizion window start hour and length}
 \usage{
-adapt_dttm_seq_to_opt_windows(
-  dttm_seq_original,
-  window_start_hour,
-  window_length
-)
+adapt_dttm_seq_to_opt_windows(dttm_seq, window_start_hour)
 }
 \arguments{
-\item{dttm_seq_original}{datetime sequence of the original timeseries data}
+\item{dttm_seq}{datetime sequence of the original timeseries data}
 
 \item{window_start_hour}{integer, hour to start the optimization window}
-
-\item{window_length}{integer, number of data points of the optimization window (not in hours)}
 }
 \value{
 datetime sequence

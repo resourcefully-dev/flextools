@@ -32,7 +32,11 @@ minimize_grid_flow(
 
 \item{up_to_G}{logical, whether to limit the flexible EV demand up to renewable Generation}
 
-\item{window_length}{integer, window length in time slots (not hours). If \code{NULL}, the window length will be the length of \code{G}}
+\item{window_length}{integer, window length in time slots (not hours).
+If \code{NULL}, the window length will be the length of \code{G}.
+It can also be an integer vector, specifying a specific length for every
+window along the length of \code{G}. In that case, the sum of all vector values
+must be equal to the length of \code{G}.}
 
 \item{flex_window_length}{integer, flexibility window length in time slots (not hours).
 This optional feature lets you apply flexibility only during few hours from the start of the window.}

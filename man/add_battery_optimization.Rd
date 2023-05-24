@@ -36,7 +36,11 @@ add_battery_optimization(
 
 \item{SOCini}{numeric, required State-of-Charge at the beginning/end of optimization window}
 
-\item{window_length}{integer, window length. If \code{NULL}, the window length will be the length of \code{G}}
+\item{window_length}{integer, window length in time slots (not hours).
+If \code{NULL}, the window length will be the length of \code{G}.
+It can also be an integer vector, specifying a specific length for every
+window along the length of \code{G}. In that case, the sum of all vector values
+must be equal to the length of \code{G}.}
 }
 \value{
 numeric vector

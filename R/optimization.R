@@ -31,6 +31,25 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
   return(dttm_seq)
 }
 
+
+
+get_optimization_windows <- function(dttm_seq, window_start_hour) {
+  windows_start_idx <- which(
+    (lubridate::hour(dttm_seq) == window_start_hour) &
+      (lubridate::minute(dttm_seq) == 0)
+  )
+  windows_length <- dplyr::lead(windows_start_idx) - windows_start_idx
+  windows_length[is.na(windows_length)] <- windows_length[1] # Fill NA produced by `lead`
+  dplyr::tibble(
+    start = windows_start_idx,
+    end = windows_start_idx + windows_length - 1,
+    length = windows_length
+  )
+}
+
+
+
+
 # Optimization of load ------------------------------------------------------------
 
 #' Minimization of the grid flow
@@ -42,7 +61,11 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param up_to_G logical, whether to limit the flexible EV demand up to renewable Generation
-#' @param window_length integer, window length in time slots (not hours). If `NULL`, the window length will be the length of `G`
+#' @param window_length integer, window length in time slots (not hours).
+#' If `NULL`, the window length will be the length of `G`.
+#' It can also be an integer vector, specifying a specific length for every
+#' window along the length of `G`. In that case, the sum of all vector values
+#' must be equal to the length of `G`.
 #' @param flex_window_length integer, flexibility window length in time slots (not hours).
 #' This optional feature lets you apply flexibility only during few hours from the start of the window.
 #' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
@@ -54,13 +77,14 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq_original, window_start_hour, 
 #' @importFrom purrr map2
 #' @importFrom rlang .data
 #'
-minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_horizon = NULL, up_to_G = TRUE, window_length = NULL, flex_window_length = window_length, grid_capacity = NULL) {
+minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_horizon = NULL, up_to_G = TRUE,
+                               window_length = NULL, flex_window_length = window_length, grid_capacity = NULL) {
   # Parameters check
   if (w == 0) {
     return( LF )
   }
   if (w > 1) {
-    message("Error: Objective must be lower or equal to 1.")
+    message("Error: optimization objective `w` must be lower or equal to 1.")
     return( NULL )
   }
 
@@ -69,28 +93,41 @@ minimize_grid_flow <- function(w, G, LF, LS = NULL, direction = 'forward', time_
   }
 
   if (!((length(G) == length(LS)) & (length(LS) == length(LF)))) {
-    message("Error: G, LS and LF must have same length.")
+    message("Error: `G`, `LS` and `LF` must have same length.")
     message(paste0("Lengths: G=", length(G), ", LS=", length(LS), ", LF=", length(LF)))
     return( NULL )
   }
 
   if (((direction != 'forward') & (direction != 'backward'))) {
-    message("Error: Direction must be 'forward' or 'backward'")
-    return( NULL )
-  }
-
-  if (((length(G)/window_length) %% 1) > 0) {
-    message("Error: The length of vector G must be multiple of window_length")
+    message("Error: `direction` must be 'forward' or 'backward'")
     return( NULL )
   }
 
   if (is.null(window_length)) {
     window_length <- length(G)
     flex_window_length <- window_length
+  } else {
+    if (length(window_length) == 1) {
+      if (((length(G)/window_length) %% 1) > 0) {
+        message("Error: The length of vector `G` must be multiple of `window_length`")
+        return( NULL )
+      }
+    } else {
+      if (sum(window_length) != length(G)) {
+        message("Error: The length of vector `G` must be equal to the sum of vector `window_length`")
+        return( NULL )
+      }
+    }
+  }
+
+  if (length(window_length) == 1) {
+    windows_length <- rep(window_length, times = length(G)/window_length)
+  } else {
+    windows_length <- window_length
   }
 
   flex_windows_idxs <- tibble(
-    flex_start = seq(1, length(G), window_length),
+    flex_start = cumsum(c(1, windows_length))[seq_len(length(windows_length))],
     flex_end = .data$flex_start + flex_window_length - 1,
     flex_idx = map2(.data$flex_start, .data$flex_end, ~ seq(.x, .y))
   )
@@ -251,7 +288,11 @@ minimize_grid_flow_window_osqp <- function (w, G, LF, LS = NULL, direction = "fo
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param window_length integer, window length. If `NULL`, the window length will be the length of `G`
+#' @param window_length integer, window length in time slots (not hours).
+#' If `NULL`, the window length will be the length of `G`.
+#' It can also be an integer vector, specifying a specific length for every
+#' window along the length of `G`. In that case, the sum of all vector values
+#' must be equal to the length of `G`.
 #'
 #' @return numeric vector
 #' @export
@@ -265,12 +306,12 @@ add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax =
     return( rep(0, length(G)) )
   }
   if (w > 1) {
-    message("Error: Objective must be lower of equal to 1.")
+    message("Error: optimization objective `w` must be lower of equal to 1.")
     return( NULL )
   }
 
   if (!(length(G) == length(L))) {
-    message("Error: G and L must have same length.")
+    message("Error: `G` and `L` must have same length.")
     message(paste0("Lengths: G=", length(G), ", L=", length(L)))
     return( NULL )
   }
@@ -287,10 +328,33 @@ add_battery_optimization <- function(w, G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax =
 
   if (is.null(window_length)) {
     window_length <- length(G)
+  } else {
+    if (length(window_length) == 1) {
+      if (((length(G)/window_length) %% 1) > 0) {
+        message("Error: The length of vector `G` must be multiple of `window_length`")
+        return( NULL )
+      }
+    } else {
+      if (sum(window_length) != length(G)) {
+        message("Error: The length of vector `G` must be equal to the sum of vector `window_length`")
+        return( NULL )
+      }
+    }
   }
 
+  if (length(window_length) == 1) {
+    windows_length <- rep(window_length, times = length(G)/window_length)
+  } else {
+    windows_length <- window_length
+  }
+
+  windows_idxs <- unlist(map(
+    seq_len(length(windows_length)),
+    ~ rep(.x, times = windows_length[.x])
+  ))
+
   B <- tibble(G, L) %>%
-    split(rep(1:(length(G)/window_length), each = window_length)) %>%
+    split(windows_idxs) %>%
     map(
       ~ add_battery_window(
         w = w, G = .x$G, L = .x$L, Bcap = Bcap, Bc = Bc, Bd = Bd,

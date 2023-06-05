@@ -43,7 +43,7 @@ get_optimization_windows <- function(dttm_seq, window_start_hour) {
     end = windows_start_idx + windows_length - 1,
     length = windows_length
   ) %>%
-    dplyr::filter(.data$end < length(dttm_seq))
+    dplyr::filter(.data$end <= length(dttm_seq))
 }
 
 

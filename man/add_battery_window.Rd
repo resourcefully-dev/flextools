@@ -4,11 +4,9 @@
 \alias{add_battery_window}
 \title{Battery optimal charging/discharging profile (just a window)}
 \usage{
-add_battery_window(w, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini)
+add_battery_window(G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini)
 }
 \arguments{
-\item{w}{numeric between \code{0} and \code{1}, being the weight of the flexibility potential}
-
 \item{G}{numeric vector, being the renewable generation profile}
 
 \item{L}{numeric vector, being the load profile}

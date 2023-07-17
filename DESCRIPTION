@@ -7,9 +7,10 @@ Authors@R:
            role = c("aut", "cre"),
            email = "marc.canigueral@udg.edu",
            comment = c(ORCID = "https://orcid.org/0000-0001-9724-5829"))
-Description: This package provides the necessary tools to simulate demand-response scenarios regarding
-	electric vehicles flexibility, heat pumps and batteries. The EV sessions coordination algorithm 
-	is based on the user profile concept raised by package {evprof}.
+Description: This R package provides the necessary tools to simulate 
+  demand-response scenarios regarding electric vehicles flexibility,
+  batteries or any time-series power demand profile, using Linear and
+  Quadratic Optimization methods.
 License: GPL-3
 Encoding: UTF-8
 LazyData: true
@@ -23,7 +24,10 @@ Imports:
     dtplyr,
     lubridate,
     rlang,
-    osqp,
     tidyr,
     purrr,
+    ROI,
     Matrix
+Suggests:
+    ROI.plugin.lpsolve,
+    ROI.plugin.osqp

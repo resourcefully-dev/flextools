@@ -12,8 +12,6 @@
 #' If `none`, the scheduling part is skipped and the sessions returned in the results will be identical to the original parameter.
 #' @param window_length integer, number of data points of the optimization window (not in hours)
 #' @param window_start_hour integer, hour to start the optimization window. If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
-#' @param opt_weights Named list with the optimization weight `w` of the `minimize_grid_flow` function.
-#' The names of the list must exactly match the Time-cycle and User profiles names, for example: list(Monday = list(Worktime = 1, Shortstay = 0.1))
 #' @param responsive Named two-layer list with the ratio of sessions responsive to smart charging program.
 #' The names of the list must exactly match the Time-cycle and User profiles names, for example: list(Monday = list(Worktime = 1, Shortstay = 0.1))
 #' @param only_above_G logical, optimize only the part of flexible load that surpasses Generation.
@@ -33,9 +31,10 @@
 #' @return a list with two elements: optimization setpoints and coordinated sessions schedule
 #' @export
 #'
-smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, opt_weights, responsive,
+smart_charging <- function(sessions, fitting_data, method, window_length, window_start_hour, responsive,
                            only_above_G = FALSE, up_to_G = FALSE, power_th = 0, include_log = FALSE,
                            charging_power_min = 3.7, charging_minutes_min = 30, grid_capacity = NULL) {
+
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {
     message("sessions object is empty.")
@@ -99,17 +98,13 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
     window_timecycle <- names(sort(table(sessions_window$Timecycle), decreasing = TRUE))[1]
     # Responsiveness of the user profiles in this time-cycle
     window_responsive <- responsive[[window_timecycle]]
-    # Optimization weights of the user profiles in this time-cycle
-    window_opt_weights <- opt_weights[[window_timecycle]]
 
     # Profiles subjected to optimization:
     #   1. appearing in the sessions set for this optimization window
     #   2. responsive values higher than 0
-    #   3. optimization weight higher than 0
     opt_profiles <- names(window_responsive)[
       (names(window_responsive) %in% unique(sessions_window$Profile)) &
-        (names(window_responsive) %in% names(window_responsive)[as.numeric(window_responsive) > 0]) &
-        (names(window_responsive) %in% names(window_opt_weights)[as.numeric(window_opt_weights) > 0])
+        (names(window_responsive) %in% names(window_responsive)[as.numeric(window_responsive) > 0])
     ]
 
     # For each optimization profile
@@ -184,15 +179,12 @@ smart_charging <- function(sessions, fitting_data, method, window_length, window
         L_prof <- setpoints[[profile]][window_prof_idxs] - L_fixed_prof
 
         # Optimize the flexible profile's load
-        O <- minimize_grid_flow_window_osqp(
-          w = window_opt_weights[[profile]],
+        O <- minimize_grid_flow_window(
           G = fitting_data_norm$solar[window_prof_idxs],
           LF = L_prof,
           LS = L_fixed + L_others + L_fixed_prof,
           direction = 'forward',
           time_horizon = NULL,
-          only_above_G = only_above_G,
-          up_to_G = up_to_G,
           grid_capacity = grid_capacity
         )
         setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof

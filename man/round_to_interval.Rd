@@ -11,9 +11,7 @@ round_to_interval(dbl, interval)
 
 \item{interval}{decimal interval (from 0 to 1)}
 }
-\value{
-dbl
-}
 \description{
 Round a numeric value to interval
 }
+\keyword{internal}

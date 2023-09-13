@@ -25,10 +25,11 @@ minimize_grid_flow(
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 
-\item{time_horizon}{integer, maximum number of positions to shift energy from}
+\item{time_horizon}{integer, maximum number of positions to shift energy from.
+If \code{NULL}, the \code{time_horizon} will be the length of \code{G}, \code{LF}, and \code{LS} (it must be the same)}
 
 \item{window_length}{integer, window length in time slots (not hours).
-If \code{NULL}, the window length will be the length of \code{G}, \code{LF}, and \code{LS} (it must be the same)
+If \code{NULL}, the \code{window_length} will be the length of \code{G}, \code{LF}, and \code{LS} (it must be the same)
 It can also be an integer vector, specifying a specific length for every
 window along the length of \code{G}. In that case, the sum of all vector values
 must be equal to the length of \code{G}.}

@@ -151,9 +151,10 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' @param LF numeric vector, being the flexible load profile
 #' @param LS numeric vector, being the static load profile
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
-#' @param time_horizon integer, maximum number of positions to shift energy from
+#' @param time_horizon integer, maximum number of positions to shift energy from.
+#'  If `NULL`, the `time_horizon` will be the length of `G`, `LF`, and `LS` (it must be the same)
 #' @param window_length integer, window length in time slots (not hours).
-#' If `NULL`, the window length will be the length of `G`, `LF`, and `LS` (it must be the same)
+#' If `NULL`, the `window_length` will be the length of `G`, `LF`, and `LS` (it must be the same)
 #' It can also be an integer vector, specifying a specific length for every
 #' window along the length of `G`. In that case, the sum of all vector values
 #' must be equal to the length of `G`.
@@ -210,6 +211,8 @@ minimize_grid_flow <- function(G, LF, LS = NULL, direction = 'forward', time_hor
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, maximum power value for the optimal `LF`
 #' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
+#'
+#' @import ROI.plugin.osqp
 #'
 #' @return numeric vector
 #'
@@ -346,6 +349,7 @@ minimize_cost <- function(G, LF, LS = NULL, PI, PE,
   for (window_idxs in flex_windows_idxs$flex_idx) {
     O_window <- minimize_cost_window(
       G = G[window_idxs], LF = LF[window_idxs], LS = LS[window_idxs],
+      PI = PI[window_idxs], PE = PE[window_idxs],
       direction = direction, time_horizon = time_horizon,
       LFmax = LFmax, grid_capacity = grid_capacity
     )
@@ -367,6 +371,8 @@ minimize_cost <- function(G, LF, LS = NULL, PI, PE,
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, value of maximum power of the load
 #' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
+#'
+#' @import ROI.plugin.lpsolve
 #'
 #' @return numeric vector
 #'

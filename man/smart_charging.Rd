@@ -6,55 +6,53 @@
 \usage{
 smart_charging(
   sessions,
-  fitting_data,
+  context_data,
   method,
   window_length,
   window_start_hour,
   responsive,
-  only_above_G = FALSE,
-  up_to_G = FALSE,
   power_th = 0,
+  charging_power_min = 0.5,
+  grid_capacity = Inf,
   include_log = FALSE,
-  charging_power_min = 3.7,
-  charging_minutes_min = 30,
-  grid_capacity = NULL
+  show_progress = TRUE
 )
 }
 \arguments{
 \item{sessions}{tibble, sessions data set}
 
-\item{fitting_data}{tibble, optimization fitting data, first column being \code{datetime}.
+\item{context_data}{tibble, optimization fitting data, first column being \code{datetime}.
 The other columns could be \code{solar} (solar generation) and \code{fixed} (static demand from other sectors like buildings, offices, ...).
 Only sessions starting within the time sequence of column \code{datetime} will be shifted.
 If columns of \code{fitting_data} are user profiles names, these are used as setpoints and no optimization is performed.}
 
-\item{method}{character, smart charging method being \code{none} or \code{postpone}.
+\item{method}{character, smart charging method being \code{none}, \code{postpone}, \code{curtail} or \code{interrupt}.
 If \code{none}, the scheduling part is skipped and the sessions returned in the results will be identical to the original parameter.}
 
 \item{window_length}{integer, number of data points of the optimization window (not in hours)}
 
 \item{window_start_hour}{integer, hour to start the optimization window. If \code{window_start = 6} the EV sessions are optimized from 6:00 to 6:00.}
 
-\item{responsive}{Named two-layer list with the ratio of sessions responsive to smart charging program.
-The names of the list must exactly match the Time-cycle and User profiles names, for example: list(Monday = list(Worktime = 1, Shortstay = 0.1))}
+\item{responsive}{Named two-layer list with the ratio (between 0 and 1) of sessions responsive to smart charging program.
+The names of the list must exactly match the Time-cycle and User profiles names.
+For example: list(Monday = list(Worktime = 1, Shortstay = 0.1))}
 
-\item{only_above_G}{logical, optimize only the part of flexible load that surpasses Generation.
-If all demand is lower than Generation the optimization is skipped.}
+\item{power_th}{numeric, power threshold (between 0 and 1) accepted from setpoint.
+For example, with \code{power_th = 0.1} and \code{setpoint = 100} for a certain time slot,
+then sessions' demand can reach a value of \code{110} without needing to schedule sessions.}
 
-\item{up_to_G}{logical, whether to limit the flexible EV demand up to renewable Generation}
+\item{charging_power_min}{numeric, minimum allowed ratio (between 0 and 1) of nominal power.
+For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
+be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} variable in \code{sessions} tibble).}
 
-\item{power_th}{numeric, power threshold accepted from setpoint, in percentage}
+\item{grid_capacity}{numeric, grid maximum power capacity that will limit the aggregated optimized demand}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
-\item{charging_power_min}{numeric, minimum power to charge vehicles using curtailment method}
-
-\item{charging_minutes_min}{integer, minimum time (in minutes) that the vehicle must be charging before interruptions}
-
-\item{grid_capacity}{numeric, grid maximum power capacity that will limit the aggregated optimized demand}
+\item{show_progress}{logical, whether to output the progress bar in the console}
 }
 \value{
-a list with two elements: optimization setpoints and coordinated sessions schedule
+a list with three elements: optimal setpoints, sessions schedule and log messages.
 }
 \description{
 Smart charging algorithm

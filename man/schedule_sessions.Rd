@@ -5,29 +5,33 @@
 \title{Schedule sessions according to optimal setpoint}
 \usage{
 schedule_sessions(
-  sessions_prof,
-  setpoint_prof,
+  sessions,
+  setpoint,
   method,
   power_th = 0,
-  include_log = F,
-  charging_power_min = 3.7,
-  charging_slots_min = 2
+  charging_power_min = 0.5,
+  include_log = FALSE,
+  show_progress = TRUE
 )
 }
 \arguments{
-\item{sessions_prof}{tibble, sessions data set normalized from \code{normalize_sessions} function}
+\item{sessions}{tibble, sessions data set normalized from \code{normalize_sessions} function}
 
-\item{setpoint_prof}{tibble with columns \code{datetime}, \code{timeslot} and rest of columns being the names of user profiles}
+\item{setpoint}{tibble with columns \code{datetime}, \code{timeslot} and rest of columns being the names of user profiles}
 
-\item{method}{character, being \code{postpone} or \code{curtail}}
+\item{method}{character, being \code{postpone}, \code{curtail} or \code{interrupt}.}
 
-\item{power_th}{numeric, power threshold accepted from setpoint, in percentage}
+\item{power_th}{numeric, power threshold (between 0 and 1) accepted from setpoint.
+For example, with \code{power_th = 0.1} and \code{setpoint = 100} for a certain time slot,
+then sessions' demand can reach a value of \code{110} without needing to schedule sessions.}
+
+\item{charging_power_min}{numeric, minimum allowed ratio (between 0 and 1) of nominal power.
+For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
+be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} variable in \code{sessions} tibble).}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
-\item{charging_power_min}{numeric, minimum power to charge vehicles using curtailment method}
-
-\item{charging_slots_min}{integer, minimum time slots that the vehicle must be charging before interruptions}
+\item{show_progress}{logical, whether to output the progress bar in the console}
 }
 \value{
 list of two elements \code{sessions} and \code{log}

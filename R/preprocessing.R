@@ -35,6 +35,7 @@ convert_time_num_to_period <- function(time_num) {
 #' limited by `ConnectionHours`. Finally, the charging times are also calculated.
 #'
 #' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
+#' (see [this article](https://mcanigueral.github.io/evprof/articles/sessions-format.html))
 #' @param time_resolution integer, time resolution (in minutes) of the sessions' datetime variables
 #' @param power_resolution numeric, power resolution (in kW) of the sessions' power
 #'
@@ -65,6 +66,7 @@ adapt_charging_features <- function (sessions, time_resolution = 15, power_resol
 #' with the corresponding `Power` consumption, among other variables.
 #'
 #' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
+#' (see [this article](https://mcanigueral.github.io/evprof/articles/sessions-format.html))
 #' @param resolution integer, time resolution (in minutes) of the time slots
 #'
 #' @importFrom dplyr  %>% mutate row_number
@@ -91,6 +93,7 @@ expand_sessions <- function(sessions, resolution) {
 #' with the corresponding `Power` consumption, among other variables.
 #'
 #' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
+#' (see [this article](https://mcanigueral.github.io/evprof/articles/sessions-format.html))
 #' @param resolution integer, time resolution (in minutes) of the time slots
 #'
 #' @importFrom dplyr  %>% mutate tibble select all_of
@@ -132,6 +135,7 @@ expand_session <- function(session, resolution) {
 #' Obtain timeseries demand from sessions dataset
 #'
 #' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
+#' (see [this article](https://mcanigueral.github.io/evprof/articles/sessions-format.html))
 #' @param dttm_seq sequence of datetime values that will be the datetime variable of the returned time-series data frame.
 #' This can be an integer sequence as well if `normalized = TRUE`.
 #' @param by character, being 'Profile' or 'Session'. When `by='Profile'` each column corresponds to an EV user profile.
@@ -204,11 +208,11 @@ get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 1
     group_by(!!sym(by), datetime = .data$Timeslot) %>%
     summarise(Power = sum(.data$Power)) %>%
     pivot_wider(names_from = !!sym(by), values_from = 'Power', values_fill = 0) %>%
-    arrange(.data$datetime) %>%
     right_join(
       tibble(datetime = dttm_seq),
       by = 'datetime'
-    )
+    ) %>%
+    arrange(.data$datetime)
 
   return( replace(demand, is.na(demand), 0) )
 }

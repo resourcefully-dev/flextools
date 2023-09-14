@@ -160,8 +160,8 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' must be equal to the length of `G`.
 #' @param flex_window_length integer, flexibility window length in time slots (not hours).
 #' This optional feature lets you apply flexibility only during few hours from the start of the window.
-#' @param LFmax numeric, maximum power value for the optimal `LF`
-#' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
+#' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
+#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @return numeric vector
 #' @export
@@ -209,8 +209,8 @@ minimize_grid_flow <- function(G, LF, LS = NULL, direction = 'forward', time_hor
 #' @param LS numeric vector, being the static load profile
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
-#' @param LFmax numeric, maximum power value for the optimal `LF`
-#' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
+#' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
+#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @import ROI.plugin.osqp
 #'
@@ -316,8 +316,8 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' must be equal to the length of `G`.
 #' @param flex_window_length integer, flexibility window length in time slots (not hours).
 #' This optional feature lets you apply flexibility only during few hours from the start of the window.
-#' @param LFmax numeric, maximum power value for the optimal `LF`
-#' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
+#' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
+#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @return numeric vector
 #' @export
@@ -369,8 +369,8 @@ minimize_cost <- function(G, LF, LS = NULL, PI, PE,
 #' @param PE numeric vector, electricity prices for exported energy
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
-#' @param LFmax numeric, value of maximum power of the load
-#' @param grid_capacity numeric, grid maximum power capacity that will limit the maximum optimized demand
+#' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
+#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @import ROI.plugin.lpsolve
 #'

@@ -9,7 +9,8 @@ expand_session(session, resolution)
 \arguments{
 \item{resolution}{integer, time resolution (in minutes) of the time slots}
 
-\item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package}
+\item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package
+(see \href{https://mcanigueral.github.io/evprof/articles/sessions-format.html}{this article})}
 }
 \value{
 tibble

@@ -31,9 +31,9 @@ minimize_cost_window(
 
 \item{time_horizon}{integer, maximum number of positions to shift energy from}
 
-\item{LFmax}{numeric, value of maximum power of the load}
+\item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 
-\item{grid_capacity}{numeric, grid maximum power capacity that will limit the maximum optimized demand}
+\item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
 }
 \value{
 numeric vector

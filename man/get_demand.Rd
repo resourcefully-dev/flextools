@@ -7,7 +7,8 @@
 get_demand(sessions, dttm_seq = NULL, by = "Profile", resolution = 15)
 }
 \arguments{
-\item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package}
+\item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package
+(see \href{https://mcanigueral.github.io/evprof/articles/sessions-format.html}{this article})}
 
 \item{dttm_seq}{sequence of datetime values that will be the datetime variable of the returned time-series data frame.
 This can be an integer sequence as well if \code{normalized = TRUE}.}

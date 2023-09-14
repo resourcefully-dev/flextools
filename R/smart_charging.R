@@ -3,16 +3,44 @@
 
 #' Smart charging algorithm
 #'
-#' @param sessions tibble, sessions data set
-#' @param context_data tibble, optimization fitting data, first column being `datetime`.
-#' The other columns could be `solar` (solar generation) and `fixed` (static demand from other sectors like buildings, offices, ...).
-#' Only sessions starting within the time sequence of column `datetime` will be shifted.
-#' If columns of `fitting_data` are user profiles names, these are used as setpoints and no optimization is performed.
-#' @param method character, smart charging method being `none`, `postpone`, `curtail` or `interrupt`.
-#' If `none`, the scheduling part is skipped and the sessions returned in the results will be identical to the original parameter.
+#' @param sessions tibble, sessions data set in standard format marked by `{evprof}` package
+#' (see [this article](https://mcanigueral.github.io/evprof/articles/sessions-format.html))
+#' @param opt_data tibble, optimization contextual data.
+#' The first column must be named `datetime` (mandatory) containing the
+#' date time sequence where the smart charging algorithm is applied, so
+#' only sessions starting within the time sequence of column `datetime`
+#' will be optimized.
+#' The other columns can be:
+#'
+#' - `static`: static power demand (in kW) from other sectors like buildings,
+#' offices, etc.
+#'
+#' - `grid_capacity`: maximum imported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
+#' - `solar`: solar power generation (in kW).
+#' This is used when `opt_objective = "grid"`.
+#'
+#'
+#' - `price_imported`: price for imported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_exported`: price for exported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' If columns of `opt_data` are user profiles names, these are used as setpoints
+#' and no optimization is performed for the corresponding user profiles.
+#'
+#' @param opt_objective character, optimization objective being `"none"`, `"grid"` or `"cost"`.
+#' See details section for more information about the different objectives.
+#' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
+#' If `none`, the scheduling part is skipped and the sessions returned in the
+#' results will be identical to the original parameter.
 #' @param window_length integer, number of data points of the optimization window (not in hours)
-#' @param window_start_hour integer, hour to start the optimization window. If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
-#' @param responsive Named two-layer list with the ratio (between 0 and 1) of sessions responsive to smart charging program.
+#' @param window_start_hour integer, hour to start the optimization window.
+#' If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
+#' @param responsive Named two-layer list with the ratio (between 0 and 1)
+#'  of sessions responsive to smart charging program.
 #' The names of the list must exactly match the Time-cycle and User profiles names.
 #' For example: list(Monday = list(Worktime = 1, Shortstay = 0.1))
 #' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
@@ -21,7 +49,6 @@
 #' @param charging_power_min numeric, minimum allowed ratio (between 0 and 1) of nominal power.
 #' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
 #' be curtailed until the 50% of the nominal charging power (i.e. `Power` variable in `sessions` tibble).
-#' @param grid_capacity numeric, grid maximum power capacity that will limit the aggregated optimized demand
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
 #'
@@ -33,8 +60,78 @@
 #' @return a list with three elements: optimal setpoints, sessions schedule and log messages.
 #' @export
 #'
-smart_charging <- function(sessions, context_data, method, window_length, window_start_hour, responsive,
-                           power_th = 0, charging_power_min = 0.5, grid_capacity = Inf,
+#' @details
+#' An important parameter of this function is `opt_data`, which defines the time
+#' sequence of the smart charging algorithm and the optimization variables.
+#' The `opt_data` parameter is directly related with the `opt_objective` parameter.
+#' There are two different optimization objectives implemented by this function:
+#'
+#' - Minimize grid interaction (`opt_objective = "grid"`): performs a quadratic
+#' optimization to minimize the peak of the flexible load and the amount of
+#' imported power from the grid. If `solar` is not found in `opt_data`, only
+#' a peak shaving objective will be considered.
+#'
+#' - Minimize the energy cost (`opt_objective = "cost"`): performs a linear
+#' optimization to minimize the energy cost. In this case, the columns
+#' `grid_capacity`, `price_imported` and `price_exported` of tibble `opt_data`
+#' are important.
+#' If these variables are not configured, default values of `grid_capacity = Inf`,
+#' `price_imported = 1` and `price_exported = 0` are considered to minimize the
+#' imported energy.
+#' For this linear optimization the `grid_capacity` should be configured since
+#' all possible power will be allocated in the time slots with lower prices.
+#'
+#' - No optimization (`opt_objective = "none"`): this will skip optimization.
+#' If a user profile name appears in `opt_data` columns, then this will be
+#' considered as a setpoint for the scheduling algorithm. If not, then this
+#' user profile will not be optimized.
+#'
+#' @examples
+#' # Example: we will use the example data set of charging sessions
+#' # from the California Technological Institute (Caltech), obtained
+#' # through the [ACN-Data website](https://ev.caltech.edu/dataset).
+#' # This data set has been clustered into different user profiles
+#' # using the R package `{evprof}`
+#' # (see [this article](https://mcanigueral.github.io/evprof/articles/california.html)).
+#' # The user profiles of this data set are `Visit` and `Worktime`,
+#' # identified in two different time cycles `Workday` and `Weekend`.
+#'
+#' # These two variables in the `sessions` tibble, `Profile` and `Timecycle`,
+#' # are required for the `smart_charging` function and give more versatility
+#' # to the smart charging context. For example, we may want to only coordinate
+#' # `Worktime` sessions instead of all sessions.
+#'
+#' # For this example we want the following:
+#'
+#' # - Postpone only `Worktime` sessions, which have a responsiveness rate of
+#' # 0.9 (i.e. 90% of Worktime users accept to postpone the session).
+#'
+#' # - Minimize the power peak of the sessions (peak shaving)
+#'
+#' # - Time series resolution of 15 minutes
+#'
+#' # - Optimization window of 24 hours from 6:00AM to 6:00 AM
+#'
+#' \dontrun{
+#' sessions <- evsim::california_ev_sessions_profiles
+#' sessions_demand <- get_demand(sessions, resolution = 15)
+#'
+#' # Don't require any other variable than datetime, since we don't
+#' # care about solar generation (just peak shaving objective)
+#' opt_data <- tibble(
+#'   datetime = sessions_demand$datetime
+#' )
+#' smart_charging(
+#'   sessions, opt_data, opt_objective = "grid", method = "postpone",
+#'   window_length = 24*60/15, window_start_hour = 6,
+#'   responsive = list(Workday = list(Worktime = 0.9))
+#' )
+#' }
+#'
+#'
+smart_charging <- function(sessions, opt_data, opt_objective, method,
+                           window_length, window_start_hour, responsive,
+                           power_th = 0, charging_power_min = 0.5,
                            include_log = FALSE, show_progress = TRUE) {
 
   # Check input sessions
@@ -43,10 +140,35 @@ smart_charging <- function(sessions, context_data, method, window_length, window
     return(NULL)
   }
 
+  # Check optimization data available
+  if (!("static" %in% names(opt_data))) {
+    opt_data$static <- 0
+  }
+  if (!("grid_capacity" %in% names(opt_data))) {
+    opt_data$grid_capacity <- Inf
+  }
+  if (opt_objective == "grid") {
+    if (!("solar" %in% names(opt_data))) {
+      message("Warning: `solar` variable not found in `opt_data`.
+              No local genaration will be considered.")
+      opt_data$solar <- 0
+    }
+  }
+  if (opt_objective == "cost") {
+    if (!("price_imported" %in% names(opt_data))) {
+      message("Warning: `price_imported` variable not found in `opt_data`.")
+      opt_data$price_imported <- 1
+    }
+    if (!("price_exported" %in% names(opt_data))) {
+      message("Warning: `price_exported` variable not found in `opt_data`.")
+      opt_data$price_exported <- 0
+    }
+  }
+
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
   window_start_hour <- as.integer(window_start_hour)
-  dttm_seq <- adapt_dttm_seq_to_opt_windows(context_data$datetime, window_start_hour)
+  dttm_seq <- adapt_dttm_seq_to_opt_windows(opt_data$datetime, window_start_hour)
   time_resolution <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
   start <- dttm_seq[1]
   end <- dttm_seq[length(dttm_seq)]
@@ -62,24 +184,20 @@ smart_charging <- function(sessions, context_data, method, window_length, window
     sessions, dttm_seq, resolution = time_resolution
   )
 
+  # Initialize setpoints tibble with the user profiles demand
+  setpoints <- profiles_demand
+
   # Filter context data within date time sequence
-  context_data <- context_data %>%
+  opt_data <- opt_data %>%
     filter(.data$datetime %in% dttm_seq)
+
+
 
 
   # SMART CHARGING ----------------------------------------------------------
   if (include_log) message("Smart charging:")
 
   log <- list()
-
-  # If context data contains user profile's name this is considered to be a setpoint (skip optimization)
-  if (any(colnames(profiles_demand[-1]) %in% colnames(context_data[-1]))) {
-    do_opt <- FALSE
-    setpoints <- context_data
-  } else {
-    do_opt <- TRUE
-    setpoints <- profiles_demand
-  }
 
 
   # For each optimization window
@@ -178,55 +296,79 @@ smart_charging <- function(sessions, context_data, method, window_length, window
       non_flexible_sessions <- sessions_window_prof %>%
         filter(!.data$Responsive | .data$Flexibility < time_resolution/60)
 
-
-      # SETPOINTS ----------------------------------------------------------
       #   Profile sessions that can't provide flexibility are not part of the setpoint
       if (nrow(non_flexible_sessions) > 0) {
         L_fixed_prof <- non_flexible_sessions %>%
-          mutate(Profile = "demand") %>%
-          get_demand(
-            dttm_seq = dttm_seq[window_prof_idxs]
-          ) %>%
-          pull(.data$demand)
+          get_demand(dttm_seq = dttm_seq[window_prof_idxs]) %>%
+          pull(!!sym(profile))
       } else {
         L_fixed_prof <- rep(0, window_prof_length)
       }
 
-      # OPTIMIZATION (if required)
-      if (do_opt) {
 
-        if (include_log) message("------ Optimization")
+      # OPTIMIZATION  ----------------------------------------------------------
 
-        # The optimization static load consists on:
-        #   - Environment fixed load (buildings, lightning, etc)
-        if ('fixed' %in% colnames(context_data)) {
-          L_fixed <- context_data$fixed[window_prof_idxs]
+      if (opt_objective != "none") {
+
+        # If `opt_data` contains user profile's name,
+        # this is considered to be a setpoint (skip optimization)
+        if (!(profile %in% colnames(opt_data[-1]))) {
+
+          if (include_log) message("------ Optimization")
+
+          # The optimization static load consists on:
+          #   - Environment fixed load (buildings, lightning, etc)
+          if ('fixed' %in% colnames(opt_data)) {
+            L_fixed <- opt_data$static[window_prof_idxs]
+          } else {
+            L_fixed <- rep(0, window_prof_length)
+          }
+          #   - Other profiles load
+          L_others <- setpoints %>%
+            filter(window_prof_idxs) %>%
+            select(- any_of(c(profile, 'datetime'))) %>%
+            rowSums()
+          if (length(L_others) == 0) {
+            L_others <- rep(0, window_prof_length)
+          }
+          # The optimization flexible load is the load of the responsive sessions
+          L_prof <- setpoints[[profile]][window_prof_idxs] - L_fixed_prof
+
+          # Optimize the flexible profile's load according to `opt_objective`
+          if (opt_objective == "grid") {
+            O <- minimize_grid_flow_window(
+              G = opt_data$solar[window_prof_idxs],
+              LF = L_prof,
+              LS = L_fixed + L_others + L_fixed_prof,
+              direction = 'forward',
+              time_horizon = NULL,
+              LFmax = Inf,
+              grid_capacity = opt_data$grid_capacity[window_prof_idxs]
+            )
+          } else if (opt_objective == "cost") {
+            O <- minimize_cost_window(
+              G = opt_data$solar[window_prof_idxs],
+              LF = L_prof,
+              LS = L_fixed + L_others + L_fixed_prof,
+              PI = opt_data$price_imported[window_prof_idxs],
+              PE = opt_data$price_exported[window_prof_idxs],
+              direction = 'forward',
+              time_horizon = NULL,
+              LFmax = Inf,
+              grid_capacity = opt_data$grid_capacity[window_prof_idxs]
+            )
+          }
+
+          setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
         } else {
-          L_fixed <- rep(0, window_prof_length)
+          setpoints[[profile]][window_prof_idxs] <- opt_data[[profile]][window_prof_idxs]
         }
-        #   - Other profiles load
-        L_others <- setpoints %>%
-          filter(window_prof_idxs) %>%
-          select(- any_of(c(profile, 'datetime'))) %>%
-          rowSums()
-        if (length(L_others) == 0) {
-          L_others <- rep(0, window_prof_length)
+      } else {
+        if (profile %in% colnames(opt_data[-1])) {
+          setpoints[[profile]][window_prof_idxs] <- opt_data[[profile]][window_prof_idxs]
         }
-        # The optimization flexible load is the load of the responsive sessions
-        L_prof <- setpoints[[profile]][window_prof_idxs] - L_fixed_prof
-
-        # Optimize the flexible profile's load
-        O <- minimize_grid_flow_window(
-          G = context_data$solar[window_prof_idxs],
-          LF = L_prof,
-          LS = L_fixed + L_others + L_fixed_prof,
-          direction = 'forward',
-          time_horizon = NULL,
-          LFmax = Inf,
-          grid_capacity = grid_capacity
-        )
-        setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
       }
+
 
       # SCHEDULING ----------------------------------------------------------
       if (method != "none") {
@@ -277,6 +419,7 @@ smart_charging <- function(sessions, context_data, method, window_length, window
     log = log
   ))
 }
+
 
 
 

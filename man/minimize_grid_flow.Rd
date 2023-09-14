@@ -37,9 +37,9 @@ must be equal to the length of \code{G}.}
 \item{flex_window_length}{integer, flexibility window length in time slots (not hours).
 This optional feature lets you apply flexibility only during few hours from the start of the window.}
 
-\item{LFmax}{numeric, maximum power value for the optimal \code{LF}}
+\item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 
-\item{grid_capacity}{numeric, grid maximum power capacity that will limit the maximum optimized demand}
+\item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
 }
 \value{
 numeric vector

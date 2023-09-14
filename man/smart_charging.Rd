@@ -6,34 +6,58 @@
 \usage{
 smart_charging(
   sessions,
-  context_data,
+  opt_data,
+  opt_objective,
   method,
   window_length,
   window_start_hour,
   responsive,
   power_th = 0,
   charging_power_min = 0.5,
-  grid_capacity = Inf,
   include_log = FALSE,
   show_progress = TRUE
 )
 }
 \arguments{
-\item{sessions}{tibble, sessions data set}
+\item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package
+(see \href{https://mcanigueral.github.io/evprof/articles/sessions-format.html}{this article})}
 
-\item{context_data}{tibble, optimization fitting data, first column being \code{datetime}.
-The other columns could be \code{solar} (solar generation) and \code{fixed} (static demand from other sectors like buildings, offices, ...).
-Only sessions starting within the time sequence of column \code{datetime} will be shifted.
-If columns of \code{fitting_data} are user profiles names, these are used as setpoints and no optimization is performed.}
+\item{opt_data}{tibble, optimization contextual data.
+The first column must be named \code{datetime} (mandatory) containing the
+date time sequence where the smart charging algorithm is applied, so
+only sessions starting within the time sequence of column \code{datetime}
+will be optimized.
+The other columns can be:
+\itemize{
+\item \code{static}: static power demand (in kW) from other sectors like buildings,
+offices, etc.
+\item \code{grid_capacity}: maximum imported power from the grid (in kW),
+for example the contracted power with the energy company.
+\item \code{solar}: solar power generation (in kW).
+This is used when \code{opt_objective = "grid"}.
+\item \code{price_imported}: price for imported energy (€/kWh).
+This is used when \code{opt_objective = "cost"}.
+\item \code{price_exported}: price for exported energy (€/kWh).
+This is used when \code{opt_objective = "cost"}.
+}
 
-\item{method}{character, smart charging method being \code{none}, \code{postpone}, \code{curtail} or \code{interrupt}.
-If \code{none}, the scheduling part is skipped and the sessions returned in the results will be identical to the original parameter.}
+If columns of \code{opt_data} are user profiles names, these are used as setpoints
+and no optimization is performed for the corresponding user profiles.}
+
+\item{opt_objective}{character, optimization objective being \code{"none"}, \code{"grid"} or \code{"cost"}.
+See details section for more information about the different objectives.}
+
+\item{method}{character, scheduling method being \code{"none"}, \code{"postpone"}, \code{"curtail"} or \code{"interrupt"}.
+If \code{none}, the scheduling part is skipped and the sessions returned in the
+results will be identical to the original parameter.}
 
 \item{window_length}{integer, number of data points of the optimization window (not in hours)}
 
-\item{window_start_hour}{integer, hour to start the optimization window. If \code{window_start = 6} the EV sessions are optimized from 6:00 to 6:00.}
+\item{window_start_hour}{integer, hour to start the optimization window.
+If \code{window_start = 6} the EV sessions are optimized from 6:00 to 6:00.}
 
-\item{responsive}{Named two-layer list with the ratio (between 0 and 1) of sessions responsive to smart charging program.
+\item{responsive}{Named two-layer list with the ratio (between 0 and 1)
+of sessions responsive to smart charging program.
 The names of the list must exactly match the Time-cycle and User profiles names.
 For example: list(Monday = list(Worktime = 1, Shortstay = 0.1))}
 
@@ -45,8 +69,6 @@ then sessions' demand can reach a value of \code{110} without needing to schedul
 For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
 be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} variable in \code{sessions} tibble).}
 
-\item{grid_capacity}{numeric, grid maximum power capacity that will limit the aggregated optimized demand}
-
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
 \item{show_progress}{logical, whether to output the progress bar in the console}
@@ -56,4 +78,73 @@ a list with three elements: optimal setpoints, sessions schedule and log message
 }
 \description{
 Smart charging algorithm
+}
+\details{
+An important parameter of this function is \code{opt_data}, which defines the time
+sequence of the smart charging algorithm and the optimization variables.
+The \code{opt_data} parameter is directly related with the \code{opt_objective} parameter.
+There are two different optimization objectives implemented by this function:
+\itemize{
+\item Minimize grid interaction (\code{opt_objective = "grid"}): performs a quadratic
+optimization to minimize the peak of the flexible load and the amount of
+imported power from the grid. If \code{solar} is not found in \code{opt_data}, only
+a peak shaving objective will be considered.
+\item Minimize the energy cost (\code{opt_objective = "cost"}): performs a linear
+optimization to minimize the energy cost. In this case, the columns
+\code{grid_capacity}, \code{price_imported} and \code{price_exported} of tibble \code{opt_data}
+are important.
+If these variables are not configured, default values of \code{grid_capacity = Inf},
+\code{price_imported = 1} and \code{price_exported = 0} are considered to minimize the
+imported energy.
+For this linear optimization the \code{grid_capacity} should be configured since
+all possible power will be allocated in the time slots with lower prices.
+\item No optimization (\code{opt_objective = "none"}): this will skip optimization.
+If a user profile name appears in \code{opt_data} columns, then this will be
+considered as a setpoint for the scheduling algorithm. If not, then this
+user profile will not be optimized.
+}
+}
+\examples{
+# Example: we will use the example data set of charging sessions
+# from the California Technological Institute (Caltech), obtained
+# through the [ACN-Data website](https://ev.caltech.edu/dataset).
+# This data set has been clustered into different user profiles
+# using the R package `{evprof}`
+# (see [this article](https://mcanigueral.github.io/evprof/articles/california.html)).
+# The user profiles of this data set are `Visit` and `Worktime`,
+# identified in two different time cycles `Workday` and `Weekend`.
+
+# These two variables in the `sessions` tibble, `Profile` and `Timecycle`,
+# are required for the `smart_charging` function and give more versatility
+# to the smart charging context. For example, we may want to only coordinate
+# `Worktime` sessions instead of all sessions.
+
+# For this example we want the following:
+
+# - Postpone only `Worktime` sessions, which have a responsiveness rate of
+# 0.9 (i.e. 90\% of Worktime users accept to postpone the session).
+
+# - Minimize the power peak of the sessions (peak shaving)
+
+# - Time series resolution of 15 minutes
+
+# - Optimization window of 24 hours from 6:00AM to 6:00 AM
+
+\dontrun{
+sessions <- evsim::california_ev_sessions_profiles
+sessions_demand <- get_demand(sessions, resolution = 15)
+
+# Don't require any other variable than datetime, since we don't
+# care about solar generation (just peak shaving objective)
+opt_data <- tibble(
+  datetime = sessions_demand$datetime
+)
+smart_charging(
+  sessions, opt_data, opt_objective = "grid", method = "postpone",
+  window_length = 24*60/15, window_start_hour = 6,
+  responsive = list(Workday = list(Worktime = 0.9))
+)
+}
+
+
 }

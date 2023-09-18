@@ -51,6 +51,8 @@
 #' be curtailed until the 50% of the nominal charging power (i.e. `Power` variable in `sessions` tibble).
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
+#' @param mc.cores integer, number of cores to use.
+#' Must be at least one, and parallelization requires at least two cores.
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct
 #' @importFrom lubridate hour minute date
@@ -114,7 +116,7 @@
 #'
 #' \dontrun{
 #' sessions <- evsim::california_ev_sessions_profiles
-#' sessions_demand <- get_demand(sessions, resolution = 15)
+#' sessions_demand <- get_demand(sessions, resolution = 15, mc.cores = 4)
 #'
 #' # Don't require any other variable than datetime, since we don't
 #' # care about solar generation (just peak shaving objective)
@@ -132,7 +134,8 @@
 smart_charging <- function(sessions, opt_data, opt_objective, method,
                            window_length, window_start_hour, responsive,
                            power_th = 0, charging_power_min = 0.5,
-                           include_log = FALSE, show_progress = TRUE) {
+                           include_log = FALSE, show_progress = TRUE,
+                           mc.cores = 2) {
 
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {
@@ -181,7 +184,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   # Get user profiles demand
   if (include_log) message("Getting EV demand profiles")
   profiles_demand <- get_demand(
-    sessions, dttm_seq, resolution = time_resolution
+    sessions, dttm_seq, mc.cores = mc.cores
   )
 
   # Initialize setpoints tibble with the user profiles demand
@@ -299,7 +302,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       #   Profile sessions that can't provide flexibility are not part of the setpoint
       if (nrow(non_flexible_sessions) > 0) {
         L_fixed_prof <- non_flexible_sessions %>%
-          get_demand(dttm_seq = dttm_seq[window_prof_idxs]) %>%
+          get_demand(dttm_seq = dttm_seq[window_prof_idxs], mc.cores = mc.cores) %>%
           pull(!!sym(profile))
       } else {
         L_fixed_prof <- rep(0, window_prof_length)

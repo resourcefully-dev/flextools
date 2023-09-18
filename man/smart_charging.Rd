@@ -15,7 +15,8 @@ smart_charging(
   power_th = 0,
   charging_power_min = 0.5,
   include_log = FALSE,
-  show_progress = TRUE
+  show_progress = TRUE,
+  mc.cores = 2
 )
 }
 \arguments{
@@ -72,6 +73,9 @@ be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} var
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
 \item{show_progress}{logical, whether to output the progress bar in the console}
+
+\item{mc.cores}{integer, number of cores to use.
+Must be at least one, and parallelization requires at least two cores.}
 }
 \value{
 a list with three elements: optimal setpoints, sessions schedule and log messages.
@@ -132,7 +136,7 @@ user profile will not be optimized.
 
 \dontrun{
 sessions <- evsim::california_ev_sessions_profiles
-sessions_demand <- get_demand(sessions, resolution = 15)
+sessions_demand <- get_demand(sessions, resolution = 15, mc.cores = 4)
 
 # Don't require any other variable than datetime, since we don't
 # care about solar generation (just peak shaving objective)

@@ -284,17 +284,23 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
   # Optimization solver
   OP_sol <- ROI::ROI_solve(OP_model, solver = "osqp")
 
-  OP_sol_data <- dplyr::tibble(
-    name = names(ROI::solution(OP_sol)),
-    value = as.numeric(ROI::solution(OP_sol))
-  ) %>%
-    tidyr::separate(.data$name, into = c("name", "idx"), sep = "_") %>%
-    dplyr::arrange(as.numeric(.data$idx)) %>%
-    tidyr::pivot_wider()
+  # If no accurate solution is found then return the original profile
+  if (OP_sol$status$code == 1) {
+    message("Warning: no accurate solution found.")
+    OL <- LF
+  } else {
+    OP_sol_data <- dplyr::tibble(
+      name = names(OP_sol$solution),
+      value = as.numeric(OP_sol$solution)
+    ) %>%
+      tidyr::separate(.data$name, into = c("name", "idx"), sep = "_") %>%
+      dplyr::arrange(as.numeric(.data$idx)) %>%
+      tidyr::pivot_wider()
 
-  OL <- OP_sol_data$OL %>%
-    pmin(LFmax) %>%
-    pmax(0)
+    OL <- OP_sol_data$OL %>%
+      pmin(LFmax) %>%
+      pmax(0)
+  }
 
   return( OL )
 }

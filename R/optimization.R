@@ -573,7 +573,7 @@ add_battery_optimization <- function(G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 10
     split(windows_idxs) %>%
     map(
       ~ add_battery_window(
-        w = w, G = .x$G, L = .x$L, Bcap = Bcap, Bc = Bc, Bd = Bd,
+        G = .x$G, L = .x$L, Bcap = Bcap, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini
       )
     )

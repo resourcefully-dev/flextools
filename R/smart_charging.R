@@ -255,9 +255,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       # time-window, so:
       #   1. Limit the CONNECTION END TIME of sessions that FINISH CHARGING BEFORE the window end
       sessions_window_prof$ConnectionEndDateTime[
-        (sessions_window_prof$ConnectionEndDateTime > dttm_seq[window[2]+1]) &
-          (sessions_window_prof$ChargingEndDateTime < dttm_seq[window[2]+1])
-      ] <- dttm_seq[window[2]+1]
+        (sessions_window_prof$ConnectionEndDateTime >= dttm_seq[window[2]]) &
+          (sessions_window_prof$ChargingEndDateTime <= dttm_seq[window[2]])
+      ] <- dttm_seq[window[2]]
       #   2. Recalculate flexibility with new end connection times
       sessions_window_prof$Flexibility <- round(as.numeric(
         sessions_window_prof$ConnectionEndDateTime - sessions_window_prof$ChargingEndDateTime,
@@ -265,7 +265,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       ), 2)
       #   3. Discard flexibility of sessions that FINISH CHARGING AFTER the window end
       sessions_window_prof$Flexibility[
-        sessions_window_prof$ChargingEndDateTime >= dttm_seq[window[2]+1]
+        sessions_window_prof$ChargingEndDateTime >= dttm_seq[window[2]]
       ] <- 0
 
       # Re-define window to profile's connection window

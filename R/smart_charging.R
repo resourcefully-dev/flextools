@@ -276,7 +276,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       # window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
       window_prof_dttm <- c(
         min(sessions_window_prof$ConnectionStartDateTime),
-        min(max(sessions_window_prof$ConnectionEndDateTime), dttm_seq[window[2]+1])
+        min(max(sessions_window_prof$ConnectionEndDateTime), dttm_seq[window[2]])
       )
       window_prof_idxs <- (dttm_seq >= window_prof_dttm[1]) &
         (dttm_seq <= window_prof_dttm[2])
@@ -318,7 +318,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
           # The optimization static load consists on:
           #   - Environment fixed load (buildings, lightning, etc)
-          if ('fixed' %in% colnames(opt_data)) {
+          if ('static' %in% colnames(opt_data)) {
             L_fixed <- opt_data$static[window_prof_idxs]
           } else {
             L_fixed <- rep(0, window_prof_length)

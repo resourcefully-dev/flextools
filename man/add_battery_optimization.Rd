@@ -13,7 +13,8 @@ add_battery_optimization(
   SOCmin = 0,
   SOCmax = 100,
   SOCini = NULL,
-  window_length = NULL
+  window_length = NULL,
+  mc.cores = 2
 )
 }
 \arguments{
@@ -38,6 +39,9 @@ If \code{NULL}, the window length will be the length of \code{G}.
 It can also be an integer vector, specifying a specific length for every
 window along the length of \code{G}. In that case, the sum of all vector values
 must be equal to the length of \code{G}.}
+
+\item{mc.cores}{integer, number of cores to use.
+Must be at least one, and parallelization requires at least two cores.}
 }
 \value{
 numeric vector

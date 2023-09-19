@@ -15,7 +15,8 @@ minimize_cost(
   window_length = NULL,
   flex_window_length = window_length,
   LFmax = Inf,
-  grid_capacity = Inf
+  grid_capacity = Inf,
+  mc.cores = 2
 )
 }
 \arguments{
@@ -45,6 +46,9 @@ This optional feature lets you apply flexibility only during few hours from the 
 \item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 
 \item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
+
+\item{mc.cores}{integer, number of cores to use.
+Must be at least one, and parallelization requires at least two cores.}
 }
 \value{
 numeric vector

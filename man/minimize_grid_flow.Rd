@@ -13,7 +13,8 @@ minimize_grid_flow(
   window_length = NULL,
   flex_window_length = window_length,
   LFmax = Inf,
-  grid_capacity = Inf
+  grid_capacity = Inf,
+  mc.cores = 2
 )
 }
 \arguments{
@@ -28,11 +29,12 @@ minimize_grid_flow(
 \item{time_horizon}{integer, maximum number of positions to shift energy from.
 If \code{NULL}, the \code{time_horizon} will be the length of \code{G}, \code{LF}, and \code{LS} (it must be the same)}
 
-\item{window_length}{integer, window length in time slots (not hours).
+\item{window_length}{integer or integer vector, window length in time slots (not hours).
 If \code{NULL}, the \code{window_length} will be the length of \code{G}, \code{LF}, and \code{LS} (it must be the same)
 It can also be an integer vector, specifying a specific length for every
 window along the length of \code{G}. In that case, the sum of all vector values
-must be equal to the length of \code{G}.}
+must be equal to the length of \code{G}, and all windows must be at least
+the \code{flex_window_length}.}
 
 \item{flex_window_length}{integer, flexibility window length in time slots (not hours).
 This optional feature lets you apply flexibility only during few hours from the start of the window.}
@@ -40,6 +42,9 @@ This optional feature lets you apply flexibility only during few hours from the 
 \item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 
 \item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
+
+\item{mc.cores}{integer, number of cores to use.
+Must be at least one, and parallelization requires at least two cores.}
 }
 \value{
 numeric vector

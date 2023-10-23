@@ -282,8 +282,8 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
-  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 1)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 1)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
@@ -667,8 +667,8 @@ add_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini) {
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- c(lb_general, lb_cumsum, lb_energy)
-  ub <- c(ub_general, ub_cumsum, ub_energy)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 1)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 1)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))

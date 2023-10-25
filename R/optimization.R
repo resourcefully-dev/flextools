@@ -79,10 +79,22 @@ get_flex_windows_idx <- function(G, LF, LS, window_length, flex_window_length) {
     }
   }
 
+  if (length(flex_window_length) == 1) {
+    flex_windows_length <- purrr::map_dbl(
+      windows_length,
+      ~ ifelse(.x < flex_window_length, .x, flex_window_length)
+    )
+  } else {
+    flex_windows_length <- purrr::map2_dbl(
+      windows_length, flex_window_length
+      ~ ifelse(.x < .y, .x, .y)
+    )
+  }
+
   flex_windows_idxs <- tibble(
     flex_start = cumsum(c(1, windows_length))[seq_len(length(windows_length))],
-    flex_end = .data$flex_start + flex_window_length - 1,
-    flex_idx = map2(.data$flex_start, .data$flex_end, ~ seq(.x, .y))
+    flex_end = .data$flex_start + flex_windows_length - 1,
+    flex_idx = purrr::map2(.data$flex_start, .data$flex_end, ~ seq(.x, .y))
   )
 
   return( flex_windows_idxs )

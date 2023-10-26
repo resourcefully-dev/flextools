@@ -269,6 +269,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       )
       sessions_window_prof_flex <- sessions_window_prof %>%
         filter(.data$Responsive & .data$Flexibility >= time_resolution/60)
+
+      if (nrow(sessions_window_prof_flex) == 0) next
+
       non_flexible_sessions <- sessions_window_prof %>%
         filter(!.data$Responsive | .data$Flexibility < time_resolution/60)
 
@@ -347,7 +350,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
 
       # SCHEDULING ----------------------------------------------------------
-      if (method != "none") {
+      if ((method != "none")) {
         setpoint_prof <- tibble(
           datetime = dttm_seq[window_prof_idxs],
           setpoint = setpoints[[profile]][window_prof_idxs] - L_fixed_prof
@@ -365,6 +368,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
           sessions_flex_opt,
           results$sessions
         )
+
         if (include_log) {
           log[[log_window_name]][[profile]] <- results$log
         }

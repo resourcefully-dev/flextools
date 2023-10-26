@@ -451,7 +451,10 @@ schedule_sessions <- function(sessions, setpoint, method,
     )
   }
 
+  dttm_tz <- tz(setpoint$datetime)
+
   for (timeslot in setpoint$datetime) {
+
     if (show_progress) pb$tick()
 
     # Filter sessions that are charging (`EnergyLeft > 0`) during this time slot
@@ -481,7 +484,7 @@ schedule_sessions <- function(sessions, setpoint, method,
 
       if (include_log) {
         log_message <- paste(
-          timeslot,
+          as_datetime(timeslot, tz=dttm_tz),
           "- Flexibility requirement of", flex_req, "kW and",
           nrow(sessions_timeslot), "sessions connected."
         )

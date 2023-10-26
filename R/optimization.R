@@ -384,7 +384,10 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
   # Optimization parameters
   time_slots <- length(LF)
   E <- sum(LF)
-  if (is.null(time_horizon) | (time_horizon > time_slots)) {
+  if (is.null(time_horizon)) {
+    time_horizon <- time_slots
+  }
+  if (time_horizon > time_slots) {
     time_horizon <- time_slots
   }
   LFmax_vct <- pmin(grid_capacity + G - LS, LFmax)
@@ -448,7 +451,10 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 
   # Optimization parameters
   time_slots <- length(LF)
-  if (is.null(time_horizon) | (time_horizon > time_slots)) {
+  if (is.null(time_horizon)) {
+    time_horizon <- time_slots
+  }
+  if (time_horizon > time_slots) {
     time_horizon <- time_slots
   }
   identityMat <- diag(time_slots)

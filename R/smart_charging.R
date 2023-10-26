@@ -18,7 +18,7 @@
 #' - `grid_capacity`: maximum imported power from the grid (in kW),
 #' for example the contracted power with the energy company.
 #'
-#' - `solar`: solar power generation (in kW).
+#' - `production`: local power generation (in kW).
 #' This is used when `opt_objective = "grid"`.
 #'
 #'
@@ -36,7 +36,8 @@
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
 #' If `none`, the scheduling part is skipped and the sessions returned in the
 #' results will be identical to the original parameter.
-#' @param window_length integer, number of data points of the optimization window (not in hours)
+#' @param window_length integer, number of data points of the optimization window
+#' (not in hours). It has to be multiple of 24 hours.
 #' @param window_start_hour integer, hour to start the optimization window.
 #' If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
 #' @param responsive Named two-layer list with the ratio (between 0 and 1)
@@ -70,7 +71,7 @@
 #'
 #' - Minimize grid interaction (`opt_objective = "grid"`): performs a quadratic
 #' optimization to minimize the peak of the flexible load and the amount of
-#' imported power from the grid. If `solar` is not found in `opt_data`, only
+#' imported power from the grid. If `production` is not found in `opt_data`, only
 #' a peak shaving objective will be considered.
 #'
 #' - Minimize the energy cost (`opt_objective = "cost"`): performs a linear
@@ -119,7 +120,7 @@
 #' sessions_demand <- get_demand(sessions, resolution = 15, mc.cores = 4)
 #'
 #' # Don't require any other variable than datetime, since we don't
-#' # care about solar generation (just peak shaving objective)
+#' # care about local generation (just peak shaving objective)
 #' opt_data <- tibble(
 #'   datetime = sessions_demand$datetime
 #' )
@@ -143,30 +144,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     return(NULL)
   }
 
-  # Check optimization data available
-  if (!("static" %in% names(opt_data))) {
-    opt_data$static <- 0
-  }
-  if (!("grid_capacity" %in% names(opt_data))) {
-    opt_data$grid_capacity <- Inf
-  }
-  if (opt_objective == "grid") {
-    if (!("solar" %in% names(opt_data))) {
-      message("Warning: `solar` variable not found in `opt_data`.
-              No local genaration will be considered.")
-      opt_data$solar <- 0
-    }
-  }
-  if (opt_objective == "cost") {
-    if (!("price_imported" %in% names(opt_data))) {
-      message("Warning: `price_imported` variable not found in `opt_data`.")
-      opt_data$price_imported <- 1
-    }
-    if (!("price_exported" %in% names(opt_data))) {
-      message("Warning: `price_exported` variable not found in `opt_data`.")
-      opt_data$price_exported <- 0
-    }
-  }
+
 
   # Datetime optimization parameters according to the window start and length
   window_length <- as.integer(window_length)
@@ -195,15 +173,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     filter(.data$datetime %in% dttm_seq)
 
 
-
-
   # SMART CHARGING ----------------------------------------------------------
   if (include_log) message("Smart charging:")
-
   log <- list()
-
-
-  # For each optimization window
   sessions_flex_opt <- tibble()
 
   if (show_progress) {
@@ -213,6 +185,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     )
   }
 
+  # For each optimization window
   for (i in seq(1, length(dttm_seq), window_length)) {
     if (show_progress) pb$tick()
 
@@ -340,7 +313,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
           # Optimize the flexible profile's load according to `opt_objective`
           if (opt_objective == "grid") {
             O <- minimize_grid_flow_window(
-              G = opt_data$solar[window_prof_idxs],
+              G = opt_data$production[window_prof_idxs],
               LF = L_prof,
               LS = L_fixed + L_others + L_fixed_prof,
               direction = 'forward',
@@ -350,7 +323,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
             )
           } else if (opt_objective == "cost") {
             O <- minimize_cost_window(
-              G = opt_data$solar[window_prof_idxs],
+              G = opt_data$production[window_prof_idxs],
               LF = L_prof,
               LS = L_fixed + L_others + L_fixed_prof,
               PI = opt_data$price_imported[window_prof_idxs],
@@ -422,6 +395,12 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     log = log
   ))
 }
+
+
+
+
+
+
 
 
 

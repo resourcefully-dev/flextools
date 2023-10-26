@@ -2,7 +2,7 @@
 % Please edit documentation in R/optimization.R
 \name{minimize_cost_window}
 \alias{minimize_cost_window}
-\title{Minimization of the grid flow (just a window)}
+\title{Minimization of the cost (just a window)}
 \usage{
 minimize_cost_window(
   G,
@@ -39,5 +39,5 @@ minimize_cost_window(
 numeric vector
 }
 \description{
-Minimization of the grid flow (just a window)
+Minimization of the cost (just a window)
 }

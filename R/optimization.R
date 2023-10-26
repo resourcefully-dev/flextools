@@ -1,6 +1,63 @@
 
 # General functions -------------------------------------------------------
 
+check_optimization_data <- function(opt_data, opt_objective) {
+  if (!("datetime" %in% names(opt_data))) {
+    message("Error: `datetime` variable must exist in `opt_data`")
+    return( NULL )
+  }
+  if (!("static" %in% names(opt_data))) {
+    opt_data$static <- 0
+  }
+  if (!("grid_capacity" %in% names(opt_data))) {
+    opt_data$grid_capacity <- Inf
+  }
+  if (opt_objective == "grid") {
+    if (!("production" %in% names(opt_data))) {
+      message("Warning: `production` variable not found in `opt_data`.
+              No local genaration will be considered.")
+      opt_data$production <- 0
+    }
+  }
+  if (opt_objective == "cost") {
+    if (!("price_imported" %in% names(opt_data))) {
+      message("Warning: `price_imported` variable not found in `opt_data`.")
+      opt_data$price_imported <- 1
+    }
+    if (!("price_exported" %in% names(opt_data))) {
+      message("Warning: `price_exported` variable not found in `opt_data`.")
+      opt_data$price_exported <- 0
+    }
+  }
+  return( opt_data )
+}
+
+
+#' Add an extra day at the beginning and the end of datetime sequence
+#' using the last and first day of the data
+#'
+#' @param df data frame, first column named `datetime` of type `datetime`
+#'
+#' @return tibble
+#' @export
+#'
+#' @importFrom dplyr filter %>% bind_rows arrange
+#' @importFrom lubridate date years
+#'
+add_extra_days <- function(df) {
+  first_day <- df %>%
+    filter(date(.data$datetime) == min(date(.data$datetime)))
+  first_day$datetime <- first_day$datetime + years(1)
+  last_day <- df %>%
+    filter(date(.data$datetime) == max(date(.data$datetime)))
+  last_day$datetime <- last_day$datetime - years(1)
+
+  bind_rows(
+    last_day, df, first_day
+  ) %>%
+    arrange(.data$datetime)
+}
+
 triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
   if (direction == 'l') {
     return( as.matrix(Matrix::tril(mat, k = k)) )
@@ -12,7 +69,7 @@ triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
   }
 }
 
-#' Cut the dateteime sequence according to the optimizion window start hour and length
+#' Cut the date time sequence according to the optimization window start hour
 #'
 #' @param dttm_seq datetime sequence of the original timeseries data
 #' @param window_start_hour integer, hour to start the optimization window
@@ -25,7 +82,23 @@ adapt_dttm_seq_to_opt_windows <- function(dttm_seq, window_start_hour) {
   first_idx <- opt_windows$start[1]
   last_idx <- opt_windows$end[nrow(opt_windows)]
   dttm_seq_opt <- dttm_seq[first_idx:last_idx]
-  return(dttm_seq_opt)
+  return( dttm_seq_opt )
+}
+
+#' Filter a data frame according to the optimization window start hour
+#'
+#' @param df data frame, first column named `datetime` of type `datetime`
+#' @param window_start_hour integer, hour to start the optimization window
+#'
+#' @return tibble
+#' @export
+#'
+#' @importFrom dplyr filter
+#'
+adapt_df_to_opt_windows <- function(df, window_start_hour) {
+  dttm_seq_opt <- adapt_dttm_seq_to_opt_windows(df$datetime, window_start_hour)
+  df_op <- filter(df, .data$datetime %in% dttm_seq_opt)
+  return( df_op )
 }
 
 
@@ -46,16 +119,10 @@ get_optimization_windows_from_dttm_seq <- function(dttm_seq, window_start_hour) 
     dplyr::filter(.data$end <= length(dttm_seq))
 }
 
-get_flex_windows_idx <- function(G, LF, LS, window_length, flex_window_length) {
-
-  if (!((length(G) == length(LS)) & (length(LS) == length(LF)))) {
-    message("Error: `G`, `LS` and `LF` must have same length.")
-    message(paste0("Lengths: G=", length(G), ", LS=", length(LS), ", LF=", length(LF)))
-    return( NULL )
-  }
+get_flex_windows_idx <- function(seq_length, window_length=NULL, flex_window_length=NULL) {
 
   if (is.null(window_length)) {
-    window_length <- length(G)
+    window_length <- seq_length
     flex_window_length <- window_length
   }
 
@@ -64,15 +131,15 @@ get_flex_windows_idx <- function(G, LF, LS, window_length, flex_window_length) {
   }
 
   if (length(window_length) == 1) {
-    if (((length(G)/window_length) %% 1) > 0) {
-      message("Error: The length of vector `G` must be multiple of `window_length`")
+    if (((seq_length/window_length) %% 1) > 0) {
+      message("Error: The length of optimization variables must be multiple of `window_length`")
       return( NULL )
     } else {
-      windows_length <- rep(window_length, times = length(G)/window_length)
+      windows_length <- rep(window_length, times = seq_length/window_length)
     }
   } else {
-    if (sum(window_length) != length(G)) {
-      message("Error: The length of vector `G` must be equal to the sum of vector `window_length`")
+    if (sum(window_length) != seq_length) {
+      message("Error: The length of optimization variables must be equal to the sum of vector `window_length`")
       return( NULL )
     } else {
       windows_length <- window_length
@@ -157,24 +224,47 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 
 # Optimization of load ------------------------------------------------------------
 
-#' Minimization of the grid flow
+
+#' Optimize a vector of flexible demand
 #'
-#' @param G numeric vector, being the renewable generation profile
-#' @param LF numeric vector, being the flexible load profile
-#' @param LS numeric vector, being the static load profile
+#' @param LF numeric vector, being the flexible load profile (in kW)
+#'
+#' @param opt_data tibble, optimization contextual data.
+#' The first column must be named `datetime` (mandatory) containing the
+#' date time sequence where the optimization algorithm is applied.
+#' The other columns can be:
+#'
+#' - `static`: static power demand (in kW) from other sectors like buildings,
+#' offices, etc.
+#'
+#' - `grid_capacity`: maximum imported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
+#' - `production`: local power generation (in kW).
+#' This is used when `opt_objective = "grid"`.
+#'
+#' - `price_imported`: price for imported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_exported`: price for exported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' @param opt_objective character, optimization objective being `"grid"` (default) or `"cost"`
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from.
-#'  If `NULL`, the `time_horizon` will be the length of `G`, `LF`, and `LS` (it must be the same)
+#'  If `NULL`, the `time_horizon` will be the number of rows of `op_data`.
 #' @param window_length integer or integer vector, window length in time slots (not hours).
-#' If `NULL`, the `window_length` will be the length of `G`, `LF`, and `LS` (it must be the same)
-#' It can also be an integer vector, specifying a specific length for every
-#' window along the length of `G`. In that case, the sum of all vector values
-#' must be equal to the length of `G`, and all windows must be at least
-#' the `flex_window_length`.
+#' If `NULL`, the `window_length` will be the number of rows of `op_data`.
+#' It can also be an integer vector, defining a specific length for every
+#' window across the length of `opt_data`. In that case, the sum of all vector values
+#' must be equal to the length of `opt_data`.
+#' @param window_start_hour integer, hour to start the first optimization window.
 #' @param flex_window_length integer, flexibility window length in time slots (not hours).
 #' This optional feature lets you apply flexibility only during few hours from the start of the window.
+#' It can also be an integer vector, defining a specific length for every
+#' window across the length of `opt_data`.
+#' It must be lower than `window_length`, if not it is limited to `window_length` value.
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -186,10 +276,27 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' @importFrom rlang .data
 #' @importFrom parallel mclapply detectCores
 #'
-minimize_grid_flow <- function(G, LF, LS = NULL, direction = 'forward', time_horizon = NULL,
-                               window_length = NULL, flex_window_length = window_length,
-                               LFmax = Inf, grid_capacity = Inf, mc.cores = 2) {
+optimize_demand <- function(LF, opt_data, opt_objective = "grid",
+                            direction = 'forward', time_horizon = NULL,
+                            window_length = NULL, window_start_hour = 0,
+                            flex_window_length = window_length,
+                            LFmax = Inf, mc.cores = 2) {
   # Parameters check
+  opt_data <- check_optimization_data(opt_data, opt_objective)
+  if (is.null(opt_data)) {
+    return( NULL )
+  }
+
+  if (!(nrow(opt_data) == length(LF))) {
+    message("Error: `opt_data` and `LF` must have same length.")
+    return( NULL )
+  }
+
+  if (((direction != 'forward') & (direction != 'backward'))) {
+    message("Error: `direction` must be 'forward' or 'backward'")
+    return( NULL )
+  }
+
   if (mc.cores < 1) {
     message("Parameter mc.cores must be at leas 1. Setting mc.cores = 1.")
     mc.cores <- 1
@@ -199,38 +306,50 @@ minimize_grid_flow <- function(G, LF, LS = NULL, direction = 'forward', time_hor
     mc.cores <- 1
   }
 
-  if (((direction != 'forward') & (direction != 'backward'))) {
-    message("Error: `direction` must be 'forward' or 'backward'")
-    return( NULL )
-  }
+  # Adapt the `opt_data` according to the optimization windows
+  dttm_seq_original <- opt_data$datetime
+  opt_data <- opt_data %>%
+    adapt_df_to_opt_windows(window_start_hour)
+  dttm_seq <- opt_data$datetime
+  time_resolution <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
 
-  if (is.null(LS)) {
-    LS <- rep(0, length(G))
-  }
-
-  if (length(grid_capacity) == 1) {
-    grid_capacity <- rep(grid_capacity, length(G))
-  }
-
-  flex_windows_idxs <- get_flex_windows_idx(G, LF, LS, window_length, flex_window_length)
+  # Optimization windows
+  flex_windows_idxs <- get_flex_windows_idx(
+    seq_length = nrow(opt_data), window_length, flex_window_length
+  )
   if (is.null(flex_windows_idxs)) {
     return( NULL )
   }
 
-  O_windows <- mclapply(
-    flex_windows_idxs$flex_idx,
-    function (x)
-      minimize_grid_flow_window(
-        G = G[x], LF = LF[x], LS = LS[x],
-        direction = direction, time_horizon = time_horizon,
-        LFmax = LFmax, grid_capacity = grid_capacity[x]
-      ),
-    mc.cores = mc.cores
-  )
+  # Optimization
+  if (opt_objective == "grid") {
+    O_windows <- mclapply(
+      flex_windows_idxs$flex_idx,
+      function (x)
+        minimize_grid_flow_window(
+          G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
+          direction = direction, time_horizon = time_horizon,
+          LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
+        ),
+      mc.cores = mc.cores
+    )
+  } else {
+    O_windows <- mclapply(
+      flex_windows_idxs$flex_idx,
+      function (x)
+        minimize_cost_window(
+          G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
+          PI = opt_data$price_imported[x], PE = opt_data$price_exported[x],
+          direction = direction, time_horizon = time_horizon,
+          LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
+        ),
+      mc.cores = mc.cores
+    )
+  }
 
   O_seq <- left_join(
     tibble(
-      idx = seq_len(length(G))
+      idx = seq_len(nrow(opt_data))
     ),
     tibble(
       idx = as.numeric(unlist(flex_windows_idxs$flex_idx)),
@@ -244,6 +363,8 @@ minimize_grid_flow <- function(G, LF, LS = NULL, direction = 'forward', time_hor
 
   return( O_seq$O )
 }
+
+
 
 
 #' Minimization of the grid flow (just a window)
@@ -305,99 +426,9 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 }
 
 
-#' Minimization of energy cost
-#'
-#' @param G numeric vector, being the renewable generation profile
-#' @param LF numeric vector, being the flexible load profile
-#' @param LS numeric vector, being the static load profile
-#' @param PI numeric vector, electricity prices for imported energy
-#' @param PE numeric vector, electricity prices for exported energy
-#' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
-#' @param time_horizon integer, maximum number of positions to shift energy from
-#' @param window_length integer, window length in time slots (not hours).
-#' If `NULL`, the window length will be the length of `G`, `LF`, and `LS` (it must be the same)
-#' It can also be an integer vector, specifying a specific length for every
-#' window along the length of `G`. In that case, the sum of all vector values
-#' must be equal to the length of `G`.
-#' @param flex_window_length integer, flexibility window length in time slots (not hours).
-#' This optional feature lets you apply flexibility only during few hours from the start of the window.
-#' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
-#' @param mc.cores integer, number of cores to use.
-#' Must be at least one, and parallelization requires at least two cores.
-#'
-#' @return numeric vector
-#' @export
-#'
-#' @importFrom dplyr tibble %>%
-#' @importFrom purrr map2
-#' @importFrom rlang .data
-#' @importFrom parallel detectCores mclapply
-#'
-minimize_cost <- function(G, LF, LS = NULL, PI, PE,
-                          direction = 'forward', time_horizon = NULL,
-                          window_length = NULL, flex_window_length = window_length,
-                          LFmax = Inf, grid_capacity = Inf, mc.cores = 2) {
-
-  # Parameters check
-  if (mc.cores < 1) {
-    message("Parameter mc.cores must be at leas 1. Setting mc.cores = 1.")
-    mc.cores <- 1
-  }
-  if (detectCores() <= (mc.cores)) {
-    message("Parameter mc.cores too high. Setting mc.cores = 1 to avoid parallelization.")
-    mc.cores <- 1
-  }
-
-  if (((direction != 'forward') & (direction != 'backward'))) {
-    message("Error: `direction` must be 'forward' or 'backward'")
-    return( NULL )
-  }
-
-  if (is.null(LS)) {
-    LS <- rep(0, length(G))
-  }
-
-  if (length(grid_capacity) == 1) {
-    grid_capacity <- rep(grid_capacity, length(G))
-  }
-
-  flex_windows_idxs <- get_flex_windows_idx(G, LF, LS, window_length, flex_window_length)
-  if (is.null(flex_windows_idxs)) {
-    return( NULL )
-  }
-
-  O_windows <- mclapply(
-    flex_windows_idxs$flex_idx,
-    function (x)
-      minimize_cost_window(
-        G = G[x], LF = LF[x], LS = LS[x],
-        PI = PI[x], PE = PE[x],
-        direction = direction, time_horizon = time_horizon,
-        LFmax = LFmax, grid_capacity = grid_capacity[x]
-      ),
-    mc.cores = mc.cores
-  )
-
-  O_seq <- left_join(
-    tibble(
-      idx = seq_len(length(G))
-    ),
-    tibble(
-      idx = as.numeric(unlist(flex_windows_idxs$flex_idx)),
-      O = as.numeric(unlist(O_windows))
-    ),
-    by = 'idx'
-  ) %>%
-    arrange(.data$idx)
-
-  O_seq$O[is.na(O_seq$O)] <- LF[is.na(O_seq$O)]
-
-  return( O_seq$O )
-}
 
 
-#' Minimization of the grid flow (just a window)
+#' Minimization of the cost (just a window)
 #'
 #' @param G numeric vector, being the renewable generation power profile
 #' @param LF numeric vector, being the flexible load power profile
@@ -417,12 +448,9 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 
   # Optimization parameters
   time_slots <- length(LF)
-  E <- sum(LF)
-  if (is.null(time_horizon)) {
+  if (is.null(time_horizon) | (time_horizon > time_slots)) {
     time_horizon <- time_slots
   }
-  LFmax_vct <- pmin(grid_capacity + G - LS, LFmax)
-
   identityMat <- diag(time_slots)
 
 
@@ -443,19 +471,19 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 
   OP_objective <- ROI::L_objective(
     L = cbind(
-      identityMat*0, identityMat*PI, identityMat*PE*-1
+      identityMat*0, identityMat*PI, -1*identityMat*PE
     ),
     names = OP_names
   )
 
 
   # Constraints
-  ## It <= OLt
+  ## It <= OLt + LSt -> It - OLt <= LSt
   OP_const_I_le_OL <- cbind(
-    identityMat*-1, identityMat*0, identityMat*1
+    identityMat*-1, identityMat*1, identityMat*0
   )
   OP_const_I_le_OL_dir <- rep("<=", time_slots)
-  OP_const_I_le_OL_rhs <- rep(0, time_slots)
+  OP_const_I_le_OL_rhs <- LS
 
   ## Et <= Gt
   OP_const_E_le_G <- cbind(
@@ -464,17 +492,23 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
   OP_const_E_le_G_dir <- rep("<=", time_slots)
   OP_const_E_le_G_rhs <- G
 
-  ## It - Et = OLt - Gt -> OLt - It + Et = Gt
+  ## It - Et = OLt + LSt - Gt -> OLt - It + Et = Gt - LSt
   OP_const_flows <- cbind(
     identityMat*1, identityMat*-1, identityMat*PE*1
   )
   OP_const_flows_dir <- rep("==", time_slots)
-  OP_const_flows_rhs <- G
+  OP_const_flows_rhs <- G - LS
 
   ## sum(OL) = sum(L)
   OP_const_equal_energy <- c(rep(1, time_slots), rep(0, time_slots), rep(0, time_slots))
   OP_const_equal_energy_dir <- "=="
-  OP_const_equal_energy_rhs <- E
+  OP_const_equal_energy_rhs <- sum(LF)
+
+  ## Capacity constraints:
+  ##    L <= grid_capacity + G - LS
+  ## And also, if available:
+  ##    L <= LFmax
+  LFmax_vct <- pmin(grid_capacity + G - LS, LFmax)
 
   ## Energy can only be shifted forwards or backwards with a specific time horizon
   ## This is done through cumulative sum matrices
@@ -490,7 +524,7 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 
   # Bounds
   OP_lb <- c(as.numeric(L_bounds$lb_general), rep(0, time_slots), rep(0, time_slots))
-  OP_ub <- c(as.numeric(L_bounds$ub_general), rep(Inf, time_slots), rep(Inf, time_slots))
+  OP_ub <- c(as.numeric(L_bounds$ub_general), grid_capacity, grid_capacity)
 
 
   # Optimization model
@@ -500,8 +534,10 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
       L = rbind(
         OP_const_I_le_OL, OP_const_E_le_G, OP_const_flows, OP_const_equal_energy, OP_const_cumsum, OP_const_cumsum
       ),
-      dir = c(OP_const_I_le_OL_dir, OP_const_E_le_G_dir, OP_const_flows_dir, OP_const_equal_energy_dir, OP_const_cumsum_dir1, OP_const_cumsum_dir2),
-      rhs = c(OP_const_I_le_OL_rhs, OP_const_E_le_G_rhs, OP_const_flows_rhs, OP_const_equal_energy_rhs, OP_const_cumsum_rhs1, OP_const_cumsum_rhs2)
+      dir = c(OP_const_I_le_OL_dir, OP_const_E_le_G_dir, OP_const_flows_dir,
+              OP_const_equal_energy_dir, OP_const_cumsum_dir1, OP_const_cumsum_dir2),
+      rhs = c(OP_const_I_le_OL_rhs, OP_const_E_le_G_rhs, OP_const_flows_rhs,
+              OP_const_equal_energy_rhs, OP_const_cumsum_rhs1, OP_const_cumsum_rhs2)
     ),
     # types = ,
     bounds = ROI::V_bound(
@@ -515,8 +551,8 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
   OP_sol <- ROI::ROI_solve(OP_model, solver = "lpsolve")
 
   OP_sol_data <- dplyr::tibble(
-    name = names(ROI::solution(OP_sol)),
-    value = as.numeric(ROI::solution(OP_sol))
+    name = names(OP_sol$solution),
+    value = as.numeric(OP_sol$solution)
   ) %>%
     tidyr::separate(.data$name, into = c("name", "idx"), sep = "_") %>%
     dplyr::arrange(as.numeric(.data$idx)) %>%
@@ -538,19 +574,44 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 
 #' Battery optimal charging/discharging profile
 #'
-#' @param G numeric vector, being the renewable generation profile
-#' @param L numeric vector, being the load profile
+#' @param opt_data tibble, optimization contextual data.
+#' The first column must be named `datetime` (mandatory) containing the
+#' date time sequence where the optimization algorithm is applied.
+#' The other columns can be:
+#'
+#' - `static`: static power demand (in kW) from other sectors like buildings,
+#' offices, etc.
+#'
+#' - `grid_capacity`: maximum imported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
+#' - `production`: local power generation (in kW).
+#' This is used when `opt_objective = "grid"`.
+#'
+#'
+#' - `price_imported`: price for imported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_exported`: price for exported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#' @param opt_objective character, optimization objective being `"grid"` (default) or `"cost"`
 #' @param Bcap numeric, capacity of the battery
 #' @param Bc numeric, maximum charging power
 #' @param Bd numeric, maximum discharging power
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param window_length integer, window length in time slots (not hours).
-#' If `NULL`, the window length will be the length of `G`.
-#' It can also be an integer vector, specifying a specific length for every
-#' window along the length of `G`. In that case, the sum of all vector values
-#' must be equal to the length of `G`.
+#' @param window_length integer or integer vector, window length in time slots (not hours).
+#' If `NULL`, the `window_length` will be the number of rows of `op_data`.
+#' It can also be an integer vector, defining a specific length for every
+#' window across the length of `opt_data`. In that case, the sum of all vector values
+#' must be equal to the length of `opt_data`.
+#' @param window_start_hour integer, hour to start the first optimization window.
+#' @param flex_window_length integer, flexibility window length in time slots (not hours).
+#' This optional feature lets you apply flexibility only during few hours from the start of the window.
+#' It can also be an integer vector, defining a specific length for every
+#' window across the length of `opt_data`.
+#' It must be lower than `window_length`, if not it is limited to `window_length` value.
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -561,19 +622,20 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 #' @importFrom purrr map
 #' @importFrom parallel detectCores mclapply
 #'
-add_battery_optimization <- function(G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = NULL, window_length = NULL, mc.cores = 2) {
+add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc, Bd,
+                                     SOCmin = 0, SOCmax = 100, SOCini = NULL,
+                                     window_length = NULL, window_start_hour = 0,
+                                     flex_window_length = window_length,
+                                     mc.cores = 2) {
+
   # Parameters check
-  if (mc.cores < 1) {
-    message("Parameter mc.cores must be at leas 1. Setting mc.cores = 1.")
-    mc.cores <- 1
-  }
-  if (detectCores() <= (mc.cores)) {
-    message("Parameter mc.cores too high. Setting mc.cores = 1 to avoid parallelization.")
-    mc.cores <- 1
+  opt_data <- check_optimization_data(opt_data, opt_objective)
+  if (is.null(opt_data)) {
+    return( NULL )
   }
 
   if (Bcap == 0 | Bc == 0 | Bd == 0 | SOCmin == SOCmax) {
-    return( rep(0, length(G)) )
+    return( rep(0, nrow(opt_data)) )
   }
 
   if (is.null(SOCini)) {
@@ -586,50 +648,73 @@ add_battery_optimization <- function(G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 10
     SOCini <- SOCmax
   }
 
-  if (!(length(G) == length(L))) {
-    message("Error: `G` and `L` must have same length.")
-    message(paste0("Lengths: G=", length(G), ", L=", length(L)))
+  if (mc.cores < 1) {
+    message("Parameter mc.cores must be at leas 1. Setting mc.cores = 1.")
+    mc.cores <- 1
+  }
+  if (detectCores() <= (mc.cores)) {
+    message("Parameter mc.cores too high. Setting mc.cores = 1 to avoid parallelization.")
+    mc.cores <- 1
+  }
+
+  # Adapt the `opt_data` according to the optimization windows
+  dttm_seq_original <- opt_data$datetime
+  opt_data <- opt_data %>%
+    adapt_df_to_opt_windows(window_start_hour)
+  dttm_seq <- opt_data$datetime
+  time_resolution <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
+
+  # Optimization windows
+  flex_windows_idxs <- get_flex_windows_idx(
+    seq_length = nrow(opt_data), window_length, flex_window_length
+  )
+  if (is.null(flex_windows_idxs)) {
     return( NULL )
   }
 
-  if (is.null(window_length)) {
-    window_length <- length(G)
-  } else {
-    if (length(window_length) == 1) {
-      if (((length(G)/window_length) %% 1) > 0) {
-        message("Error: The length of vector `G` must be multiple of `window_length`")
-        return( NULL )
-      }
-    } else {
-      if (sum(window_length) != length(G)) {
-        message("Error: The length of vector `G` must be equal to the sum of vector `window_length`")
-        return( NULL )
-      }
-    }
-  }
-
-  if (length(window_length) == 1) {
-    windows_length <- rep(window_length, times = length(G)/window_length)
-  } else {
-    windows_length <- window_length
-  }
-
-  windows_idxs <- unlist(map(
-    seq_len(length(windows_length)),
-    ~ rep(.x, times = windows_length[.x])
-  ))
-
-  B <- tibble(G, L) %>%
-    split(windows_idxs) %>%
-    mclapply(
-      function(x)
-        add_battery_window(
-          G = x$G, L = x$L, Bcap = Bcap, Bc = Bc, Bd = Bd,
-          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini
+  # Optimization
+  if (opt_objective == "grid") {
+    B_windows <- mclapply(
+      flex_windows_idxs$flex_idx,
+      function (x)
+        minimize_grid_flow_window_battery(
+          G = opt_data$production[x], L = opt_data$static[x],
+          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          grid_capacity = opt_data$grid_capacity[x]
         ),
       mc.cores = mc.cores
     )
-  return( as.numeric(unlist(B)) )
+  } else {
+    B_windows <- mclapply(
+      flex_windows_idxs$flex_idx,
+      function (x)
+        minimize_cost_window_battery(
+          G = opt_data$production[x], L = opt_data$static[x],
+          PI = opt_data$price_imported[x], PE = opt_data$price_exported[x],
+          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          grid_capacity = opt_data$grid_capacity[x]
+        ),
+      mc.cores = mc.cores
+    )
+  }
+
+  B_seq <- left_join(
+    tibble(
+      idx = seq_len(nrow(opt_data))
+    ),
+    tibble(
+      idx = as.numeric(unlist(flex_windows_idxs$flex_idx)),
+      B = as.numeric(unlist(B_windows))
+    ),
+    by = 'idx'
+  ) %>%
+    arrange(.data$idx)
+
+  B_seq$B[is.na(B_seq$B)] <- 0
+
+  return( B_seq$B )
 }
 
 
@@ -647,10 +732,11 @@ add_battery_optimization <- function(G, L, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 10
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @return numeric vector
 #'
-add_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini) {
+minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity = Inf) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -663,9 +749,15 @@ add_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini) {
 
   # Lower and upper bounds
   ## General bounds
+  ##  - Grid capacity: -grid_capacity <= L - G + B <= +grid_capacity
+  ##    - LB: B >= G - L - grid_capacity
+  ##    - UB: B <= G - L + grid_capacity
+  ##  - Battery power limits:
+  ##    - LB: B >= -Bd
+  ##    - UB: B <= Bc
   Amat_general <- identityMat
-  lb_general <- rep(-Bd, time_slots)
-  ub_general <- rep(Bc, time_slots)
+  lb_general <- pmax(G - L - grid_capacity, -Bd)
+  ub_general <- pmin(G - L + grid_capacity, Bc)
 
   ## SOC limits
   Amat_cumsum <- cumsumMat
@@ -687,3 +779,109 @@ add_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini) {
   B <- solver$Solve()
   return( round(B$x, 2) )
 }
+
+
+minimize_cost_window_battery <- function (G, L, PE, PI, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity = Inf) {
+
+  # Optimization parameters
+  time_slots <- length(G)
+  identityMat <- diag(time_slots)
+  cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
+
+    # Optimization problem
+  # link: TO-DO
+  # I*PI - E*PE
+
+  # Linear Optimization Objective
+  # One x vector containing three unknown variables:
+  # - B: Optimal battery demand
+  # - I: Imported power from the optimal load
+  # - E: Exported power from the optimal load
+  OP_names <- c(
+    paste0("B_", seq(1, time_slots)),
+    paste0("I_", seq(1, time_slots)),
+    paste0("E_", seq(1, time_slots))
+  )
+
+  OP_objective <- ROI::L_objective(
+    L = cbind(
+      identityMat*0, identityMat*PI, identityMat*PE*-1
+    ),
+    names = OP_names
+  )
+
+  # Constraints
+  ## It <= Bt + Lt -> It - Bt <= Lt
+  OP_const_I_le_OL <- cbind(
+    identityMat*-1, identityMat*1, identityMat*0
+  )
+  OP_const_I_le_OL_dir <- rep("<=", time_slots)
+  OP_const_I_le_OL_rhs <- L
+
+  ## Et <= Gt --> This only allows the battery to discharge during importing hours
+  OP_const_E_le_G <- cbind(
+    identityMat*0, identityMat*0, identityMat*1
+  )
+  OP_const_E_le_G_dir <- rep("<=", time_slots)
+  OP_const_E_le_G_rhs <- G
+
+  ## It - Et = Bt + Lt - Gt -> Bt - It + Et = Gt - Lt
+  OP_const_flows <- cbind(
+    identityMat*1, identityMat*-1, identityMat*PE*1
+  )
+  OP_const_flows_dir <- rep("==", time_slots)
+  OP_const_flows_rhs <- G - L
+
+  # Lower and upper bounds
+  ## General bounds
+  ##  - Grid capacity: -grid_capacity <= L - G + B <= +grid_capacity
+  ##    - LB: B >= G - L - grid_capacity
+  ##    - UB: B <= G - L + grid_capacity
+  ##  - Battery power limits:
+  ##    - LB: B >= -Bd
+  ##    - UB: B <= Bc
+  lb_general <- pmax(G - L - grid_capacity, -Bd)
+  ub_general <- pmin(G - L + grid_capacity, Bc)
+  OP_lb <- c(lb_general, rep(0, time_slots), rep(0, time_slots))
+  OP_ub <- c(ub_general, grid_capacity, grid_capacity)
+
+
+  # Optimization model
+  OP_model <- ROI::OP(
+    objective = OP_objective,
+    constraints = ROI::L_constraint(
+      L = rbind(
+        OP_const_I_le_OL, OP_const_E_le_G, OP_const_flows
+      ),
+      dir = c(OP_const_I_le_OL_dir, OP_const_E_le_G_dir, OP_const_flows_dir),
+      rhs = c(OP_const_I_le_OL_rhs, OP_const_E_le_G_rhs, OP_const_flows_rhs)
+    ),
+    # types = ,
+    bounds = ROI::V_bound(
+      li = seq(1, time_slots*3), ui = seq(1, time_slots*3), lb = OP_lb, ub = OP_ub
+    ),
+    maximum = FALSE
+  )
+
+
+  # Optimization solver
+  OP_sol <- ROI::ROI_solve(OP_model, solver = "lpsolve")
+
+  OP_sol_data <- dplyr::tibble(
+    name = names(OP_sol$solution),
+    value = as.numeric(OP_sol$solution)
+  ) %>%
+    tidyr::separate(.data$name, into = c("name", "idx"), sep = "_") %>%
+    dplyr::arrange(as.numeric(.data$idx)) %>%
+    tidyr::pivot_wider()
+
+  B <- OP_sol_data$B %>%
+    pmin(Bc) %>%
+    pmax(-Bd)
+
+  return( round(B, 2) )
+}
+
+
+
+

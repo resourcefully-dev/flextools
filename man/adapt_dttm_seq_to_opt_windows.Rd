@@ -2,7 +2,7 @@
 % Please edit documentation in R/optimization.R
 \name{adapt_dttm_seq_to_opt_windows}
 \alias{adapt_dttm_seq_to_opt_windows}
-\title{Cut the dateteime sequence according to the optimizion window start hour and length}
+\title{Cut the date time sequence according to the optimization window start hour}
 \usage{
 adapt_dttm_seq_to_opt_windows(dttm_seq, window_start_hour)
 }
@@ -15,5 +15,5 @@ adapt_dttm_seq_to_opt_windows(dttm_seq, window_start_hour)
 datetime sequence
 }
 \description{
-Cut the dateteime sequence according to the optimizion window start hour and length
+Cut the date time sequence according to the optimization window start hour
 }

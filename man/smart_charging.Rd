@@ -34,7 +34,7 @@ The other columns can be:
 offices, etc.
 \item \code{grid_capacity}: maximum imported power from the grid (in kW),
 for example the contracted power with the energy company.
-\item \code{solar}: solar power generation (in kW).
+\item \code{production}: local power generation (in kW).
 This is used when \code{opt_objective = "grid"}.
 \item \code{price_imported}: price for imported energy (€/kWh).
 This is used when \code{opt_objective = "cost"}.
@@ -52,7 +52,8 @@ See details section for more information about the different objectives.}
 If \code{none}, the scheduling part is skipped and the sessions returned in the
 results will be identical to the original parameter.}
 
-\item{window_length}{integer, number of data points of the optimization window (not in hours)}
+\item{window_length}{integer, number of data points of the optimization window
+(not in hours). It has to be multiple of 24 hours.}
 
 \item{window_start_hour}{integer, hour to start the optimization window.
 If \code{window_start = 6} the EV sessions are optimized from 6:00 to 6:00.}
@@ -91,7 +92,7 @@ There are two different optimization objectives implemented by this function:
 \itemize{
 \item Minimize grid interaction (\code{opt_objective = "grid"}): performs a quadratic
 optimization to minimize the peak of the flexible load and the amount of
-imported power from the grid. If \code{solar} is not found in \code{opt_data}, only
+imported power from the grid. If \code{production} is not found in \code{opt_data}, only
 a peak shaving objective will be considered.
 \item Minimize the energy cost (\code{opt_objective = "cost"}): performs a linear
 optimization to minimize the energy cost. In this case, the columns
@@ -139,7 +140,7 @@ sessions <- evsim::california_ev_sessions_profiles
 sessions_demand <- get_demand(sessions, resolution = 15, mc.cores = 4)
 
 # Don't require any other variable than datetime, since we don't
-# care about solar generation (just peak shaving objective)
+# care about local generation (just peak shaving objective)
 opt_data <- tibble(
   datetime = sessions_demand$datetime
 )

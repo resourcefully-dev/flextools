@@ -69,6 +69,26 @@ triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
   }
 }
 
+
+
+# Optimization functions --------------------------------------------------
+
+get_optimization_windows_from_dttm_seq <- function(dttm_seq, window_start_hour) {
+  windows_start_idx <- which(
+    (lubridate::hour(dttm_seq) == window_start_hour) &
+      (lubridate::minute(dttm_seq) == 0)
+  )
+  windows_length <- dplyr::lead(windows_start_idx) - windows_start_idx
+  # Fill last NA produced by `lead`
+  windows_length[is.na(windows_length)] <- windows_length[1]
+  dplyr::tibble(
+    start = windows_start_idx,
+    end = windows_start_idx + windows_length - 1,
+    length = windows_length
+  ) %>%
+    dplyr::filter(.data$end <= length(dttm_seq))
+}
+
 #' Cut the date time sequence according to the optimization window start hour
 #'
 #' @param dttm_seq datetime sequence of the original timeseries data
@@ -102,24 +122,11 @@ adapt_df_to_opt_windows <- function(df, window_start_hour) {
 }
 
 
+get_flex_windows <- function(dttm_seq, window_start_hour, window_length, flex_window_length) {
 
-get_optimization_windows_from_dttm_seq <- function(dttm_seq, window_start_hour) {
-  windows_start_idx <- which(
-    (lubridate::hour(dttm_seq) == window_start_hour) &
-      (lubridate::minute(dttm_seq) == 0)
-  )
-  windows_length <- dplyr::lead(windows_start_idx) - windows_start_idx
-  # Fill last NA produced by `lead`
-  windows_length[is.na(windows_length)] <- windows_length[1]
-  dplyr::tibble(
-    start = windows_start_idx,
-    end = windows_start_idx + windows_length - 1,
-    length = windows_length
-  ) %>%
-    dplyr::filter(.data$end <= length(dttm_seq))
-}
-
-get_flex_windows_idx <- function(seq_length, window_length=NULL, flex_window_length=NULL) {
+  dttm_seq_opt <- adapt_dttm_seq_to_opt_windows(dttm_seq, window_start_hour)
+  seq_length <- length(dttm_seq_opt)
+  first_time_slot <- which(dttm_seq %in% dttm_seq_opt[1])
 
   if (is.null(window_length)) {
     window_length <- seq_length
@@ -131,18 +138,15 @@ get_flex_windows_idx <- function(seq_length, window_length=NULL, flex_window_len
   }
 
   if (length(window_length) == 1) {
-    if (((seq_length/window_length) %% 1) > 0) {
-      message("Error: The length of optimization variables must be multiple of `window_length`")
-      return( NULL )
-    } else {
-      windows_length <- rep(window_length, times = seq_length/window_length)
-    }
+    windows_length <- rep(window_length, times = trunc(seq_length/window_length))
   } else {
-    if (sum(window_length) != seq_length) {
-      message("Error: The length of optimization variables must be equal to the sum of vector `window_length`")
+    if (sum(window_length) > seq_length) {
+      message("Error: The length of optimization variables must be lower or equal than
+              the sum of vector `window_length`")
       return( NULL )
     } else {
       windows_length <- window_length
+      diff_windows_length <- unique(window_length)
     }
   }
 
@@ -159,12 +163,12 @@ get_flex_windows_idx <- function(seq_length, window_length=NULL, flex_window_len
   }
 
   flex_windows_idxs <- tibble(
-    flex_start = cumsum(c(1, windows_length))[seq_len(length(windows_length))],
+    flex_start = cumsum(c(first_time_slot, windows_length))[seq_len(length(windows_length))],
     flex_end = .data$flex_start + flex_windows_length - 1,
-    flex_idx = purrr::map2(.data$flex_start, .data$flex_end, ~ seq(.x, .y))
+    flex_idx = map2(.data$flex_start, .data$flex_end, ~ seq(.x, .y))
   )
 
-  return( flex_windows_idxs )
+  return(flex_windows_idxs)
 }
 
 
@@ -306,20 +310,18 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
     mc.cores <- 1
   }
 
-  # Adapt the `opt_data` according to the optimization windows
-  dttm_seq_original <- opt_data$datetime
-  opt_data <- opt_data %>%
-    adapt_df_to_opt_windows(window_start_hour)
-  dttm_seq <- opt_data$datetime
-  time_resolution <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
-
   # Optimization windows
-  flex_windows_idxs <- get_flex_windows_idx(
-    seq_length = nrow(opt_data), window_length, flex_window_length
+  dttm_seq <- opt_data$datetime
+  flex_windows_idxs <- get_flex_windows(
+    dttm_seq = dttm_seq,
+    window_start_hour = window_start_hour,
+    window_length = window_length,
+    flex_window_length = flex_window_length
   )
   if (is.null(flex_windows_idxs)) {
     return( NULL )
   }
+  flex_windows_idxs_seq <- as.numeric(unlist(flex_windows_idxs$flex_idx))
 
   # Optimization
   if (opt_objective == "grid") {
@@ -347,21 +349,26 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
     )
   }
 
-  O_seq <- left_join(
-    tibble(
-      idx = seq_len(nrow(opt_data))
-    ),
-    tibble(
-      idx = as.numeric(unlist(flex_windows_idxs$flex_idx)),
-      O = as.numeric(unlist(O_windows))
-    ),
-    by = 'idx'
-  ) %>%
-    arrange(.data$idx)
+  O <- as.numeric(unlist(O_windows))
 
-  O_seq$O[is.na(O_seq$O)] <- LF[is.na(O_seq$O)]
+  if (length(flex_windows_idxs_seq) == length(dttm_seq)) {
+    return( O )
+  } else {
+    # Create the complete demand vector with the time slots outside the
+    # optimization windows
+    O_flex <- left_join(
+      tibble(idx = seq_len(length(dttm_seq))),
+      tibble(
+        idx = flex_windows_idxs_seq,
+        O = O
+      ),
+      by = 'idx'
+    ) %>%
+      arrange(.data$idx)
 
-  return( O_seq$O )
+    O_flex$O[is.na(O_flex$O)] <- LF[is.na(O_flex$O)]
+    return( O_flex$O )
+  }
 }
 
 
@@ -663,20 +670,18 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
     mc.cores <- 1
   }
 
-  # Adapt the `opt_data` according to the optimization windows
-  dttm_seq_original <- opt_data$datetime
-  opt_data <- opt_data %>%
-    adapt_df_to_opt_windows(window_start_hour)
-  dttm_seq <- opt_data$datetime
-  time_resolution <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
-
   # Optimization windows
-  flex_windows_idxs <- get_flex_windows_idx(
-    seq_length = nrow(opt_data), window_length, flex_window_length
+  dttm_seq <- opt_data$datetime
+  flex_windows_idxs <- get_flex_windows(
+    dttm_seq = dttm_seq,
+    window_start_hour = window_start_hour,
+    window_length = window_length,
+    flex_window_length = flex_window_length
   )
   if (is.null(flex_windows_idxs)) {
     return( NULL )
   }
+  flex_windows_idxs_seq <- as.numeric(unlist(flex_windows_idxs$flex_idx))
 
   # Optimization
   if (opt_objective == "grid") {
@@ -706,21 +711,26 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
     )
   }
 
-  B_seq <- left_join(
-    tibble(
-      idx = seq_len(nrow(opt_data))
-    ),
-    tibble(
-      idx = as.numeric(unlist(flex_windows_idxs$flex_idx)),
-      B = as.numeric(unlist(B_windows))
-    ),
-    by = 'idx'
-  ) %>%
-    arrange(.data$idx)
+  B <- as.numeric(unlist(B_windows))
 
-  B_seq$B[is.na(B_seq$B)] <- 0
+  if (length(flex_windows_idxs_seq) == length(dttm_seq)) {
+    return( B )
+  } else {
+    # Create the complete battery vector with the time slots outside the
+    # optimization windows
+    B_flex <- left_join(
+      tibble(idx = seq_len(length(dttm_seq))),
+      tibble(
+        idx = flex_windows_idxs_seq,
+        B = B
+      ),
+      by = 'idx'
+    ) %>%
+      arrange(.data$idx)
 
-  return( B_seq$B )
+    B_flex$B[is.na(B_flex$B)] <- 0
+    return( B_flex$B )
+  }
 }
 
 

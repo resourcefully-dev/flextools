@@ -428,6 +428,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 #'
 #' @importFrom dplyr tibble %>% filter mutate arrange desc
 #' @importFrom rlang .data
+#' @importFrom lubridate as_datetime tz
 #'
 schedule_sessions <- function(sessions, setpoint, method,
                               power_th = 0, charging_power_min = 0.5,

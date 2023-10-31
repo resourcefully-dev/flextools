@@ -70,103 +70,53 @@ triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
 }
 
 
+get_flex_windows <- function(dttm_seq, window_days, window_start_hour, flex_window_hours = NULL) {
 
-# Optimization functions --------------------------------------------------
-
-get_optimization_windows_from_dttm_seq <- function(dttm_seq, window_start_hour) {
-  windows_start_idx <- which(
+  # Flexibility windows according to `window_start_hour` and `windows_days`
+  start_hour_idx <- which(
     (lubridate::hour(dttm_seq) == window_start_hour) &
       (lubridate::minute(dttm_seq) == 0)
   )
-  windows_length <- dplyr::lead(windows_start_idx) - windows_start_idx
-  # Fill last NA produced by `lead`
-  windows_length[is.na(windows_length)] <- windows_length[1]
-  dplyr::tibble(
-    start = windows_start_idx,
-    end = windows_start_idx + windows_length - 1,
-    length = windows_length
-  ) %>%
-    dplyr::filter(.data$end <= length(dttm_seq))
-}
 
-#' Cut the date time sequence according to the optimization window start hour
-#'
-#' @param dttm_seq datetime sequence of the original timeseries data
-#' @param window_start_hour integer, hour to start the optimization window
-#'
-#' @return datetime sequence
-#' @export
-#'
-adapt_dttm_seq_to_opt_windows <- function(dttm_seq, window_start_hour) {
-  opt_windows <- get_optimization_windows_from_dttm_seq(dttm_seq, window_start_hour)
-  first_idx <- opt_windows$start[1]
-  last_idx <- opt_windows$end[nrow(opt_windows)]
-  dttm_seq_opt <- dttm_seq[first_idx:last_idx]
-  return( dttm_seq_opt )
-}
-
-#' Filter a data frame according to the optimization window start hour
-#'
-#' @param df data frame, first column named `datetime` of type `datetime`
-#' @param window_start_hour integer, hour to start the optimization window
-#'
-#' @return tibble
-#' @export
-#'
-#' @importFrom dplyr filter
-#'
-adapt_df_to_opt_windows <- function(df, window_start_hour) {
-  dttm_seq_opt <- adapt_dttm_seq_to_opt_windows(df$datetime, window_start_hour)
-  df_op <- filter(df, .data$datetime %in% dttm_seq_opt)
-  return( df_op )
-}
-
-
-get_flex_windows <- function(dttm_seq, window_start_hour, window_length, flex_window_length) {
-
-  dttm_seq_opt <- adapt_dttm_seq_to_opt_windows(dttm_seq, window_start_hour)
-  seq_length <- length(dttm_seq_opt)
-  first_time_slot <- which(dttm_seq %in% dttm_seq_opt[1])
-
-  if (is.null(window_length)) {
-    window_length <- seq_length
-    flex_window_length <- window_length
-  }
-
-  if (is.null(flex_window_length)) {
-    flex_window_length <- window_length
-  }
-
-  if (length(window_length) == 1) {
-    windows_length <- rep(window_length, times = trunc(seq_length/window_length))
+  if (window_days > 1) {
+    n_windows <- trunc(length(start_hour_idx)/window_days)
+    window_days_idx <- rep(seq_len(n_windows), each = window_days)
+    start_windows_idx <- split(
+      start_hour_idx[seq_len(n_windows*window_days)], window_days_idx
+    ) %>%
+      unname() %>%
+      purrr::map_int(~ .x[1])
   } else {
-    if (sum(window_length) > seq_length) {
-      message("Error: The length of optimization variables must be lower or equal than
-              the sum of vector `window_length`")
-      return( NULL )
-    } else {
-      windows_length <- window_length
-      diff_windows_length <- unique(window_length)
-    }
+    start_windows_idx <- start_hour_idx
   }
 
-  if (length(flex_window_length) == 1) {
+  windows_length <- dplyr::lead(start_windows_idx) - start_windows_idx
+  windows_length[is.na(windows_length)] <- windows_length[1] # Fill last NA produced by `lead`
+
+  # Flexibility windows according to `flex_window_hours`
+  resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units="mins")
+
+  if (is.null(flex_window_hours)) {
+    flex_windows_length <- windows_length
+  } else {
+    if (flex_window_hours > 24*window_days) {
+      message("Warning: `flex_window_hours` must be lower than `window_days` hours.")
+      flex_window_hours <- 24*window_days
+    }
+    flex_window_length <- flex_window_hours*60/resolution
     flex_windows_length <- purrr::map_dbl(
       windows_length,
       ~ ifelse(.x < flex_window_length, .x, flex_window_length)
     )
-  } else {
-    flex_windows_length <- purrr::map2_dbl(
-      windows_length, flex_window_length
-      ~ ifelse(.x < .y, .x, .y)
-    )
   }
 
-  flex_windows_idxs <- tibble(
-    flex_start = cumsum(c(first_time_slot, windows_length))[seq_len(length(windows_length))],
-    flex_end = .data$flex_start + flex_windows_length - 1,
-    flex_idx = map2(.data$flex_start, .data$flex_end, ~ seq(.x, .y))
-  )
+  flex_windows_idxs <- dplyr::tibble(
+    start = start_windows_idx,
+    end = start_windows_idx + windows_length - 1,
+    flex_end = start_windows_idx + flex_windows_length - 1,
+    flex_idx = map2(.data$start, .data$flex_end, ~ seq(.x, .y))
+  ) %>%
+    dplyr::filter(.data$end <= length(dttm_seq))
 
   return(flex_windows_idxs)
 }
@@ -257,17 +207,11 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from.
 #'  If `NULL`, the `time_horizon` will be the number of rows of `op_data`.
-#' @param window_length integer or integer vector, window length in time slots (not hours).
-#' If `NULL`, the `window_length` will be the number of rows of `op_data`.
-#' It can also be an integer vector, defining a specific length for every
-#' window across the length of `opt_data`. In that case, the sum of all vector values
-#' must be equal to the length of `opt_data`.
-#' @param window_start_hour integer, hour to start the first optimization window.
-#' @param flex_window_length integer, flexibility window length in time slots (not hours).
-#' This optional feature lets you apply flexibility only during few hours from the start of the window.
-#' It can also be an integer vector, defining a specific length for every
-#' window across the length of `opt_data`.
-#' It must be lower than `window_length`, if not it is limited to `window_length` value.
+#' @param window_days integer, number of days to consider as optimization window.
+#' @param window_start_hour integer, starting hour of the optimization window.
+#' @param flex_window_hours integer, flexibility window length, in hours.
+#' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
+#' It must be lower than `window_days*24` hours.
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
@@ -282,8 +226,8 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #'
 optimize_demand <- function(LF, opt_data, opt_objective = "grid",
                             direction = 'forward', time_horizon = NULL,
-                            window_length = NULL, window_start_hour = 0,
-                            flex_window_length = window_length,
+                            window_days = 1, window_start_hour = 0,
+                            flex_window_hours = NULL,
                             LFmax = Inf, mc.cores = 2) {
   # Parameters check
   opt_data <- check_optimization_data(opt_data, opt_objective)
@@ -314,9 +258,9 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
   dttm_seq <- opt_data$datetime
   flex_windows_idxs <- get_flex_windows(
     dttm_seq = dttm_seq,
+    window_days = window_days,
     window_start_hour = window_start_hour,
-    window_length = window_length,
-    flex_window_length = flex_window_length
+    flex_window_hours = flex_window_hours
   )
   if (is.null(flex_windows_idxs)) {
     return( NULL )
@@ -614,17 +558,11 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param window_length integer or integer vector, window length in time slots (not hours).
-#' If `NULL`, the `window_length` will be the number of rows of `op_data`.
-#' It can also be an integer vector, defining a specific length for every
-#' window across the length of `opt_data`. In that case, the sum of all vector values
-#' must be equal to the length of `opt_data`.
-#' @param window_start_hour integer, hour to start the first optimization window.
-#' @param flex_window_length integer, flexibility window length in time slots (not hours).
-#' This optional feature lets you apply flexibility only during few hours from the start of the window.
-#' It can also be an integer vector, defining a specific length for every
-#' window across the length of `opt_data`.
-#' It must be lower than `window_length`, if not it is limited to `window_length` value.
+#' @param window_days integer, number of days to consider as optimization window.
+#' @param window_start_hour integer, starting hour of the optimization window.
+#' @param flex_window_hours integer, flexibility window length, in hours.
+#' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
+#' It must be lower than `window_days*24` hours.
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -637,8 +575,8 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 #'
 add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc, Bd,
                                      SOCmin = 0, SOCmax = 100, SOCini = NULL,
-                                     window_length = NULL, window_start_hour = 0,
-                                     flex_window_length = window_length,
+                                     window_days = 1, window_start_hour = 0,
+                                     flex_window_hours = 24,
                                      mc.cores = 2) {
 
   # Parameters check
@@ -674,9 +612,9 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   dttm_seq <- opt_data$datetime
   flex_windows_idxs <- get_flex_windows(
     dttm_seq = dttm_seq,
+    window_days = window_days,
     window_start_hour = window_start_hour,
-    window_length = window_length,
-    flex_window_length = flex_window_length
+    flex_window_hours = flex_window_hours
   )
   if (is.null(flex_windows_idxs)) {
     return( NULL )

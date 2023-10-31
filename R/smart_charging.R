@@ -36,10 +36,8 @@
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
 #' If `none`, the scheduling part is skipped and the sessions returned in the
 #' results will be identical to the original parameter.
-#' @param window_length integer, number of data points of the optimization window
-#' (not in hours). It has to be multiple of 24 hours.
-#' @param window_start_hour integer, hour to start the optimization window.
-#' If `window_start = 6` the EV sessions are optimized from 6:00 to 6:00.
+#' @param window_days integer, number of days to consider as optimization window.
+#' @param window_start_hour integer, starting hour of the optimization window.
 #' @param responsive Named two-layer list with the ratio (between 0 and 1)
 #'  of sessions responsive to smart charging program.
 #' The names of the list must exactly match the Time-cycle and User profiles names.
@@ -133,7 +131,7 @@
 #'
 #'
 smart_charging <- function(sessions, opt_data, opt_objective, method,
-                           window_length, window_start_hour, responsive,
+                           window_days, window_start_hour, responsive,
                            power_th = 0, charging_power_min = 0.5,
                            include_log = FALSE, show_progress = TRUE,
                            mc.cores = 2) {
@@ -144,15 +142,13 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     return(NULL)
   }
 
-
-
-  # Datetime optimization parameters according to the window start and length
-  window_length <- as.integer(window_length)
-  window_start_hour <- as.integer(window_start_hour)
-  dttm_seq <- adapt_dttm_seq_to_opt_windows(opt_data$datetime, window_start_hour)
+  dttm_seq <- opt_data$datetime
   time_resolution <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
-  start <- dttm_seq[1]
-  end <- dttm_seq[length(dttm_seq)]
+
+  # Optimization windows according to `window_days` and `window_start_hour`
+  flex_windows_idx <- get_flex_windows(
+    dttm_seq, window_days, window_start_hour
+  )
 
   # Adapt the data set for the current time resolution
   sessions <- sessions %>%
@@ -168,9 +164,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   # Initialize setpoints tibble with the user profiles demand
   setpoints <- profiles_demand
 
-  # Filter context data within date time sequence
-  opt_data <- opt_data %>%
-    filter(.data$datetime %in% dttm_seq)
+  # # Filter context data within date time sequence
+  # opt_data <- opt_data %>%
+  #   filter(.data$datetime %in% dttm_seq)
 
 
   # SMART CHARGING ----------------------------------------------------------
@@ -181,15 +177,15 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   if (show_progress) {
     pb <- progress::progress_bar$new(
       format = "[:bar] :percent eta: :eta",
-      total = trunc(length(dttm_seq)/window_length)+1
+      total = nrow(flex_windows_idx)
     )
   }
 
   # For each optimization window
-  for (i in seq(1, length(dttm_seq), window_length)) {
+  for (i in seq_len(nrow(flex_windows_idx))) {
     if (show_progress) pb$tick()
 
-    window <- c(i, i+window_length-1)
+    window <- c(flex_windows_idx$start[i], flex_windows_idx$end[i])
     log_window_name <- as.character(date(dttm_seq[window[1]]))
     if (include_log) {
       message(paste("--", log_window_name))

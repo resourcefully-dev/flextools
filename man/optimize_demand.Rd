@@ -10,9 +10,9 @@ optimize_demand(
   opt_objective = "grid",
   direction = "forward",
   time_horizon = NULL,
-  window_length = NULL,
+  window_days = 1,
   window_start_hour = 0,
-  flex_window_length = window_length,
+  flex_window_hours = NULL,
   LFmax = Inf,
   mc.cores = 2
 )
@@ -44,19 +44,13 @@ This is used when \code{opt_objective = "cost"}.
 \item{time_horizon}{integer, maximum number of positions to shift energy from.
 If \code{NULL}, the \code{time_horizon} will be the number of rows of \code{op_data}.}
 
-\item{window_length}{integer or integer vector, window length in time slots (not hours).
-If \code{NULL}, the \code{window_length} will be the number of rows of \code{op_data}.
-It can also be an integer vector, defining a specific length for every
-window across the length of \code{opt_data}. In that case, the sum of all vector values
-must be equal to the length of \code{opt_data}.}
+\item{window_days}{integer, number of days to consider as optimization window.}
 
-\item{window_start_hour}{integer, hour to start the first optimization window.}
+\item{window_start_hour}{integer, starting hour of the optimization window.}
 
-\item{flex_window_length}{integer, flexibility window length in time slots (not hours).
-This optional feature lets you apply flexibility only during few hours from the start of the window.
-It can also be an integer vector, defining a specific length for every
-window across the length of \code{opt_data}.
-It must be lower than \code{window_length}, if not it is limited to \code{window_length} value.}
+\item{flex_window_hours}{integer, flexibility window length, in hours.
+This optional feature lets you apply flexibility only during few hours from the \code{window_start_hour}.
+It must be lower than \code{window_days*24} hours.}
 
 \item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 

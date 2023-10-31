@@ -9,7 +9,7 @@ smart_charging(
   opt_data,
   opt_objective,
   method,
-  window_length,
+  window_days,
   window_start_hour,
   responsive,
   power_th = 0,
@@ -52,11 +52,9 @@ See details section for more information about the different objectives.}
 If \code{none}, the scheduling part is skipped and the sessions returned in the
 results will be identical to the original parameter.}
 
-\item{window_length}{integer, number of data points of the optimization window
-(not in hours). It has to be multiple of 24 hours.}
+\item{window_days}{integer, number of days to consider as optimization window.}
 
-\item{window_start_hour}{integer, hour to start the optimization window.
-If \code{window_start = 6} the EV sessions are optimized from 6:00 to 6:00.}
+\item{window_start_hour}{integer, starting hour of the optimization window.}
 
 \item{responsive}{Named two-layer list with the ratio (between 0 and 1)
 of sessions responsive to smart charging program.

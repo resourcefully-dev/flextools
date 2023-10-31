@@ -342,6 +342,10 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
     time_horizon <- time_slots
   }
   LFmax_vct <- pmin(grid_capacity + G - LS, LFmax)
+  if (any(LFmax_vct < 0)) {
+    message("Warning: `grid_capacity` too low. Skipping optimization.")
+    return(LF)
+  }
   identityMat <- diag(time_slots)
 
   # Objective function terms

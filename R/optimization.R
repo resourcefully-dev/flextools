@@ -332,6 +332,9 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
 #'
 minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax, grid_capacity) {
 
+  # Round LF to 2 decimals to avoid problems with lower and upper bounds
+  LF <- round(LF, 2)
+
   # Optimization parameters
   time_slots <- length(LF)
   E <- sum(LF)
@@ -373,8 +376,8 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- round(c(lb_general, lb_cumsum, lb_energy), 1)
-  ub <- round(c(ub_general, ub_cumsum, ub_energy), 1)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
@@ -729,8 +732,8 @@ minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- round(c(lb_general, lb_cumsum, lb_energy), 1)
-  ub <- round(c(ub_general, ub_cumsum, ub_energy), 1)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))

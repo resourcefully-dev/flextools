@@ -53,10 +53,10 @@
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
-#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between
 #' @importFrom lubridate hour minute date
 #' @importFrom rlang .data
-#' @importFrom stats ecdf quantile
+#' @importFrom stats sd
 #'
 #' @return a list with three elements: optimal setpoints, sessions schedule and log messages.
 #' @export
@@ -164,11 +164,6 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   # Initialize setpoints tibble with the user profiles demand
   setpoints <- profiles_demand
 
-  # # Filter context data within date time sequence
-  # opt_data <- opt_data %>%
-  #   filter(.data$datetime %in% dttm_seq)
-
-
   # SMART CHARGING ----------------------------------------------------------
   if (include_log) message("Smart charging:")
   log <- list()
@@ -241,11 +236,24 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       ] <- 0
 
       # Re-define window to profile's connection window
-      # # Find the End time for at least 95% of sessions
-      # ss_ecdf <- ecdf(sessions_window_prof$coe)
-      # ss_coe_ecdf <- round(ss_ecdf(knots(ss_ecdf)), 1)
-      # ss_coe_90 <- knots(ss_ecdf)[ss_coe_ecdf == 0.95][1]
-      # window_prof <- c(min(sessions_window_prof$cos), ss_coe_75)
+      # Using the rule mean+-2*sd (95.45%) for the start and end times
+      start_time_mean <- mean(as.numeric(sessions_window_prof$ConnectionStartDateTime))
+      start_time_sd <- sd(as.numeric(sessions_window_prof$ConnectionStartDateTime))
+      end_time_mean <- mean(as.numeric(sessions_window_prof$ConnectionEndDateTime))
+      end_time_sd <- sd(as.numeric(sessions_window_prof$ConnectionEndDateTime))
+      sessions_window_prof <- sessions_window_prof %>%
+        filter(
+          between(
+            as.numeric(.data$ConnectionStartDateTime),
+            round_to_interval(start_time_mean - 2*start_time_sd, time_resolution*60),
+            round_to_interval(start_time_mean + 2*start_time_sd, time_resolution*60)
+          ),
+          between(
+            as.numeric(.data$ConnectionEndDateTime),
+            round_to_interval(end_time_mean - 2*end_time_sd, time_resolution*60),
+            round_to_interval(end_time_mean + 2*end_time_sd, time_resolution*60)
+          )
+        )
       window_prof_dttm <- c(
         min(sessions_window_prof$ConnectionStartDateTime),
         min(max(sessions_window_prof$ConnectionEndDateTime), dttm_seq[window[2]])

@@ -174,12 +174,10 @@ get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 1
       return( tibble(datetime = dttm_seq, demand = 0) )
     }
   } else {
-
-    sessions <- sessions %>%
-      filter(.data$Power > 0) %>%
-      adapt_charging_features(time_resolution = resolution)
-
     if (is.null(dttm_seq)) {
+      sessions <- sessions %>%
+        filter(.data$Power > 0) %>%
+        adapt_charging_features(time_resolution = resolution)
       dttm_seq <- seq.POSIXt(
         from = floor_date(min(sessions$ConnectionStartDateTime), 'day'),
         to = floor_date(max(sessions$ConnectionEndDateTime), 'day') + days(1),
@@ -187,6 +185,13 @@ get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 1
       )
     } else {
       resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = 'mins')
+      sessions <- sessions %>%
+        filter(
+          .data$ConnectionStartDateTime >= dttm_seq[1],
+          .data$ConnectionEndDateTime <= dttm_seq[length(dttm_seq)],
+          .data$Power > 0
+        ) %>%
+        adapt_charging_features(time_resolution = resolution)
     }
   }
 
@@ -230,7 +235,7 @@ get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 1
   # Calculate power demand by time slot and variable `by`
   demand <- sessions_expanded %>%
     group_by(!!sym(by), datetime = .data$Timeslot) %>%
-    summarise(Power = sum(.data$Power)) %>%
+    summarise(Power = sum(.data$Power), .groups = "drop") %>%
     pivot_wider(names_from = !!sym(by), values_from = 'Power', values_fill = 0) %>%
     right_join(
       tibble(datetime = dttm_seq),

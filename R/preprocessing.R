@@ -141,6 +141,7 @@ expand_session <- function(session, resolution) {
 #' @param by character, being 'Profile' or 'Session'. When `by='Profile'` each column corresponds to an EV user profile.
 #' @param resolution integer, time resolution (in minutes) of the sessions datetime variables.
 #' If `dttm_seq` is defined this parameter is ignored.
+#' @param align_time logical, whether to align time variables or sessions with the corresponding time `resolution`
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -154,7 +155,7 @@ expand_session <- function(session, resolution) {
 #' @importFrom parallel detectCores mclapply
 #' @importFrom purrr list_rbind
 #'
-get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 15, mc.cores = 2) {
+get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 15, align_time = FALSE, mc.cores = 2) {
 
   # Parameter check and definition of `dttm_seq` and `resolution`
   if (mc.cores < 1) {
@@ -175,9 +176,6 @@ get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 1
     }
   } else {
     if (is.null(dttm_seq)) {
-      sessions <- sessions %>%
-        filter(.data$Power > 0) %>%
-        adapt_charging_features(time_resolution = resolution)
       dttm_seq <- seq.POSIXt(
         from = floor_date(min(sessions$ConnectionStartDateTime), 'day'),
         to = floor_date(max(sessions$ConnectionEndDateTime), 'day') + days(1),
@@ -187,9 +185,17 @@ get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 1
       resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = 'mins')
       sessions <- sessions %>%
         filter(
-          between(.data$ChargingStartDateTime, dttm_seq[1], dttm_seq[length(dttm_seq)]),
-          .data$Power > 0
-        ) %>%
+          between(.data$ChargingStartDateTime, dttm_seq[1], dttm_seq[length(dttm_seq)])
+        )
+    }
+
+    # Remove sessions that are not consuming in certain time slots
+    sessions <- sessions %>%
+      filter(.data$Power > 0)
+
+    # Align time variables to current time resolution
+    if (align_time) {
+      sessions <- sessions %>%
         adapt_charging_features(time_resolution = resolution)
     }
   }

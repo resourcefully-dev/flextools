@@ -9,6 +9,7 @@ get_demand(
   dttm_seq = NULL,
   by = "Profile",
   resolution = 15,
+  align_time = FALSE,
   mc.cores = 2
 )
 }
@@ -23,6 +24,8 @@ variable of the returned time-series data frame.}
 
 \item{resolution}{integer, time resolution (in minutes) of the sessions datetime variables.
 If \code{dttm_seq} is defined this parameter is ignored.}
+
+\item{align_time}{logical, whether to align time variables or sessions with the corresponding time \code{resolution}}
 
 \item{mc.cores}{integer, number of cores to use.
 Must be at least one, and parallelization requires at least two cores.}

@@ -147,7 +147,7 @@ expand_session <- function(session, resolution) {
 #' @return tibble
 #' @export
 #'
-#' @importFrom dplyr tibble sym select_if group_by summarise arrange right_join distinct
+#' @importFrom dplyr tibble sym select_if group_by summarise arrange right_join distinct between
 #' @importFrom rlang .data
 #' @importFrom tidyr pivot_wider
 #' @importFrom lubridate floor_date days month
@@ -187,8 +187,7 @@ get_demand <- function(sessions, dttm_seq = NULL, by = "Profile", resolution = 1
       resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = 'mins')
       sessions <- sessions %>%
         filter(
-          .data$ConnectionStartDateTime >= dttm_seq[1],
-          .data$ConnectionEndDateTime <= dttm_seq[length(dttm_seq)],
+          between(.data$ChargingStartDateTime, dttm_seq[1], dttm_seq[length(dttm_seq)]),
           .data$Power > 0
         ) %>%
         adapt_charging_features(time_resolution = resolution)

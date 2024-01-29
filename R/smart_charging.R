@@ -53,7 +53,7 @@
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
-#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym
 #' @importFrom lubridate hour minute date
 #' @importFrom rlang .data
 #' @importFrom stats sd

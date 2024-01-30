@@ -16,7 +16,7 @@ add_battery_optimization(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = 24,
-  mc.cores = 2
+  mc.cores = 1
 )
 }
 \arguments{

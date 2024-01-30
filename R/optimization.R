@@ -228,7 +228,7 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
                             direction = 'forward', time_horizon = NULL,
                             window_days = 1, window_start_hour = 0,
                             flex_window_hours = NULL,
-                            LFmax = Inf, mc.cores = 2) {
+                            LFmax = Inf, mc.cores = 1) {
   # Parameters check
   opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
@@ -245,14 +245,16 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
     return( NULL )
   }
 
-  if (mc.cores < 1) {
-    message("Parameter mc.cores must be at leas 1. Setting mc.cores = 1.")
+  # Multi-core parameter check
+  if (mc.cores > detectCores(logical = FALSE) | mc.cores < 1) {
     mc.cores <- 1
   }
-  if (detectCores() <= (mc.cores)) {
-    message("Parameter mc.cores too high. Setting mc.cores = 1 to avoid parallelization.")
-    mc.cores <- 1
-  }
+  my.mclapply <- switch(
+    Sys.info()[['sysname']], # check OS
+    Windows = {mclapply.windows}, # case: windows
+    Linux   = {mclapply}, # case: linux
+    Darwin  = {mclapply} # case: mac
+  )
 
   # Optimization windows
   dttm_seq <- opt_data$datetime
@@ -269,28 +271,37 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
 
   # Optimization
   if (opt_objective == "grid") {
-    O_windows <- mclapply(
-      flex_windows_idxs$flex_idx,
-      function (x)
-        minimize_grid_flow_window(
-          G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
-          direction = direction, time_horizon = time_horizon,
-          LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
-        ),
-      mc.cores = mc.cores
-    )
+    if (mc.cores == 1) {
+      O_windows <- minimize_grid_flow_window(
+        G = opt_data$production, LF = LF, LS = opt_data$static,
+        direction = direction, time_horizon = time_horizon,
+        LFmax = LFmax, grid_capacity = opt_data$grid_capacity
+      )
+    } else {
+      O_windows <- my.mclapply(
+        flex_windows_idxs$flex_idx,
+        function (x)
+          minimize_grid_flow_window(
+            G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
+            direction = direction, time_horizon = time_horizon,
+            LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
+          ),
+        mc.cores = mc.cores
+      )
+    }
   } else {
-    O_windows <- mclapply(
-      flex_windows_idxs$flex_idx,
-      function (x)
-        minimize_cost_window(
-          G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
-          PI = opt_data$price_imported[x], PE = opt_data$price_exported[x],
-          direction = direction, time_horizon = time_horizon,
-          LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
-        ),
-      mc.cores = mc.cores
-    )
+    O_windows <- LF
+    # O_windows <- mclapply(
+    #   flex_windows_idxs$flex_idx,
+    #   function (x)
+    #     minimize_cost_window(
+    #       G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
+    #       PI = opt_data$price_imported[x], PE = opt_data$price_exported[x],
+    #       direction = direction, time_horizon = time_horizon,
+    #       LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
+    #     ),
+    #   mc.cores = mc.cores
+    # )
   }
 
   O <- as.numeric(unlist(O_windows))
@@ -584,7 +595,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
                                      SOCmin = 0, SOCmax = 100, SOCini = NULL,
                                      window_days = 1, window_start_hour = 0,
                                      flex_window_hours = 24,
-                                     mc.cores = 2) {
+                                     mc.cores = 1) {
 
   # Parameters check
   opt_data <- check_optimization_data(opt_data, opt_objective)
@@ -606,14 +617,16 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
     SOCini <- SOCmax
   }
 
-  if (mc.cores < 1) {
-    message("Parameter mc.cores must be at leas 1. Setting mc.cores = 1.")
+  # Multi-core parameter check
+  if (mc.cores > detectCores(logical = FALSE) | mc.cores < 1) {
     mc.cores <- 1
   }
-  if (detectCores() <= (mc.cores)) {
-    message("Parameter mc.cores too high. Setting mc.cores = 1 to avoid parallelization.")
-    mc.cores <- 1
-  }
+  my.mclapply <- switch(
+    Sys.info()[['sysname']], # check OS
+    Windows = {mclapply.windows}, # case: windows
+    Linux   = {mclapply}, # case: linux
+    Darwin  = {mclapply} # case: mac
+  )
 
   # Optimization windows
   dttm_seq <- opt_data$datetime
@@ -630,30 +643,40 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 
   # Optimization
   if (opt_objective == "grid") {
-    B_windows <- mclapply(
-      flex_windows_idxs$flex_idx,
-      function (x)
-        minimize_grid_flow_window_battery(
-          G = opt_data$production[x], L = opt_data$static[x],
-          Bcap = Bcap, Bc = Bc, Bd = Bd,
-          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-          grid_capacity = opt_data$grid_capacity[x]
-        ),
-      mc.cores = mc.cores
-    )
+    if (mc.cores == 1) {
+      B_windows <- minimize_grid_flow_window_battery(
+        G = opt_data$production, L = opt_data$static,
+        Bcap = Bcap, Bc = Bc, Bd = Bd,
+        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        grid_capacity = opt_data$grid_capacity
+      )
+    } else {
+      B_windows <- my.mclapply(
+        flex_windows_idxs$flex_idx,
+        function (x)
+          minimize_grid_flow_window_battery(
+            G = opt_data$production[x], L = opt_data$static[x],
+            Bcap = Bcap, Bc = Bc, Bd = Bd,
+            SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+            grid_capacity = opt_data$grid_capacity[x]
+          ),
+        mc.cores = mc.cores
+      )
+    }
   } else {
-    B_windows <- mclapply(
-      flex_windows_idxs$flex_idx,
-      function (x)
-        minimize_cost_window_battery(
-          G = opt_data$production[x], L = opt_data$static[x],
-          PI = opt_data$price_imported[x], PE = opt_data$price_exported[x],
-          Bcap = Bcap, Bc = Bc, Bd = Bd,
-          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-          grid_capacity = opt_data$grid_capacity[x]
-        ),
-      mc.cores = mc.cores
-    )
+    B_windows <- rep(0, nrow(opt_data))
+    # B_windows <- mclapply(
+    #   flex_windows_idxs$flex_idx,
+    #   function (x)
+    #     minimize_cost_window_battery(
+    #       G = opt_data$production[x], L = opt_data$static[x],
+    #       PI = opt_data$price_imported[x], PE = opt_data$price_exported[x],
+    #       Bcap = Bcap, Bc = Bc, Bd = Bd,
+    #       SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+    #       grid_capacity = opt_data$grid_capacity[x]
+    #     ),
+    #   mc.cores = mc.cores
+    # )
   }
 
   B <- as.numeric(unlist(B_windows))

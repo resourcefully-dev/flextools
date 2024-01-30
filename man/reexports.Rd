@@ -4,6 +4,8 @@
 \name{reexports}
 \alias{reexports}
 \alias{get_demand}
+\alias{expand_sessions}
+\alias{adapt_charging_features}
 \title{Objects exported from other packages}
 \keyword{internal}
 \description{
@@ -11,6 +13,6 @@ These objects are imported from other packages. Follow the links
 below to see their documentation.
 
 \describe{
-  \item{evsim}{\code{\link[evsim]{get_demand}}}
+  \item{evsim}{\code{\link[evsim]{adapt_charging_features}}, \code{\link[evsim]{expand_sessions}}, \code{\link[evsim]{get_demand}}}
 }}
 

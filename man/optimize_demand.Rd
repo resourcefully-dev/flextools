@@ -14,7 +14,7 @@ optimize_demand(
   window_start_hour = 0,
   flex_window_hours = NULL,
   LFmax = Inf,
-  mc.cores = 2
+  mc.cores = 1
 )
 }
 \arguments{

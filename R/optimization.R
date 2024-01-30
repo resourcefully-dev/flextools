@@ -272,10 +272,13 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
   # Optimization
   if (opt_objective == "grid") {
     if (mc.cores == 1) {
-      O_windows <- minimize_grid_flow_window(
-        G = opt_data$production, LF = LF, LS = opt_data$static,
-        direction = direction, time_horizon = time_horizon,
-        LFmax = LFmax, grid_capacity = opt_data$grid_capacity
+      O_windows <- map(
+        flex_windows_idxs$flex_idx,
+        ~ minimize_grid_flow_window(
+          G = opt_data$production[.x], LF = LF[.x], LS = opt_data$static[.x],
+          direction = direction, time_horizon = time_horizon,
+          LFmax = LFmax, grid_capacity = opt_data$grid_capacity[.x]
+        )
       )
     } else {
       O_windows <- my.mclapply(
@@ -644,11 +647,14 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   # Optimization
   if (opt_objective == "grid") {
     if (mc.cores == 1) {
-      B_windows <- minimize_grid_flow_window_battery(
-        G = opt_data$production, L = opt_data$static,
-        Bcap = Bcap, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        grid_capacity = opt_data$grid_capacity
+      B_windows <- map(
+        flex_windows_idxs$flex_idx,
+        ~ minimize_grid_flow_window_battery(
+          G = opt_data$production[.x], L = opt_data$static[.x],
+          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          grid_capacity = opt_data$grid_capacity[.x]
+        )
       )
     } else {
       B_windows <- my.mclapply(

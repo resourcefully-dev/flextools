@@ -135,7 +135,7 @@ user profile will not be optimized.
 
 \dontrun{
 sessions <- evsim::california_ev_sessions_profiles
-sessions_demand <- get_demand(sessions, resolution = 15, mc.cores = 4)
+sessions_demand <- evsim::get_demand(sessions, resolution = 15, mc.cores = 4)
 
 # Don't require any other variable than datetime, since we don't
 # care about local generation (just peak shaving objective)

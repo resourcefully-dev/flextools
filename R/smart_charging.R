@@ -57,6 +57,7 @@
 #' @importFrom lubridate hour minute date
 #' @importFrom rlang .data
 #' @importFrom stats sd
+#' @importFrom evsim get_demand adapt_charging_features
 #'
 #' @return a list with three elements: optimal setpoints, sessions schedule and log messages.
 #' @export
@@ -115,7 +116,7 @@
 #'
 #' \dontrun{
 #' sessions <- evsim::california_ev_sessions_profiles
-#' sessions_demand <- get_demand(sessions, resolution = 15, mc.cores = 4)
+#' sessions_demand <- evsim::get_demand(sessions, resolution = 15, mc.cores = 4)
 #'
 #' # Don't require any other variable than datetime, since we don't
 #' # care about local generation (just peak shaving objective)
@@ -433,6 +434,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 #' @importFrom dplyr tibble %>% filter mutate arrange desc
 #' @importFrom rlang .data
 #' @importFrom lubridate as_datetime tz
+#' @importFrom evsim expand_sessions
 #'
 schedule_sessions <- function(sessions, setpoint, method,
                               power_th = 0, charging_power_min = 0.5,
@@ -772,10 +774,10 @@ schedule_sessions <- function(sessions, setpoint, method,
 #' #' Simulate charging power limitation based on grid capacity signals
 #' #'
 #' #' @param sessions tibble, charging sessions data set.
-#' #' If sessions have been expanded using `expand_session` function, set parameter `expand = FALSE`.
+#' #' If sessions have been expanded using `evsim::expand_session` function, set parameter `expand = FALSE`.
 #' #' @param grid_capacity tibble, grid capacity time-series with columns `datetime` and `max_amps` per phase
 #' #' @param amps_car_min integer, minimum current to charge the vehicles
-#' #' @param expand logical, whether to expand session using `expand_session` function
+#' #' @param expand logical, whether to expand session using `evsim::expand_session` function
 #' #' @param include_log logical, whether to print and return log messages
 #' #'
 #' #' @return tibble
@@ -784,6 +786,7 @@ schedule_sessions <- function(sessions, setpoint, method,
 #' #' @importFrom dplyr %>% tibble mutate select all_of row_number filter group_by summarise
 #' #' @importFrom lubridate as_datetime tz
 #' #' @importFrom rlang .data
+#' #' @importFrom evsim get_demand expand_sessions
 #' #'
 #' simulate_flexpower <- function(sessions, grid_capacity, amps_car_min = 8, expand = TRUE, include_log = FALSE) {
 #'   log_messages <- c()

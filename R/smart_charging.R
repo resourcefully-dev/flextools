@@ -137,8 +137,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
                            include_log = FALSE, show_progress = TRUE,
                            mc.cores = 1) {
 
-  # Temporary patch
-  mc.cores <- 1
+  # # Temporary patch
+  # mc.cores <- 1
 
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {
@@ -167,6 +167,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
   # Initialize setpoints tibble with the user profiles demand
   setpoints <- profiles_demand
+
+  # Temporary patch
+  mc.cores <- 1
 
   # SMART CHARGING ----------------------------------------------------------
   if (include_log) message("Smart charging:")

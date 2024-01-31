@@ -135,7 +135,10 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
                            window_days, window_start_hour, responsive,
                            power_th = 0, charging_power_min = 0.5,
                            include_log = FALSE, show_progress = TRUE,
-                           mc.cores = 2) {
+                           mc.cores = 1) {
+
+  # Temporary patch
+  mc.cores <- 1
 
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {

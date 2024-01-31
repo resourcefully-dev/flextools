@@ -137,9 +137,6 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
                            include_log = FALSE, show_progress = TRUE,
                            mc.cores = 1) {
 
-  # # Temporary patch
-  # mc.cores <- 1
-
   # Check input sessions
   if (is.null(sessions) | nrow(sessions) == 0) {
     message("sessions object is empty.")
@@ -168,8 +165,6 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   # Initialize setpoints tibble with the user profiles demand
   setpoints <- profiles_demand
 
-  # Temporary patch
-  mc.cores <- 1
 
   # SMART CHARGING ----------------------------------------------------------
   if (include_log) message("Smart charging:")
@@ -289,7 +284,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       #   Profile sessions that can't provide flexibility are not part of the setpoint
       if (nrow(non_flexible_sessions) > 0) {
         L_fixed_prof <- non_flexible_sessions %>%
-          get_demand(dttm_seq = dttm_seq[window_prof_idxs], mc.cores = mc.cores) %>%
+          get_demand(dttm_seq = dttm_seq[window_prof_idxs], mc.cores = 1) %>%
           pull(!!sym(profile))
       } else {
         L_fixed_prof <- rep(0, window_prof_length)

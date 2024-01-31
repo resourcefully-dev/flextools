@@ -271,35 +271,27 @@ optimize_demand <- function(LF, opt_data, opt_objective = "grid",
 
   # Optimization
   if (opt_objective == "grid") {
-    O_windows <- map(
-      flex_windows_idxs$flex_idx,
-      ~ minimize_grid_flow_window(
-        G = opt_data$production[.x], LF = LF[.x], LS = opt_data$static[.x],
-        direction = direction, time_horizon = time_horizon,
-        LFmax = LFmax, grid_capacity = opt_data$grid_capacity[.x]
+    if (mc.cores == 1) {
+      O_windows <- map(
+        flex_windows_idxs$flex_idx,
+        ~ minimize_grid_flow_window(
+          G = opt_data$production[.x], LF = LF[.x], LS = opt_data$static[.x],
+          direction = direction, time_horizon = time_horizon,
+          LFmax = LFmax, grid_capacity = opt_data$grid_capacity[.x]
+        )
       )
-    )
-    # if (mc.cores == 1) {
-    #   O_windows <- map(
-    #     flex_windows_idxs$flex_idx,
-    #     ~ minimize_grid_flow_window(
-    #       G = opt_data$production[.x], LF = LF[.x], LS = opt_data$static[.x],
-    #       direction = direction, time_horizon = time_horizon,
-    #       LFmax = LFmax, grid_capacity = opt_data$grid_capacity[.x]
-    #     )
-    #   )
-    # } else {
-    #   O_windows <- my.mclapply(
-    #     flex_windows_idxs$flex_idx,
-    #     function (x)
-    #       minimize_grid_flow_window(
-    #         G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
-    #         direction = direction, time_horizon = time_horizon,
-    #         LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
-    #       ),
-    #     mc.cores = mc.cores
-    #   )
-    # }
+    } else {
+      O_windows <- my.mclapply(
+        flex_windows_idxs$flex_idx,
+        function (x)
+          minimize_grid_flow_window(
+            G = opt_data$production[x], LF = LF[x], LS = opt_data$static[x],
+            direction = direction, time_horizon = time_horizon,
+            LFmax = LFmax, grid_capacity = opt_data$grid_capacity[x]
+          ),
+        mc.cores = mc.cores
+      )
+    }
   } else {
     O_windows <- LF
     # O_windows <- mclapply(
@@ -654,38 +646,29 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 
   # Optimization
   if (opt_objective == "grid") {
-    B_windows <- map(
-      flex_windows_idxs$flex_idx,
-      ~ minimize_grid_flow_window_battery(
-        G = opt_data$production[.x], L = opt_data$static[.x],
-        Bcap = Bcap, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        grid_capacity = opt_data$grid_capacity[.x]
+    if (mc.cores == 1) {
+      B_windows <- map(
+        flex_windows_idxs$flex_idx,
+        ~ minimize_grid_flow_window_battery(
+          G = opt_data$production[.x], L = opt_data$static[.x],
+          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          grid_capacity = opt_data$grid_capacity[.x]
+        )
       )
-    )
-    # if (mc.cores == 1) {
-    #   B_windows <- map(
-    #     flex_windows_idxs$flex_idx,
-    #     ~ minimize_grid_flow_window_battery(
-    #       G = opt_data$production[.x], L = opt_data$static[.x],
-    #       Bcap = Bcap, Bc = Bc, Bd = Bd,
-    #       SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-    #       grid_capacity = opt_data$grid_capacity[.x]
-    #     )
-    #   )
-    # } else {
-    #   B_windows <- my.mclapply(
-    #     flex_windows_idxs$flex_idx,
-    #     function (x)
-    #       minimize_grid_flow_window_battery(
-    #         G = opt_data$production[x], L = opt_data$static[x],
-    #         Bcap = Bcap, Bc = Bc, Bd = Bd,
-    #         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-    #         grid_capacity = opt_data$grid_capacity[x]
-    #       ),
-    #     mc.cores = mc.cores
-    #   )
-    # }
+    } else {
+      B_windows <- my.mclapply(
+        flex_windows_idxs$flex_idx,
+        function (x)
+          minimize_grid_flow_window_battery(
+            G = opt_data$production[x], L = opt_data$static[x],
+            Bcap = Bcap, Bc = Bc, Bd = Bd,
+            SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+            grid_capacity = opt_data$grid_capacity[x]
+          ),
+        mc.cores = mc.cores
+      )
+    }
   } else {
     B_windows <- rep(0, nrow(opt_data))
     # B_windows <- mclapply(

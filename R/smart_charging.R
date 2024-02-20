@@ -256,6 +256,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
             round_to_interval(end_time_mean + 2*end_time_sd, time_resolution*60)
           )
         )
+
+      if (nrow(sessions_window_prof) == 0) next
+
       window_prof_dttm <- c(
         min(sessions_window_prof$ConnectionStartDateTime),
         min(max(sessions_window_prof$ConnectionEndDateTime), dttm_seq[window[2]])

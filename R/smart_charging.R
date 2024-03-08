@@ -604,11 +604,12 @@ schedule_sessions <- function(sessions, setpoint, method,
           sessions_timeslot$AveragePower[sessions_timeslot$Curtailable]
         )
 
-        # Power reduction for all sessions, limited by the minimum percentage
-        # allowed of the nominal charging power (`charging_power_min`)
+        # Power reduction that would be required
         power_reduction <- (curtailable_sessions_power - flex_req)/curtailable_sessions_power
 
-        if (power_reduction < 0) {
+        # If the reduction required is lower than the minimum allowed,
+        # then limit the reduction to the minimum allowed
+        if (power_reduction < charging_power_min) {
 
           power_reduction <- charging_power_min
 

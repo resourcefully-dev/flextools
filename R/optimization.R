@@ -568,6 +568,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
                                      mc.cores = 1) {
 
   # Parameters check
+  opt_data <- opt_data %>% mutate(flexible = 0)
   opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
     return( NULL )

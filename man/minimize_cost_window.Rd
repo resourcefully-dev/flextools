@@ -13,7 +13,8 @@ minimize_cost_window(
   direction,
   time_horizon,
   LFmax,
-  grid_capacity
+  grid_capacity,
+  lambda
 )
 }
 \arguments{
@@ -34,6 +35,8 @@ minimize_cost_window(
 \item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 
 \item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
+
+\item{lambda}{numeric, cost optimization factor (see documentation (TO-DO))}
 }
 \value{
 numeric vector

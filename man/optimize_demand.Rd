@@ -5,7 +5,6 @@
 \title{Optimize a vector of flexible demand}
 \usage{
 optimize_demand(
-  LF,
   opt_data,
   opt_objective = "grid",
   direction = "forward",
@@ -13,22 +12,26 @@ optimize_demand(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = NULL,
-  LFmax = Inf,
+  lambda = 0,
   mc.cores = 1
 )
 }
 \arguments{
-\item{LF}{numeric vector, being the flexible load profile (in kW)}
-
 \item{opt_data}{tibble, optimization contextual data.
 The first column must be named \code{datetime} (mandatory) containing the
 date time sequence where the optimization algorithm is applied.
+
+The second column must be named \code{flexible} (mandatory), being the
+power demand (in kW) vector that will be optimized.
+
 The other columns can be:
 \itemize{
 \item \code{static}: static power demand (in kW) from other sectors like buildings,
 offices, etc.
 \item \code{grid_capacity}: maximum imported power from the grid (in kW),
 for example the contracted power with the energy company.
+\item \code{load_capacity}: maximum power that the \code{flexible} load
+can consume (in kW).
 \item \code{production}: local power generation (in kW).
 This is used when \code{opt_objective = "grid"}.
 \item \code{price_imported}: price for imported energy (€/kWh).
@@ -52,7 +55,7 @@ If \code{NULL}, the \code{time_horizon} will be the number of rows of \code{op_d
 This optional feature lets you apply flexibility only during few hours from the \code{window_start_hour}.
 It must be lower than \code{window_days*24} hours.}
 
-\item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
+\item{lambda}{numeric, cost optimization factor (see documentation (TO-DO))}
 
 \item{mc.cores}{integer, number of cores to use.
 Must be at least one, and parallelization requires at least two cores.}

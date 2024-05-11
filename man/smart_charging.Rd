@@ -16,7 +16,7 @@ smart_charging(
   charging_power_min = 0.5,
   include_log = FALSE,
   show_progress = TRUE,
-  mc.cores = 2
+  mc.cores = 1
 )
 }
 \arguments{

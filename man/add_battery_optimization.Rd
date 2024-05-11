@@ -16,6 +16,7 @@ add_battery_optimization(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = 24,
+  lambda = 0,
   mc.cores = 1
 )
 }
@@ -58,6 +59,8 @@ This is used when \code{opt_objective = "cost"}.
 \item{flex_window_hours}{integer, flexibility window length, in hours.
 This optional feature lets you apply flexibility only during few hours from the \code{window_start_hour}.
 It must be lower than \code{window_days*24} hours.}
+
+\item{lambda}{numeric, cost optimization factor (see documentation (TO-DO)}
 
 \item{mc.cores}{integer, number of cores to use.
 Must be at least one, and parallelization requires at least two cores.}

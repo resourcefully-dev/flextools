@@ -659,6 +659,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
       ~ minimize_cost_window_battery(
         G = opt_data$production[.x], L = opt_data$static[.x],
         PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
+        PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
         Bcap = Bcap, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
         grid_capacity = opt_data$grid_capacity[.x],

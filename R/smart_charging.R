@@ -137,6 +137,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     message("Error: `sessions` parameter is empty.")
     return( NULL )
   }
+  opt_data$flexible <- 0
   opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
     return( NULL )

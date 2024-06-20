@@ -24,7 +24,7 @@ date time sequence where the optimization algorithm is applied.
 The second column must be named \code{flexible} (mandatory), being the
 power demand (in kW) vector that will be optimized.
 
-The other columns can be:
+The other columns can be (optional):
 \itemize{
 \item \code{static}: static power demand (in kW) from other sectors like buildings,
 offices, etc.
@@ -37,6 +37,10 @@ This is used when \code{opt_objective = "grid"}.
 \item \code{price_imported}: price for imported energy (€/kWh).
 This is used when \code{opt_objective = "cost"}.
 \item \code{price_exported}: price for exported energy (€/kWh).
+This is used when \code{opt_objective = "cost"}.
+\item \code{price_turn_down}: price for turn-down energy use (€/kWh).
+This is used when \code{opt_objective = "cost"}.
+\item \code{price_turn_up}: price for turn-up energy use (€/kWh).
 This is used when \code{opt_objective = "cost"}.
 }}
 

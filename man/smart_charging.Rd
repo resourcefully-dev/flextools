@@ -94,8 +94,8 @@ imported power from the grid. If \code{production} is not found in \code{opt_dat
 a peak shaving objective will be considered.
 \item Minimize the energy cost (\code{opt_objective = "cost"}): performs a linear
 optimization to minimize the energy cost. In this case, the columns
-\code{grid_capacity}, \code{price_imported} and \code{price_exported} of tibble \code{opt_data}
-are important.
+\code{grid_capacity}, \code{price_imported}, \code{price_exported},
+\code{price_turn_up} and \code{price_turn_down} of tibble \code{opt_data} are important.
 If these variables are not configured, default values of \code{grid_capacity = Inf},
 \code{price_imported = 1} and \code{price_exported = 0} are considered to minimize the
 imported energy.
@@ -110,27 +110,23 @@ user profile will not be optimized.
 \examples{
 # Example: we will use the example data set of charging sessions
 # from the California Technological Institute (Caltech), obtained
-# through the [ACN-Data website](https://ev.caltech.edu/dataset).
+# through the ACN-Data website (https://ev.caltech.edu/dataset).
 # This data set has been clustered into different user profiles
-# using the R package `{evprof}`
-# (see [this article](https://mcanigueral.github.io/evprof/articles/california.html)).
+# using the R package `{evprof}`. See the article in:
+# https://mcanigueral.github.io/evprof/articles/california.html.
+
 # The user profiles of this data set are `Visit` and `Worktime`,
 # identified in two different time cycles `Workday` and `Weekend`.
-
 # These two variables in the `sessions` tibble, `Profile` and `Timecycle`,
 # are required for the `smart_charging` function and give more versatility
 # to the smart charging context. For example, we may want to only coordinate
 # `Worktime` sessions instead of all sessions.
 
 # For this example we want the following:
-
 # - Postpone only `Worktime` sessions, which have a responsiveness rate of
 # 0.9 (i.e. 90\% of Worktime users accept to postpone the session).
-
 # - Minimize the power peak of the sessions (peak shaving)
-
 # - Time series resolution of 15 minutes
-
 # - Optimization window of 24 hours from 6:00AM to 6:00 AM
 
 \dontrun{

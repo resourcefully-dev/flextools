@@ -21,7 +21,6 @@
 #' - `production`: local power generation (in kW).
 #' This is used when `opt_objective = "grid"`.
 #'
-#'
 #' - `price_imported`: price for imported energy (€/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
@@ -75,8 +74,8 @@
 #'
 #' - Minimize the energy cost (`opt_objective = "cost"`): performs a linear
 #' optimization to minimize the energy cost. In this case, the columns
-#' `grid_capacity`, `price_imported` and `price_exported` of tibble `opt_data`
-#' are important.
+#' `grid_capacity`, `price_imported`, `price_exported`,
+#' `price_turn_up` and `price_turn_down` of tibble `opt_data` are important.
 #' If these variables are not configured, default values of `grid_capacity = Inf`,
 #' `price_imported = 1` and `price_exported = 0` are considered to minimize the
 #' imported energy.
@@ -91,27 +90,23 @@
 #' @examples
 #' # Example: we will use the example data set of charging sessions
 #' # from the California Technological Institute (Caltech), obtained
-#' # through the [ACN-Data website](https://ev.caltech.edu/dataset).
+#' # through the ACN-Data website (https://ev.caltech.edu/dataset).
 #' # This data set has been clustered into different user profiles
-#' # using the R package `{evprof}`
-#' # (see [this article](https://mcanigueral.github.io/evprof/articles/california.html)).
+#' # using the R package `{evprof}`. See the article in:
+#' # https://mcanigueral.github.io/evprof/articles/california.html.
+#'
 #' # The user profiles of this data set are `Visit` and `Worktime`,
 #' # identified in two different time cycles `Workday` and `Weekend`.
-#'
 #' # These two variables in the `sessions` tibble, `Profile` and `Timecycle`,
 #' # are required for the `smart_charging` function and give more versatility
 #' # to the smart charging context. For example, we may want to only coordinate
 #' # `Worktime` sessions instead of all sessions.
 #'
 #' # For this example we want the following:
-#'
 #' # - Postpone only `Worktime` sessions, which have a responsiveness rate of
 #' # 0.9 (i.e. 90% of Worktime users accept to postpone the session).
-#'
 #' # - Minimize the power peak of the sessions (peak shaving)
-#'
 #' # - Time series resolution of 15 minutes
-#'
 #' # - Optimization window of 24 hours from 6:00AM to 6:00 AM
 #'
 #' \dontrun{
@@ -137,10 +132,14 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
                            include_log = FALSE, show_progress = TRUE,
                            mc.cores = 1) {
 
-  # Check input sessions
+  # Parameters check
   if (is.null(sessions) | nrow(sessions) == 0) {
-    message("sessions object is empty.")
-    return(NULL)
+    message("Error: `sessions` parameter is empty.")
+    return( NULL )
+  }
+  opt_data <- check_optimization_data(opt_data, opt_objective)
+  if (is.null(opt_data)) {
+    return( NULL )
   }
 
   dttm_seq <- opt_data$datetime
@@ -340,6 +339,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
               LS = L_fixed + L_others + L_fixed_prof,
               PI = opt_data$price_imported[window_prof_idxs],
               PE = opt_data$price_exported[window_prof_idxs],
+              PTU = opt_data$price_turn_up[window_prof_idxs],
+              PTD = opt_data$price_turn_down[window_prof_idxs],
               direction = 'forward',
               time_horizon = NULL,
               LFmax = Inf,

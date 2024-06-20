@@ -10,6 +10,8 @@ minimize_cost_window(
   LS,
   PI,
   PE,
+  PTD,
+  PTU,
   direction,
   time_horizon,
   LFmax,
@@ -27,6 +29,10 @@ minimize_cost_window(
 \item{PI}{numeric vector, electricity prices for imported energy}
 
 \item{PE}{numeric vector, electricity prices for exported energy}
+
+\item{PTD}{numeric vector, prices for turn-down energy use}
+
+\item{PTU}{numeric vector, prices for turn-up energy use}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 

@@ -9,6 +9,8 @@ minimize_cost_window_battery(
   L,
   PE,
   PI,
+  PTD,
+  PTU,
   Bcap,
   Bc,
   Bd,
@@ -27,6 +29,10 @@ minimize_cost_window_battery(
 \item{PE}{numeric vector, electricity prices for exported energy}
 
 \item{PI}{numeric vector, electricity prices for imported energy}
+
+\item{PTD}{numeric vector, prices for turn-down energy use}
+
+\item{PTU}{numeric vector, prices for turn-up energy use}
 
 \item{Bcap}{numeric, capacity of the battery}
 

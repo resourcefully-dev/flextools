@@ -16,6 +16,9 @@ check_optimization_data <- function(opt_data, opt_objective) {
   if (!("grid_capacity" %in% names(opt_data))) {
     opt_data$grid_capacity <- Inf
   }
+  if (!("load_capacity" %in% names(opt_data))) {
+    opt_data$load_capacity <- Inf
+  }
   if (opt_objective == "grid") {
     if (!("production" %in% names(opt_data))) {
       message("Warning: `production` variable not found in `opt_data`.
@@ -31,6 +34,14 @@ check_optimization_data <- function(opt_data, opt_objective) {
     if (!("price_exported" %in% names(opt_data))) {
       message("Warning: `price_exported` variable not found in `opt_data`.")
       opt_data$price_exported <- 0
+    }
+    if (!("price_turn_up" %in% names(opt_data))) {
+      message("Warning: `price_turn_up` variable not found in `opt_data`.")
+      opt_data$price_turn_up <- 0
+    }
+    if (!("price_turn_down" %in% names(opt_data))) {
+      message("Warning: `price_turn_down` variable not found in `opt_data`.")
+      opt_data$price_turn_down <- 0
     }
   }
   return( opt_data )
@@ -192,7 +203,7 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' The second column must be named `flexible` (mandatory), being the
 #' power demand (in kW) vector that will be optimized.
 #'
-#' The other columns can be:
+#' The other columns can be (optional):
 #'
 #' - `static`: static power demand (in kW) from other sectors like buildings,
 #' offices, etc.
@@ -210,6 +221,12 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' This is used when `opt_objective = "cost"`.
 #'
 #' - `price_exported`: price for exported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_turn_down`: price for turn-down energy use (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_turn_up`: price for turn-up energy use (€/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
 #' @param opt_objective character, optimization objective being `"grid"` (default) or `"cost"`
@@ -294,6 +311,10 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
         G = opt_data$production[.x],
         LF = opt_data$flexible[.x],
         LS = opt_data$static[.x],
+        PI = opt_data$price_imported[.x],
+        PE = opt_data$price_exported[.x],
+        PTU = opt_data$price_turn_up[.x],
+        PTD = opt_data$price_turn_down[.x],
         direction = direction,
         time_horizon = time_horizon,
         LFmax = opt_data$load_capacity[.x],
@@ -410,6 +431,8 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @param LS numeric vector, being the static load power profile
 #' @param PI numeric vector, electricity prices for imported energy
 #' @param PE numeric vector, electricity prices for exported energy
+#' @param PTD numeric vector, prices for turn-down energy use
+#' @param PTU numeric vector, prices for turn-up energy use
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
@@ -418,7 +441,7 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #'
 #' @return numeric vector
 #'
-minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LFmax, grid_capacity, lambda) {
+minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, grid_capacity, lambda) {
 
   # Round LF to 2 decimals to avoid problems with lower and upper bounds
   LF <- round(LF, 2)
@@ -446,7 +469,7 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
     )
   )
   q <- c(
-    -lambda*2*LF, PI, -PE
+    PTD - PTU - 2*lambda*LF, PI, -PE
   )
 
   # Constraints
@@ -521,7 +544,7 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 #' @param opt_data tibble, optimization contextual data.
 #' The first column must be named `datetime` (mandatory) containing the
 #' date time sequence where the optimization algorithm is applied.
-#' The other columns can be:
+#' The other columns can be (optional):
 #'
 #' - `static`: static power demand (in kW) from other sectors like buildings,
 #' offices, etc.
@@ -538,6 +561,13 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, direction, time_horizon, LF
 #'
 #' - `price_exported`: price for exported energy (€/kWh).
 #' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_turn_down`: price for turn-down energy use (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_turn_up`: price for turn-up energy use (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
 #' @param opt_objective character, optimization objective being `"grid"` (default) or `"cost"`
 #' @param Bcap numeric, capacity of the battery
 #' @param Bc numeric, maximum charging power
@@ -734,6 +764,8 @@ minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param L numeric vector, being the load profile
 #' @param PI numeric vector, electricity prices for imported energy
 #' @param PE numeric vector, electricity prices for exported energy
+#' @param PTD numeric vector, prices for turn-down energy use
+#' @param PTU numeric vector, prices for turn-up energy use
 #' @param Bcap numeric, capacity of the battery
 #' @param Bc numeric, maximum charging power
 #' @param Bd numeric, maximum discharging power
@@ -745,7 +777,7 @@ minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #'
 #' @return numeric vector
 #'
-minimize_cost_window_battery <- function (G, L, PE, PI, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda) {
+minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -766,7 +798,7 @@ minimize_cost_window_battery <- function (G, L, PE, PI, Bcap, Bc, Bd, SOCmin, SO
     )
   )
   q <- c(
-    rep(0, time_slots), PI, -PE
+    PTD - PTU, PI, -PE
   )
 
   # Constraints

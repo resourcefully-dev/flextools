@@ -11,7 +11,8 @@ minimize_grid_flow_window(
   direction,
   time_horizon,
   LFmax,
-  grid_capacity
+  grid_capacity,
+  lambda = 0
 )
 }
 \arguments{
@@ -28,6 +29,9 @@ minimize_grid_flow_window(
 \item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 
 \item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
+
+\item{lambda}{numeric, penalty on change for the flexible load.
+This is a factor used in the optimization problem.}
 }
 \value{
 numeric vector

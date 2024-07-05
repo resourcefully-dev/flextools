@@ -30,6 +30,7 @@ The `flextools` function `optimize_demand` provides a framework to modify a time
 * **Direction to shift energy** (forwards or backwards)
 * **Time horizon** of the energy shift, being the maximum number of time-slots to shift demand from
 * **Optimization window** characteristics, such as the length (in days), the starting hour or the hours where energy shifting is allowed.
+* **Penalty on change** for the flexible load (parameter `lambda`). The higher lambda, the lower flexibility potential.
 
 This article shows different configurations regarding these parameters, using the following example data set with a power demand and solar generation profiles:
 

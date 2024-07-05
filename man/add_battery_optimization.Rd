@@ -64,7 +64,8 @@ This is used when \code{opt_objective = "cost"}.
 This optional feature lets you apply flexibility only during few hours from the \code{window_start_hour}.
 It must be lower than \code{window_days*24} hours.}
 
-\item{lambda}{numeric, cost optimization factor (see documentation (TO-DO)}
+\item{lambda}{numeric, penalty on change for the battery power profile.
+This is a factor used in the optimization problem.}
 
 \item{mc.cores}{integer, number of cores to use.
 Must be at least one, and parallelization requires at least two cores.}

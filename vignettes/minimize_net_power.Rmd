@@ -27,11 +27,12 @@ The objective function (Equation \@ref(eq:opt-objective)) and constraints (Equat
 - $LS_t$ : Non-flexible load time-series vector
 - $LF_t$ : Flexible load time-series vector (if not optimized)
 - $O_t$ : Optimal flexible load time-series vector
+- $\lambda$ : penalty on change for the flexible load
 - $LFmax$ : Maximum power demand for the flexible load
 - $GC_t$ : Grid power capacity time-series vector
 
 \begin{equation}
-  min \sum_{t=1}^{T} (R_t-L_t-O_t)^2
+  min \sum_{t=1}^{T} (R_t-L_t-O_t)^2 + \lambda (O_t-LF_t)^{2}
   (\#eq:opt-objective)
 \end{equation}
 

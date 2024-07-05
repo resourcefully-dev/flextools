@@ -238,7 +238,8 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' @param flex_window_hours integer, flexibility window length, in hours.
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
-#' @param lambda numeric, cost optimization factor (see documentation (TO-DO))
+#' @param lambda numeric, penalty on change for the flexible load.
+#' This is a factor used in the optimization problem.
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -301,7 +302,8 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
         direction = direction,
         time_horizon = time_horizon,
         LFmax = opt_data$load_capacity[.x],
-        grid_capacity = opt_data$grid_capacity[.x]
+        grid_capacity = opt_data$grid_capacity[.x],
+        lambda = lambda
       )
     )
   } else {
@@ -358,14 +360,18 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param lambda numeric, penalty on change for the flexible load.
+#' This is a factor used in the optimization problem.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax, grid_capacity) {
+minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax, grid_capacity, lambda=0) {
 
-  # Round LF to 2 decimals to avoid problems with lower and upper bounds
+  # Round to 2 decimals to avoid problems with lower and upper bounds
+  G <- round(G, 2)
   LF <- round(LF, 2)
+  LS <- round(LS, 2)
 
   # Optimization parameters
   time_slots <- length(LF)
@@ -384,8 +390,8 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
   identityMat <- diag(time_slots)
 
   # Objective function terms
-  P <- 2*identityMat
-  q <- 2*(LS - G)
+  P <- 2*identityMat*(1+lambda)
+  q <- 2*(LS - G - lambda*LF)
 
   # Constraints
   L_bounds <- get_bounds(LF, LFmax = LFmax_vct, time_slots, time_horizon, direction)
@@ -438,15 +444,18 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
-#' @param lambda numeric, cost optimization factor (see documentation (TO-DO))
+#' @param lambda numeric, penalty on change for the flexible load.
+#' This is a factor used in the optimization problem.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, grid_capacity, lambda) {
+minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, grid_capacity, lambda=0) {
 
-  # Round LF to 2 decimals to avoid problems with lower and upper bounds
+  # Round to 2 decimals to avoid problems with lower and upper bounds
+  G <- round(G, 2)
   LF <- round(LF, 2)
+  LS <- round(LS, 2)
 
   # Optimization parameters
   time_slots <- length(LF)
@@ -454,7 +463,7 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   if (is.null(time_horizon)) {
     time_horizon <- time_slots
   }
-  LFmax_vct <- pmin(grid_capacity + G - LS, LFmax)
+  LFmax_vct <- round(pmin(grid_capacity + G - LS, LFmax), 2)
   identityMat <- diag(time_slots)
 
   # Objective function terms
@@ -582,7 +591,8 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
 #' @param flex_window_hours integer, flexibility window length, in hours.
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
-#' @param lambda numeric, cost optimization factor (see documentation (TO-DO)
+#' @param lambda numeric, penalty on change for the battery power profile.
+#' This is a factor used in the optimization problem.
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -777,12 +787,13 @@ minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
-#' @param lambda numeric, cost optimization factor (see documentation (TO-DO))
+#' @param lambda numeric, penalty on change for the battery power profile.
+#' This is a factor used in the optimization problem.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda) {
+minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda=0) {
 
   # Optimization parameters
   time_slots <- length(G)

@@ -1,0 +1,46 @@
+---
+title: "Smart charging"
+output: html_document
+---
+
+# Overview
+
+The smart charging concept is widely used in different fields and applications. In `{flextools}` package, we define *smart charging* as a tool to coordinate individual EV charging sessions in order to obtain the optimal aggregated demand profile according to a certain objective. There are different practical strategies to coordinate each session, such as postponing sessions, reducing the charging power or the total energy charged, interrupting the session, a combination of multiple strategies, etc.
+
+
+# Smart charging algorithm
+
+We have divided the smart charging algorithm in two different stages:
+
+1. Setpoint calculation for the aggregated EV demand curve
+2. Scheduling of the individual sessions to match the setpoint of the aggregated demand
+
+Below, we will briefly explain the process performed in each one of theses steps.
+
+
+## Setpoint calculation
+
+The *setpoint* for the aggregated EV demand is understood as the desired, optimal or allowed power demand, depending on the objective and characteristics of the control over the charging points. 
+
+Currently, `flextools` allows the following methods to define the setpoint of the aggregated EV demand:
+
+* **Net power optimization**: the interaction with the grid is minimized as well as the peaks of demand. This is done through the Quadrating programming formulation explained in `vignette("minimize_net_power")`, using parameters `direction="forward"` to postpone EV sessions and `time_horizon=NULL`  to exploit their flexibility until the end of the optimization window. 
+* **Grid capacity profile** [TO-DO]
+
+
+## Scheduling algorithm
+
+After obtaining the setpoint $S_t$, the the scheduling algorithm follows the sequence below for every timeslot $t$:
+
+1. Calculate $V_t$, the EV demand
+2. Get the time slots where $V_t > S_t$
+3. Stop if no more flexibility is required
+4. Get the power difference between load and setpoint in the time slots where $V_t > S_t$
+5. Select sessions with potential to be shifted:
+    - Flexibility hours (connection duration - charging duration) > $\Delta t$
+    - For postpone method: start charging in any of the time slots where $V_t > S_t$
+    - For curtail and interrupt methods: is charging in any of the time slots where $V_t > S_t$
+6. Stop if no more flexibility is available
+7. Coordinate all sessions that start in the first time slot that requires flexibility until $V_t <= S_t$
+8. Repeat 1-6 until no more flexibility is required or available
+

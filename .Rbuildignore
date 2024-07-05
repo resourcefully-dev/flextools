@@ -6,3 +6,11 @@
 ^data-raw$
 vignettes
 tests
+^vignettes/articles$
+^_pkgdown\.yml$
+^docs$
+^pkgdown$
+^README.Rmd
+^\.github$
+^cran-comments\.md$
+^CRAN-SUBMISSION$

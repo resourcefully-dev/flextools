@@ -360,6 +360,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @return numeric vector
+#' @keywords internal
 #'
 minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax, grid_capacity) {
 
@@ -440,6 +441,7 @@ minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @param lambda numeric, cost optimization factor (see documentation (TO-DO))
 #'
 #' @return numeric vector
+#' @keywords internal
 #'
 minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, grid_capacity, lambda) {
 
@@ -708,6 +710,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #'
 #' @return numeric vector
+#' @keywords internal
 #'
 minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity = Inf) {
 
@@ -777,6 +780,7 @@ minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param lambda numeric, cost optimization factor (see documentation (TO-DO))
 #'
 #' @return numeric vector
+#' @keywords internal
 #'
 minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda) {
 

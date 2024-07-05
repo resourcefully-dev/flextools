@@ -28,3 +28,5 @@ Imports:
     osqp,
     Matrix,
     evsim
+Suggests: 
+    rmarkdown

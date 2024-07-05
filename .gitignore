@@ -3,3 +3,5 @@ R/*.rda
 data-raw
 tests
 vignettes
+inst/doc
+docs

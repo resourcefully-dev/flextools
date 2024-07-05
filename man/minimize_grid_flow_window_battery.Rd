@@ -41,3 +41,4 @@ numeric vector
 \description{
 Battery optimal charging/discharging profile to minimize grid interaction (just a window)
 }
+\keyword{internal}

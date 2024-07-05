@@ -56,3 +56,4 @@ numeric vector
 \description{
 Battery optimal charging/discharging profile to minimize cost (just a window)
 }
+\keyword{internal}

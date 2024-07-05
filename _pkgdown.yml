@@ -1,0 +1,36 @@
+url: mcanigueral.github.io/flextools
+
+template:
+  bootstrap: 5
+  bootswatch: flatly
+
+navbar:
+  structure:
+    left:  [home, intro, reference, articles, tutorials, news]
+    right: [github]
+
+reference:
+  - title: Optimization
+  - contents:
+    - add_extra_days
+    - optimize_demand
+    - add_battery_optimization
+  - title: Smart charging
+  - contents:
+    - smart_charging
+    - schedule_sessions
+  - title: Battery
+  - contents:
+    - add_battery_simple
+    - get_storage_level
+    - add_storage_level
+    - get_storage_losses
+    - get_conversion_losses
+
+articles:
+  - title: Articles
+    navbar: ~
+    contents:
+      - net_power
+      - optimize_demand
+      - smart_charging

@@ -50,3 +50,4 @@ numeric vector
 \description{
 Minimization of the cost (just a window)
 }
+\keyword{internal}

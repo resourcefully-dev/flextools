@@ -35,3 +35,4 @@ numeric vector
 \description{
 Minimization of the grid flow (just a window)
 }
+\keyword{internal}

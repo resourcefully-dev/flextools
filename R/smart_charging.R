@@ -324,7 +324,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
           # Optimize the flexible profile's load according to `opt_objective`
           if (opt_objective == "grid") {
-            O <- minimize_grid_flow_window(
+            O <- minimize_net_power_window(
               G = opt_data$production[window_prof_idxs],
               LF = L_prof,
               LS = L_fixed + L_others + L_fixed_prof,

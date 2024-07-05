@@ -295,7 +295,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
   if (opt_objective == "grid") {
     O_windows <- map(
       flex_windows_idxs$flex_idx,
-      ~ minimize_grid_flow_window(
+      ~ minimize_net_power_window(
         G = opt_data$production[.x],
         LF = opt_data$flexible[.x],
         LS = opt_data$static[.x],
@@ -351,7 +351,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 
 
 
-#' Minimization of the grid flow (just a window)
+#' Minimization of net power (just a window)
 #'
 #' @param G numeric vector, being the renewable generation profile
 #' @param LF numeric vector, being the flexible load profile
@@ -366,7 +366,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_grid_flow_window <- function (G, LF, LS, direction, time_horizon, LFmax, grid_capacity, lambda=0) {
+minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax, grid_capacity, lambda=0) {
 
   # Round to 2 decimals to avoid problems with lower and upper bounds
   G <- round(G, 2)
@@ -658,7 +658,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   if (opt_objective == "grid") {
     B_windows <- map(
       flex_windows_idxs$flex_idx,
-      ~ minimize_grid_flow_window_battery(
+      ~ minimize_net_power_window_battery(
         G = opt_data$production[.x], L = opt_data$static[.x],
         Bcap = Bcap, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
@@ -722,7 +722,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_grid_flow_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity = Inf) {
+minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity = Inf) {
 
   # Optimization parameters
   time_slots <- length(G)

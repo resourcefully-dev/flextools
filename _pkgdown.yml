@@ -26,11 +26,21 @@ reference:
     - add_storage_level
     - get_storage_losses
     - get_conversion_losses
+  - title: Calculations
+  - contents:
+    - get_energy_balance
+    - get_energy_kpis
+    - get_energy_cost
+    - get_imbalance_income
 
 articles:
   - title: Articles
     navbar: ~
     contents:
-      - net_power
       - optimize_demand
       - smart_charging
+      - minimize_net_power
+      - minimize_cost
+      - minimize_net_power_battery
+      - minimize_cost_battery
+

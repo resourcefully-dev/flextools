@@ -57,18 +57,18 @@ check_optimization_data <- function(opt_data, opt_objective) {
 #' @export
 #'
 #' @importFrom dplyr filter %>% bind_rows arrange
-#' @importFrom lubridate date years
+#' @importFrom lubridate date days
 #'
 add_extra_days <- function(df) {
   first_day <- df %>%
     filter(date(.data$datetime) == min(date(.data$datetime)))
-  first_day$datetime <- first_day$datetime + years(1)
+  first_day$datetime <- first_day$datetime - days(1)
   last_day <- df %>%
     filter(date(.data$datetime) == max(date(.data$datetime)))
-  last_day$datetime <- last_day$datetime - years(1)
+  last_day$datetime <- last_day$datetime +days(1)
 
   bind_rows(
-    last_day, df, first_day
+    first_day, df, last_day
   ) %>%
     arrange(.data$datetime)
 }
@@ -493,7 +493,7 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   ub_O <- L_bounds$ub_general
 
   ## Imported energy bounds
-  ## 0 <= It <= grid_capacity -> 0 <= It <= grid_capacity
+  ## 0 <= It <= grid_capacity
   Amat_I <- cbind(
     identityMat*0, identityMat*1, identityMat*0
   )
@@ -718,11 +718,13 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param lambda numeric, penalty on change for the battery power profile.
+#' This is a factor used in the optimization problem.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity = Inf) {
+minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda=0) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -730,7 +732,7 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
 
   # Objective function terms
-  P <- 2*identityMat
+  P <- 2*identityMat*lambda
   q <- 2*(L - G)
 
   # Lower and upper bounds
@@ -799,12 +801,27 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   time_slots <- length(G)
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
+  nextMat <- identityMat
+  nextMat[1, 1] <- 0
+  nextMat[time_slots, time_slots] <- 0
+  lambdaMat <- identityMat + nextMat -
+    triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "u", 1), "l", 1
+    ) -
+    triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "l", -1), "u", -1
+    )
 
   # Objective function terms
-  # unknown variable: X = [O, I, E]
+  # unknown variable: X = [B, I, E]
   P <- rbind(
+    # cbind(
+    #   2*lambda*identityMat, identityMat*0, identityMat*0
+    # ),
     cbind(
-      2*lambda*identityMat, identityMat*0, identityMat*0
+      2*lambda*(
+        lambdaMat
+      ), identityMat*0, identityMat*0
     ),
     cbind(
       identityMat*0, identityMat*0, identityMat*0
@@ -825,7 +842,7 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   ub_B <- rep(Bc, time_slots)
 
   ## Imported energy bounds
-  ## 0 <= It <= grid_capacity -> 0 <= It <= grid_capacity
+  ## 0 <= It <= grid_capacity
   Amat_I <- cbind(
     identityMat*0, identityMat*1, identityMat*0
   )
@@ -861,6 +878,16 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   )
   lb_energy <- 0
   ub_energy <- 0
+
+  # ## Ramp rate
+  # ## -R <= B_t - B_{t-1} <= R
+  # rampMat <- diag(-1, time_slots, time_slots) +
+  #   triangulate_matrix(triangulate_matrix(matrix(1, time_slots, time_slots), "u", 1), "l", 1)
+  # Amat_ramp <- cbind(
+  #   rampMat, identityMat*0, identityMat*0
+  # )
+  # lb_ramp <- -Bc*0.5
+  # ub_ramp <- Bc*0.5
 
   # Join constraints
   Amat <- rbind(Amat_B, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)

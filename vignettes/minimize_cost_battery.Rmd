@@ -1,0 +1,409 @@
+---
+title: "Energy cost minimization with battery"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, fig.width = 9)
+# library(flextools)
+devtools::load_all()
+library(dplyr)
+library(lubridate)
+library(dutils)
+library(dygraphs)
+library(ggplot2)
+library(tidyr)
+
+plot_cost_opt_battery <- function(opt_data_batt) {
+  energy_cost <- opt_data_batt %>%
+    mutate(
+      consumption = static + battery
+    ) %>% 
+    get_energy_cost()
+  
+  imbalance_income <- opt_data_batt %>%
+    mutate(
+      demand_baseline = 0, 
+      demand_final = battery
+    ) %>% 
+    get_imbalance_income()
+  
+  opt_data_batt %>% 
+    dyplot(
+      title = paste0("Energy cost: ", round(energy_cost), "€, Imbalance income: ", round(imbalance_income), "€")
+    ) %>% 
+    dyAxis("y", "Power (kW)") %>% 
+    dyAxis("y2", "Price (€/kWh)") %>% 
+    dySeries("static", "Building", "navy") %>%
+    dySeries("production", "Production", "orange") %>% 
+    dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
+    dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>% 
+    dySeries("price_turn_up","Turn-up price",  axis = "y2", color = "#003300", strokePattern = "dashed", strokeWidth = 2) %>% 
+    dySeries("price_turn_down","Turn-down price",  axis = "y2", color = "#669900", strokePattern = "dashed", strokeWidth = 2) %>% 
+    dySeries("battery", "Battery", "purple") %>% 
+    dyLegend(width = 200, show = "onmouseover") %>% 
+    dyOptions(strokeWidth = 2)
+}
+```
+
+Function `add_battery_optimization()` makes use of Quadratic programming to obtain the optimal battery charging/discharging profile given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, flextools package allows to optimize a time-series battery power profile considering two different goals:
+
+* Minimize the power exchanged with the grid (net power)
+* Minimize the energy cost
+
+In this article, we'll cover the optimization problem for the first objective: **energy cost minimization**.
+
+
+# Problem formulation
+
+Our energy cost optimization takes into account multiple profiles of energy prices with the objective to minimize the total cost, considering:
+
+* Imported energy cost
+* Exported energy income
+* Balancing market prices (income for turn up/down demand)
+  
+The objective function and constraints of this optimization problem are represented below, where:
+
+- $T$ : Number of time intervals within the optimization window
+- $G_t$ : Local power generation time-series vector
+- $L_t$ : Power load time-series vector
+- $B_t$ : Optimal battery power time-series vector. Positive charging, negative discharging.
+- $I_t$ : imported energy
+- $E_t$ : exported energy
+- $PI_t$ : imported energy price
+- $PE_t$ : exported energy price
+- $PTU_t$ : balancing price for turn-up power
+- $PTD_t$ : balancing price for turn-down power
+- $\lambda$ : penalty on change for the flexible load
+- $GC_t$ : Grid power capacity time-series vector
+- $B_{cap}$ : Battery capacity
+- $B_c$ : Maximum charging power
+- $B_d$ : Maximum discharging power
+- $SOC_{min}$ : Minimum state of charge of the battery
+- $SOC_{max}$ : Maximum state of charge of the battery
+- $SOC_{ini}$ : state of charge at the beginning/end of the optimization window
+
+Objective function of the optimization problem:
+
+$$
+min \sum_{t=1}^{T} I_t·PI_t - E_t·PE_t - PTU_t·B_t  - PTD_t·(-B_t) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^{2}
+$$
+
+
+Moreover, this optimization problem has the following constraints:
+  
+* Battery power (positive = charging, negative = discharging) limits:
+
+$$
+-B_d \le B_t \le B_c \quad t \in T
+$$
+
+* State of charge limits:
+
+$$
+SOC_{min} \le SOC_{ini} + \frac{\sum_{t=1}^T B_t \Delta t}{B_{cap}} \le SOC_{max} \quad t \in T
+$$
+
+* The balance of charged/discharge energy must be 0 at the end of the optimization window to have the same initial state of charge at the beginning of every optimization window:
+
+$$
+\sum_{t=1}^T B_t \Delta t = 0
+$$
+
+* The imported energy must remain between 0 and the corresponding energy consumed with the maximum grid capacity:
+
+$$
+0 \le I_t \le GC_t \Delta t \quad t \in T
+$$
+
+* The exported energy must remain between 0 and power generation (this only allows the battery to discharge during importing hours):
+
+$$
+0 \le E_t \le G_t \Delta t \quad t \in T
+$$
+
+* Energy balance behind-the-meter:
+
+$$
+I_t - E_t = B_t + L_t - G_t
+$$
+
+
+
+# Quadratic programming
+  
+Considering that the objective function of this problem has quadratic terms, a Quadratic Programming algorithm must be used. In this case we have used the R package `osqp`, visit their [website](https://osqp.org/) for more information.
+
+The form of a [quadratic problem](https://osqp.org/docs/solver/index.html) is:
+
+$$
+  \begin{array}{ll} 
+  \text{minimize} & \mathrm (1/2) x^\top \mathrm P \, \mathrm x + \mathrm q^{\top} \mathrm x \\ 
+  \text{subject to} & \mathrm l \leq \mathrm Ax \leq \mathrm u
+  \end{array}
+$$
+
+The OSQP function `osqp::solve_osqp(P, q, A, l, u)` requires the parameters `P`, `q`, `A`, `l` and `u`. These parameters must be extracted from our problem formulation, so developing the objective function we can create `P` and `q` and from constraints we can create `A`, `l` and `u`.
+
+Then:
+
+$$
+P = 2 · \lambda · H
+$$
+$$
+q = PTD - PTU + PI - PE
+$$
+
+Where $H$ is the matrix corresponding to the smoothing term (penalty on change) of the objective function: $\lambda \sum_{t=1}^{T-1} (B_{t+1} - B_t)^2$.
+
+
+
+
+
+# Examples
+
+Package `flextools` provides an example data set of time-series energy and prices profiles to test its functions, called  `energy_profiles`. We will filter the whole data set for just a single week, and rename the variables with custom names to fit the column names required in the `flextools` functions:
+
+```{r}
+opt_data <- energy_profiles %>% 
+  filter(isoweek(datetime) == 18) %>% 
+  rename(
+    production = solar, 
+    static = building
+  )
+```
+
+For that week, we have a building energy consumption profile (now called `static`) and a solar PV production profile (called `production`), together with prices for imported and exported energy and for the imbalance market:
+
+```{r, echo=FALSE}
+opt_data %>% 
+  dyplot() %>% 
+  dyAxis("y", "Power (kW)") %>% 
+  dyAxis("y2", "Price (€/kWh)") %>% 
+  dySeries("static", "Building", "navy") %>%
+  dySeries("production", "Production", "orange") %>% 
+  dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
+  dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>% 
+  dySeries("price_turn_up","Turn-up price",  axis = "y2", color = "#003300", strokePattern = "dashed", strokeWidth = 2) %>% 
+  dySeries("price_turn_down","Turn-down price",  axis = "y2", color = "#669900", strokePattern = "dashed", strokeWidth = 2) %>% 
+  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyOptions(strokeWidth = 2)
+```
+
+Now, let's add the optimal battery profile in different scenarios, considering a **capacity of 50kWh** and a **charge/discharge power of 4kW**. 
+
+
+## Minimize energy cost (without imbalance market)
+
+Now we'll focus just on the energy cost minimization. For that purpose, we can skip imbalance optimization by setting the variables `price_turn_up` and `price_turn_down` to zero:
+
+```{r}
+opt_data_batt <- opt_data %>%
+  mutate(
+    price_turn_up = 0,
+    price_turn_down = 0,
+  ) %>% 
+  mutate(
+    battery = add_battery_optimization(
+      opt_data = .,
+      opt_objective = "cost",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4
+    )
+  ) 
+```
+```{r, echo=FALSE}
+plot_cost_opt_battery(opt_data_batt)
+```
+
+Since this example considers constant exported energy price, we can appreciate that battery discharges when the imported price goes up, and charges when the imported prices goes down. Moreover, we can see that the charging hours are mainly during solar production times, to minimize imported/exported energy. 
+
+However, we see that the price fluctuation makes to increase the variability of the battery profile. To avoid switching from charging to discharging in small periods of time, the `lambda` parameter has been introduced to the problem formulation. Thus when `lambda > 0`, there is a penalty on changes of the battery power between consecutives time-slots. For example, with `lambda = 1`:
+
+```{r}
+opt_data_batt <- opt_data %>%
+  mutate(
+    price_turn_up = 0,
+    price_turn_down = 0,
+  ) %>% 
+  mutate(
+    battery = add_battery_optimization(
+      opt_data = .,
+      opt_objective = "cost",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      lambda = 1
+    )
+  ) 
+```
+```{r, echo=FALSE}
+plot_cost_opt_battery(opt_data_batt)
+```
+
+
+Now, we can see that the price fluctuations does not impact on the battery profile, but the total cost has increased. The optimal solution would be found with a lambda value between 0 and 1. 
+
+To find the optimal lambda, we can apply an iteration over multiple values and calculate two significant indicators: the **energy cost** (the lower the better) and the **crossover times**, so the times that the battery shifted from charging to discharging (the lower the better).
+
+The following plot shows the normalized values (between 0 and 1) from these two indicators according to the `lambda` value:
+
+```{r, echo=FALSE}
+lambdas_tbl <- tibble(
+  lambda = seq(0, 1, 0.05),
+  energy_cost = NA,
+  crossover_times = NA
+)
+for (i in seq_len(nrow(lambdas_tbl))) {
+  opt_data_batt <- opt_data %>%
+    mutate(
+      price_turn_up = 0,
+      price_turn_down = 0,
+    ) %>% 
+    mutate(
+      battery = add_battery_optimization(
+        opt_data = .,
+        opt_objective = "cost",
+        Bcap = 50,
+        Bc = 4,
+        Bd = 4,
+        lambda = lambdas_tbl$lambda[i]
+      )
+    ) 
+  lambdas_tbl$energy_cost[i] <- opt_data_batt %>%
+    mutate(
+      consumption = static + battery
+    ) %>% 
+    get_energy_cost()
+  lambdas_tbl$crossover_times[i] <- sum(diff(sign(opt_data_batt$battery)) != 0)
+}
+lambdas_tbl$energy_cost <- normalize(lambdas_tbl$energy_cost)
+lambdas_tbl$crossover_times <- normalize(lambdas_tbl$crossover_times)
+```
+
+```{r, echo=FALSE}
+lambdas_plot <- lambdas_tbl %>%
+  pivot_longer(-lambda) %>% 
+  ggplot(aes(lambda, value, color = name, group = name)) + 
+  geom_line() + 
+  labs(x ="", y = "Indicator normalized value", color = "")
+plotly::ggplotly(lambdas_plot)
+```
+
+We could consider the optimal lambda the "knee" of the curves, so approximately `lamda=0.1`. For this value of lambda we obtain the following battery profile:
+
+```{r}
+opt_data_batt <- opt_data %>%
+  mutate(
+    price_turn_up = 0,
+    price_turn_down = 0,
+  ) %>% 
+  mutate(
+    battery = add_battery_optimization(
+      opt_data = .,
+      opt_objective = "cost",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      lambda = 0.1
+    )
+  ) 
+```
+```{r, echo=FALSE}
+plot_cost_opt_battery(opt_data_batt)
+```
+
+
+## Minimize energy cost considering imbalance income
+
+Now let's consider the prices for the imbalance market, assuming more income thanks to providing flexibility to the power system. 
+
+```{r}
+opt_data_batt <- opt_data %>%
+  mutate(
+    battery = add_battery_optimization(
+      opt_data = .,
+      opt_objective = "cost",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      lambda = 0.1
+    )
+  ) 
+```
+```{r, echo=FALSE}
+plot_cost_opt_battery(opt_data_batt)
+```
+
+In this case we see that the "knee" of the curves corresponds to a higher lambda, `lambda = 0.15`:
+
+```{r, echo=FALSE}
+lambdas_tbl <- tibble(
+  lambda = seq(0, 1, 0.05),
+  total_cost = NA,
+  crossover_times = NA
+)
+for (i in seq_len(nrow(lambdas_tbl))) {
+  opt_data_batt <- opt_data %>%
+    mutate(
+      battery = add_battery_optimization(
+        opt_data = .,
+        opt_objective = "cost",
+        Bcap = 50,
+        Bc = 4,
+        Bd = 4,
+        lambda = lambdas_tbl$lambda[i]
+      )
+    ) 
+  energy_cost <- opt_data_batt %>%
+    mutate(
+      consumption = static + battery
+    ) %>% 
+    get_energy_cost()
+  imbalance_income <- opt_data_batt %>%
+    mutate(
+      demand_baseline = 0, 
+      demand_final = battery
+    ) %>% 
+    get_imbalance_income()
+  
+  lambdas_tbl$total_cost[i] <- energy_cost - imbalance_income
+  lambdas_tbl$crossover_times[i] <- sum(diff(sign(opt_data_batt$battery)) != 0)
+  
+}
+lambdas_tbl$total_cost <- normalize(lambdas_tbl$total_cost)
+lambdas_tbl$crossover_times <- normalize(lambdas_tbl$crossover_times)
+```
+
+```{r, echo=FALSE}
+lambdas_plot <- lambdas_tbl %>%
+  pivot_longer(-lambda) %>% 
+  ggplot(aes(lambda, value, color = name, group = name)) + 
+  geom_line() + 
+  labs(x ="", y = "Indicator normalized value", color = "")
+plotly::ggplotly(lambdas_plot)
+```
+
+And effectively, we see that the fluctuation is better with this lambda value:
+
+```{r}
+opt_data_batt <- opt_data %>%
+  mutate(
+    battery = add_battery_optimization(
+      opt_data = .,
+      opt_objective = "cost",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      lambda = 0.2
+    )
+  ) 
+```
+```{r, echo=FALSE}
+plot_cost_opt_battery(opt_data_batt)
+```
+
+
+
+

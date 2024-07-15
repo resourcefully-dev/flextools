@@ -13,7 +13,8 @@ minimize_net_power_window_battery(
   SOCmin,
   SOCmax,
   SOCini,
-  grid_capacity = Inf
+  grid_capacity,
+  lambda = 0
 )
 }
 \arguments{
@@ -34,6 +35,9 @@ minimize_net_power_window_battery(
 \item{SOCini}{numeric, required State-of-Charge at the beginning/end of optimization window}
 
 \item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
+
+\item{lambda}{numeric, penalty on change for the battery power profile.
+This is a factor used in the optimization problem.}
 }
 \value{
 numeric vector

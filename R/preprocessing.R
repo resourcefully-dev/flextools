@@ -23,3 +23,12 @@ convert_time_num_to_period <- function(time_num) {
   hours(as.integer(h)) + minutes(as.integer(m))
 }
 
+#' Normalize between 0 and 1
+#'
+#' @param x numeric value or vector
+#'
+#' @keywords internal
+#'
+normalize <- function(x) {
+  (x-min(x))/(max(x)-min(x))
+}

@@ -1,0 +1,95 @@
+---
+title: "Net power minimization with battery"
+output: html_document
+---
+
+Function `add_battery_optimization` makes use of Quadratic programming in order to obtain the optimal battery charging/discharging profile given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, flextools package allows to optimize a time-series battery power profile considering two different goals:
+
+* Minimize the power exchanged with the grid (net power)
+* Minimize the energy cost
+
+In this article, we'll cover the optimization problem for the first objective: **net power minimization**.
+
+
+# Problem formulation
+
+Our net power optimization has been designed with multiple objectives:
+
+1. Minimize the energy exchanged with the distribution grid maximizing the use of local generation
+2. Obtain a demand profile the most flat as possible (peak shaving)
+  
+The objective function and constraints of this optimization problem are represented below, where:
+
+- $T$ : Number of time intervals within the optimization window
+- $G_t$ : Local power generation time-series vector
+- $L_t$ : Power load time-series vector
+- $B_t$ : Optimal battery power time-series vector. Positive charging, negative discharging.
+- $\lambda$ : penalty on change for the flexible load
+- $GC_t$ : Grid power capacity time-series vector
+- $B_{cap}$ : Battery capacity
+- $B_c$ : Maximum charging power
+- $B_d$ : Maximum discharging power
+- $SOC_{min}$ : Minimum state of charge of the battery
+- $SOC_{max}$ : Maximum state of charge of the battery
+- $SOC_{ini}$ : state of charge at the beginning/end of the optimization window
+
+Objective function of the optimization problem:
+
+$$
+min \sum_{t=1}^{T} (G_t-L_t-B_t)^2 + \lambda B_t^{2}
+$$
+
+
+Moreover, this optimization problem has the following constraints:
+  
+* Battery power (positive = charging, negative = discharging) limits:
+
+$$
+-B_d \le B_t \le B_c \quad t \in T
+$$
+
+* State of charge limits:
+
+$$
+SOC_{min} \le SOC_{ini} + \frac{\sum_{t=1}^T B_t \Delta t}{B_{cap}} \le SOC_{max} \quad t \in T
+$$
+
+* The balance of charged/discharge energy must be 0 at the end of the optimization window to have the same initial state of charge at the beginning of every optimization window:
+
+$$
+\sum_{t=1}^T B_t \Delta t = 0
+$$
+
+* The energy balance between generation and loads must be lower than the grid capacity:
+
+$$
+-GC_t \le B_t + L_t - G_t \le GC_t \quad t \in T
+$$
+
+
+# Quadratic programming
+  
+Considering that the objective function of this problem has quadratic terms, a Quadratic Programming algorithm must be used. In this case we have used the R package `osqp`, visit their [website](https://osqp.org/) for more information.
+
+The form of a [quadratic problem](https://osqp.org/docs/solver/index.html) is:
+
+$$
+  \begin{array}{ll} 
+  \text{minimize} & \mathrm (1/2) x^\top \mathrm P \, \mathrm x + \mathrm q^{\top} \mathrm x \\ 
+  \text{subject to} & \mathrm l \leq \mathrm Ax \leq \mathrm u
+  \end{array}
+$$
+
+The OSQP function `osqp::solve_osqp(P, q, A, l, u)` requires the parameters `P`, `q`, `A`, `l` and `u`. These parameters must be extracted from our problem formulation, so developing the objective function we can create `P` and `q` and from constraints we can create `A`, `l` and `u`.
+
+Then:
+
+$$
+P = 2 · \mathbb{I} · \lambda
+$$
+$$
+q = 2·(L - G)
+$$
+
+
+

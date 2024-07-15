@@ -11,16 +11,9 @@ library(dygraphs)
 
 # Import data
 demo_energy_flows <- readxl::read_excel("energy_flows.xlsx") %>% 
-  mutate(datetime = with_tz(datetime, "Europe/Amsterdam"))
+  mutate(datetime = with_tz(datetime, "Europe/Amsterdam")) 
+  # add_extra_days()
 year(demo_energy_flows$datetime) <- 2019
-dttm_seq <- demo_energy_flows$datetime
-
-# Add one extra day at the beginning and the end to not cut optmization in the plots
-demo_energy_flows_first_day <- demo_energy_flows %>% filter(date(datetime) == min(date(datetime)))
-day(demo_energy_flows_first_day$datetime) <- day(min(date(demo_energy_flows$datetime)))-1
-demo_energy_flows_last_day <- demo_energy_flows %>% filter(date(datetime) == max(date(datetime)))
-day(demo_energy_flows_last_day$datetime) <- day(max(date(demo_energy_flows$datetime)))+1
-demo_energy_flows <- bind_rows(demo_energy_flows_first_day, demo_energy_flows, demo_energy_flows_last_day)
 ```
 
 The `flextools` function `optimize_demand` provides a framework to modify a time-series demand profile according to different parameters, such as:
@@ -34,6 +27,11 @@ The `flextools` function `optimize_demand` provides a framework to modify a time
 
 This article shows different configurations regarding these parameters, using the following example data set with a power demand and solar generation profiles:
 
+```{r}
+head(demo_energy_flows)
+```
+
+
 ```{r bau energy flows, fig.height=3, fig.align='center'}
 demo_energy_flows %>% 
   dygraph(ylab = "Power (kW)") %>% 
@@ -41,6 +39,38 @@ demo_energy_flows %>%
   dySeries("demand", label = "Demand", color = "navy") %>% 
   dyOptions(fillGraph = T)
 ```
+
+
+The first parameter in `optimize_demand()` function is `opt_data`. This parameter must be a tibble with the first column named `datetime`, containing the date-time sequence where the optimization algorithm is applied, and the second column named `flexible`, being the power profile of the flexible demand. Other variables that can be part of the `opt_data` algorithm are described in the function's reference page (see `optimize_demand()`).
+
+In this case, we will rename the `demand` and `solar` variables from the `demo_energy_flows` object
+
+```{r}
+opt_data <- demo_energy_flows %>% 
+  rename(
+    flexible = demand,
+    production = solar
+  )
+```
+
+
+
+```{r}
+optimize_demand(
+  opt_data = opt_data,
+  opt_objective = "grid",
+  direction = "forward"
+)
+```
+
+
+
+
+
+
+
+
+
 
 
 

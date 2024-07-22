@@ -331,7 +331,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
               direction = 'forward',
               time_horizon = NULL,
               LFmax = Inf,
-              grid_capacity = opt_data$grid_capacity[window_prof_idxs]
+              grid_capacity = opt_data$grid_capacity[window_prof_idxs],
+              lambda = 0
             )
           } else if (opt_objective == "cost") {
             O <- minimize_cost_window(
@@ -345,7 +346,24 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
               direction = 'forward',
               time_horizon = NULL,
               LFmax = Inf,
-              grid_capacity = opt_data$grid_capacity[window_prof_idxs]
+              grid_capacity = opt_data$grid_capacity[window_prof_idxs],
+              lambda = 0
+            )
+          } else if (is.numeric(opt_objective)) {
+            O <- optimize_demand_window(
+              G = opt_data$production[window_prof_idxs],
+              LF = L_prof,
+              LS = L_fixed + L_others + L_fixed_prof,
+              PI = opt_data$price_imported[window_prof_idxs],
+              PE = opt_data$price_exported[window_prof_idxs],
+              PTU = opt_data$price_turn_up[window_prof_idxs],
+              PTD = opt_data$price_turn_down[window_prof_idxs],
+              direction = 'forward',
+              time_horizon = NULL,
+              LFmax = Inf,
+              grid_capacity = opt_data$grid_capacity[window_prof_idxs],
+              w = opt_objective,
+              lambda = 0
             )
           }
 

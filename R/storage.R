@@ -28,31 +28,12 @@ get_storage_losses <- function(power, loss) {
 #'
 get_storage_level <- function(power, init = 0, loss = 0) {
   storage_losses <- get_storage_losses(power, loss)
-  pmax(c(init, init + cumsum(power + storage_losses) - cumsum(lag(storage_losses, default = 0))), 0)
+  storage_vct <- pmax(c(init, init + cumsum(power + storage_losses) - cumsum(lag(storage_losses, default = 0))), 0)
+  return( storage_vct[seq_len(length(power))] ) # The `storage_vct` would be T+1 length for the cumsum starting at `init`
 }
 
 
-#' Add `storage` column to time-series tibble
-#'
-#' @param df tibble, being the first column `datetime` variable
-#' @param power numeric vector, being positive when charging and negative when discharging
-#' @param init numeric, initial storage level (in energy units, not %)
-#' @param loss numeric, the hourly storage loss in percentage (%/hour), passed to `get_storage_losses` function
-#'
-#' @return tibble, with extra column `storage`
-#' @export
-#'
-#' @importFrom lubridate minutes
-#' @importFrom dplyr left_join tibble %>% select everything
-#'
-add_storage_level <- function(df, power, init = 0, loss = 0) {
-  storage <- get_storage_level(power, init, loss)
-  resolution_minutes <- as.integer(df$datetime[2] - df$datetime[1], units = 'minutes')
-  new_datetime <- c(df$datetime, df$datetime[nrow(df)] + minutes(resolution_minutes))
 
-  left_join(tibble(datetime = new_datetime, storage), df, by = 'datetime') %>%
-    select(everything(), 'storage')
-}
 
 
 #' Losses due to charging/discharging process

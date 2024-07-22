@@ -6,8 +6,8 @@
 #' Get energy balance time-series
 #'
 #' Input data frame must have columns `consumption`, `production`.
-#' Output data frame has extra columns `balance`, `local`, `imported`, `exported`.
-#' Column `balance` is positive when there is more production than consumption.
+#' Output data frame has extra columns `net`, `local`, `imported`, `exported`.
+#' Column `net` is positive when there is more consumption than production
 #'
 #' @param df tibble, with columns `datetime`, `consumption`, `production`
 #'
@@ -20,8 +20,8 @@
 get_energy_balance <- function(df) {
   df %>%
     mutate(
-      balance = .data$production - .data$consumption,
-      local = ifelse(.data$balance > 0, .data$consumption, .data$production),
+      net = .data$consumption - .data$production,
+      local = ifelse(.data$net > 0, .data$production, .data$consumption),
       imported = .data$consumption - .data$local,
       exported = .data$production - .data$local,
     )

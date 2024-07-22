@@ -14,6 +14,6 @@ tibble
 }
 \description{
 Input data frame must have columns \code{consumption}, \code{production}.
-Output data frame has extra columns \code{balance}, \code{local}, \code{imported}, \code{exported}.
-Column \code{balance} is positive when there is more production than consumption.
+Output data frame has extra columns \code{net}, \code{local}, \code{imported}, \code{exported}.
+Column \code{net} is positive when there is more consumption than production
 }

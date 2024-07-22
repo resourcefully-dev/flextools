@@ -3,7 +3,6 @@
 export(add_battery_optimization)
 export(add_battery_simple)
 export(add_extra_days)
-export(add_storage_level)
 export(get_conversion_losses)
 export(get_energy_balance)
 export(get_energy_cost)

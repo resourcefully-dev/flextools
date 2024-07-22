@@ -7,10 +7,9 @@ Authors@R:
            role = c("aut", "cre"),
            email = "marc.canigueral@udg.edu",
            comment = c(ORCID = "https://orcid.org/0000-0001-9724-5829"))
-Description: This R package provides the necessary tools to simulate 
-  demand-response scenarios regarding electric vehicles flexibility,
-  batteries or any time-series power demand profile, using Linear and
-  Quadratic Optimization methods.
+Description: Simulate demand-response scenarios with flexibility from 
+  electric vehicles, batteries or any time-series power demand profile, using
+  custom algorithms and Quadratic programming methods.
 License: GPL-3
 Encoding: UTF-8
 LazyData: true

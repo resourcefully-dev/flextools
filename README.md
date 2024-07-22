@@ -4,17 +4,15 @@
 # flextools <a href='https://mcanigueral.github.io/flextools/'><img src='man/figures/logo.png' align="right" height="139" /></a>
 
 <!-- badges: start -->
+<!-- [![CRAN status](https://www.r-pkg.org/badges/version/flextools)](https://cran.r-project.org/package=flextools) -->
 
-[![CRAN
-status](https://www.r-pkg.org/badges/version/flextools)](https://cran.r-project.org/package=flextools)
 [![R-CMD-check](https://github.com/mcanigueral/flextools/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/mcanigueral/flextools/actions/workflows/R-CMD-check.yaml)
-[![Codecov test
-coverage](https://codecov.io/gh/mcanigueral/flextools/branch/main/graph/badge.svg)](https://app.codecov.io/gh/mcanigueral/flextools?branch=main)
+<!-- [![Codecov test coverage](https://codecov.io/gh/mcanigueral/flextools/branch/main/graph/badge.svg)](https://app.codecov.io/gh/mcanigueral/flextools?branch=main) -->
 <!-- badges: end -->
 
 ## Overview
 
-flextools package provides the functions for:
+`flextools` package provides the functions for:
 
 - Optimizing time-series power loads for minimizing net power
   interaction with the grid or energy cost
@@ -25,9 +23,8 @@ flextools package provides the functions for:
 
 ## Usage
 
-If you want to test
-[flextools](https://mcanigueral.github.io/flextools/) with your own data
-set of time-series energy, the best place to start is the [Get started
+If you want to test `flextools` with your own data set of time-series
+energy, the best place to start is the [Get started
 chapter](https://mcanigueral.github.io/flextools/articles/flextools.html)
 in the package website.
 
@@ -38,8 +35,8 @@ latest development version from GitHub:
 
 ``` r
 # Latest development version
-# install.packages("devtools")
-devtools::install_github("mcanigueral/flextools")
+# install.packages("remotes")
+remotes::install_github("mcanigueral/flextools")
 ```
 
 ## Getting help

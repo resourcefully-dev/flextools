@@ -3,21 +3,27 @@ title: "Energy cost minimization"
 output: html_document
 ---
 
-Function `optimize_demand` makes use of Quadratic programming in order to obtain the optimal power load given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, flextools package allows to optimize a time-series power load considering two different goals:
+Function `optimize_demand` and `add_battery_optimization` makes use of Quadratic programming in order to obtain the optimal power load given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, `flextools` package allows to optimize a time-series power load considering two different goals:
 
 * Minimize the power exchanged with the grid (net power)
 * Minimize the energy cost
 
-In this article, we'll cover the optimization problem for the first objective: **energy cost minimization**.
-
-
-# Problem formulation
+In this article, we'll cover the optimization problem for the first objective, **energy_cost minimization**, for both the **flexible demand** (e.g. heatpumps, electric vehicles, etc.) and the **battery**.
 
 Our energy cost optimization takes into account multiple profiles of energy prices with the objective to minimize the total cost, considering:
 
 * Imported energy cost
 * Exported energy income
-* Balancing markets prices (turn up/down demand)
+* Income from balancing markets (turn up/down demand)
+
+
+# Demand optimization
+
+To minimize the energy cost using the **flexibility from a power demand profile**, the objective function of the optimization problem has been raised in the following way:
+
+$$
+min \sum_{t=1}^{T} I_t·PI_t - E_t·PE_t - PTU_t(O_t-LF_t)  - PTD_t(LF_t-O_t) + \lambda (O_t-LF_t)^{2}
+$$
   
 The objective function and constraints of this optimization problem are represented below, where:
 
@@ -33,14 +39,6 @@ The objective function and constraints of this optimization problem are represen
 - $PTU_t$ : balancing price for turn-up power
 - $PTD_t$ : balancing price for turn-down power
 - $\lambda$ : penalty on change for the flexible load
-- $LFmax$ : Maximum power demand for the flexible load
-- $GC_t$ : Grid power capacity time-series vector
-
-Objective function of the optimization problem:
-
-$$
-min \sum_{t=1}^{T} I_t·PI_t - E_t·PE_t - PTU_t(O_t-LF_t)  - PTD_t(LF_t-O_t) + \lambda (O_t-LF_t)^{2}
-$$
 
 
 Moreover, this optimization problem has the following constraints:
@@ -51,13 +49,13 @@ $$
 \sum_{t=1}^T O_t \Delta t = \sum_{t=1}^T LF_t \Delta t
 $$
 
-* Optimal flexible load must be lower than a certain maximum power:
+* Optimal flexible load must be lower than a certain maximum power $LF_{max}$:
 
 $$
 0 \le O_t \le LFmax_t \quad t \in T
 $$
 
-* The energy balance between generation and loads must be lower than the grid capacity:
+* The energy balance between generation and loads must be lower than the grid capacity $GC_t$:
 
 $$
 0 \le O_t \le GC_t + G_t - LS_t \quad t \in T
@@ -118,30 +116,78 @@ $$
 O_u \le \sum_{t = u}^{u+h} LF_t \quad u = 1 \dots T
 $$
 
+# Battery optimization
 
-# Quadratic programming
+To minimize the energy cost using the **flexibility from a battery**, the objective function of the optimization problem has been raised in the following way:
+
+$$
+min \sum_{t=1}^{T} I_t·PI_t - E_t·PE_t - PTU_t·B_t  - PTD_t·(-B_t) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^{2}
+$$
+
+
+Where:
+
+- $T$ : Number of time intervals within the optimization window
+- $G_t$ : Local power generation time-series vector
+- $L_t$ : Power load time-series vector
+- $B_t$ : Optimal battery power time-series vector. Positive charging, negative discharging.
+- $I_t$ : imported energy
+- $E_t$ : exported energy
+- $PI_t$ : imported energy price
+- $PE_t$ : exported energy price
+- $PTU_t$ : balancing price for turn-up power
+- $PTD_t$ : balancing price for turn-down power
+- $\lambda$ : penalty on change for the flexible load
+
+Additionally, this optimization problem also counts with the following parameters used in the constraints below:
+
+- $B_{cap}$ : Battery capacity
+- $B_c$ : Maximum charging power
+- $B_d$ : Maximum discharging power
+- $SOC_{min}$ : Minimum state of charge of the battery
+- $SOC_{max}$ : Maximum state of charge of the battery
+- $SOC_{ini}$ : state of charge at the beginning/end of the optimization window
   
-Considering that the objective function of this problem has quadratic terms, a Quadratic Programming algorithm must be used. In this case we have used the R package `osqp`, visit their [website](https://osqp.org/) for more information.
 
-The form of a [quadratic problem](https://osqp.org/docs/solver/index.html) is:
-
-$$
-  \begin{array}{ll} 
-  \text{minimize} & \mathrm (1/2) x^\top \mathrm P \, \mathrm x + \mathrm q^{\top} \mathrm x \\ 
-  \text{subject to} & \mathrm l \leq \mathrm Ax \leq \mathrm u
-  \end{array}
-$$
-
-The OSQP function `osqp::solve_osqp(P, q, A, l, u)` requires the parameters `P`, `q`, `A`, `l` and `u`. These parameters must be extracted from our problem formulation, so developing the objective function we can create `P` and `q` and from constraints we can create `A`, `l` and `u`.
-
-Then:
+Optimization constraints:
+  
+* Battery power (positive = charging, negative = discharging) limits:
 
 $$
-P = 2 · \mathbb{I} · \lambda
+-B_d \le B_t \le B_c \quad t \in T
 $$
+
+* State of charge limits:
+
 $$
-q = PTD - PTU - 2·\lambda·LF + PI - PE
+SOC_{min} \le SOC_{ini} + \frac{\sum_{t=1}^T B_t \Delta t}{B_{cap}} \le SOC_{max} \quad t \in T
 $$
+
+* The balance of charged/discharge energy must be 0 at the end of the optimization window to have the same initial state of charge at the beginning of every optimization window:
+
+$$
+\sum_{t=1}^T B_t \Delta t = 0
+$$
+
+* The imported energy must remain between 0 and the corresponding energy consumed with the maximum grid capacity $GC_t$:
+
+$$
+0 \le I_t \le GC_t \Delta t \quad t \in T
+$$
+
+* The exported energy must remain between 0 and power generation (this only allows the battery to discharge during importing hours):
+
+$$
+0 \le E_t \le G_t \Delta t \quad t \in T
+$$
+
+* Energy balance behind-the-meter:
+
+$$
+I_t - E_t = B_t + L_t - G_t
+$$
+
+
 
 
 

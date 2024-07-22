@@ -1,6 +1,2 @@
 .Rproj.user
 R/*.rda
-data-raw
-tests
-inst/doc
-docs

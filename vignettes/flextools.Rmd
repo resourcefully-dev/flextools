@@ -1,5 +1,5 @@
 ---
-title: "Optimize demand"
+title: "Introduction to flextools"
 output: html_document
 ---
 
@@ -12,10 +12,10 @@ library(dutils)
 library(ggplot2)
 ```
 
-The function `flextools::optimize_demand` provides a framework to modify a time-series demand profile according to different parameters, such as:
+Function `flextools::optimize_demand` and `flextools::add_battery_optimization` provide a framework to optimize time-series demand profiles according to different parameters, such as:
 
 * **Contextual variables** for the optimization problem (local energy generation, static load, grid capacity, etc.). These values must be collected in a data frame through the `opt_data` parameter.
-* **Optimization objective**, whether to minimize the net power or the energy cost.
+* **Optimization objective**, whether to minimize the net power, the energy cost or both.
 * **Direction to shift energy** (forwards or backwards)
 * **Time horizon** of the energy shift, being the maximum number of time-slots to shift demand from
 * **Optimization window** characteristics, such as the length (in days), the starting hour or the hours where energy shifting is allowed.
@@ -53,6 +53,8 @@ opt_data %>%
 
 
 # Net power minimization
+
+To minimize the energy exchanged with the distribution grid while maximizing the use of local generation, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Net power optimization](https://mcanigueral.github.io/flextools/articles/minimize_net_power.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
 
 ## Demand flexibility
 
@@ -145,6 +147,8 @@ opt_data %>%
 
 
 # Cost minimization
+
+To minimize the energy cost while maximizing the income from imbalance markets, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Energy cost optimization](https://mcanigueral.github.io/flextools/articles/minimize_cost.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
 
 ## Demand flexibility
 
@@ -373,6 +377,10 @@ opt_data %>%
 
 # Combined objectives
 
+To minimize the energy cost and the impact in the distribution grid, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Combined optimization](https://mcanigueral.github.io/flextools/articles/combined_optimization.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
+
+## Demand flexibility
+
 The parameter `opt_objective` can be `"grid"`, `"cost"` or a number between 0 and 1, being 0 the equivalent to "cost" and 1 the equivalent to "grid". Thus, when `opt_objective` is a number, the optimization problem combines both objectives.
 
 To show the effect of this term, we can calculate the demand profiles corresponding to three different values of `opt_objective`:
@@ -411,4 +419,42 @@ opt_data %>%
 
 We see that during production hours all three profiles follow the PV production as much as possible, but they differ in the periods where the prices fluctuates the most. This is also caused by the difference between a constant and low export price and a high and variable import price.
 
+## Battery flexibility
+
+The same example can be done with a battery, considering a **capacity of 50kWh** and a **charge/discharge power of 4kW**. See that now we use the `building` column as `static` to avoid optimizing the building profile:
+
+```{r}
+opt_battery <- purrr::map(
+  list(objective_0.25 = 0.25, objective_0.5 = 0.5, objective_0.75 = 0.75),
+  ~ opt_data %>% 
+    select(datetime, production, building, price_imported, price_exported) %>% 
+    mutate(
+      static = building
+    ) %>%
+    add_battery_optimization(
+      opt_objective = .x,
+      Bcap = 50, Bc = 4, Bd = 4,
+      window_start_hour = 5
+    )
+) %>% 
+  as_tibble()
+```
+
+```{r, echo=FALSE}
+opt_data %>% 
+  select(datetime, production, building, price_imported, price_exported) %>% 
+  mutate(opt_battery) %>% 
+  dyplot() %>% 
+  dyAxis("y", "Power (kW)") %>% 
+  dyAxis("y2", "Price (€/kWh)") %>% 
+  dySeries("building", "Building", "navy") %>%
+  # dySeries("battery", "Battery", "purple") %>%
+  dySeries("production", "Production", "orange") %>% 
+  dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
+  dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
+  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyOptions(strokeWidth = 2)
+```
+
+An interesting outcome of this simulation is that combining both objectives also smoothes out the effect of the price fluctuation in the battery profile. Since now it is also important to reduce the impact on the distribution network, now the `lambda` is not so required.
 

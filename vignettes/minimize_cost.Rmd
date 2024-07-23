@@ -1,5 +1,5 @@
 ---
-title: "Energy cost minimization"
+title: "Energy cost optimization"
 output: html_document
 ---
 

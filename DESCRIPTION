@@ -1,5 +1,5 @@
 Package: flextools
-Title: Tools for demand-response optimization
+Title: Tools for demand-response simulations
 Version: 1.0.0
 Authors@R: 
     person(given = "Marc",

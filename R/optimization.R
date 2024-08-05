@@ -212,6 +212,9 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 
 #' Optimize a vector of flexible demand
 #'
+#' See the formulation of the optimization problems in the
+#' [documentation website](https://mcanigueral.github.io/flextools/).
+#'
 #' @param opt_data tibble, optimization contextual data.
 #' The first column must be named `datetime` (mandatory) containing the
 #' date time sequence where the optimization algorithm is applied.
@@ -255,7 +258,6 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
 #' @param lambda numeric, penalty on change for the flexible load.
-#' This is a factor used in the optimization problem.
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -406,7 +408,6 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #' @param lambda numeric, penalty on change for the flexible load.
-#' This is a factor used in the optimization problem.
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -490,7 +491,6 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #' @param lambda numeric, penalty on change for the flexible load.
-#' This is a factor used in the optimization problem.
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -604,7 +604,6 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost).
 #' @param lambda numeric, penalty on change for the flexible load.
-#' This is a factor used in the optimization problem.
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -711,6 +710,9 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 
 #' Battery optimal charging/discharging profile
 #'
+#' See the formulation of the optimization problems in the
+#' [documentation website](https://mcanigueral.github.io/flextools/).
+#'
 #' @param opt_data tibble, optimization contextual data.
 #' The first column must be named `datetime` (mandatory) containing the
 #' date time sequence where the optimization algorithm is applied.
@@ -750,8 +752,7 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' @param flex_window_hours integer, flexibility window length, in hours.
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
-#' @param lambda numeric, penalty on change for the battery power profile.
-#' This is a factor used in the optimization problem.
+#' @param lambda numeric, penalty on change for the flexible load.
 #' @param mc.cores integer, number of cores to use.
 #' Must be at least one, and parallelization requires at least two cores.
 #'
@@ -893,8 +894,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
-#' @param lambda numeric, penalty on change for the battery power profile.
-#' This is a factor used in the optimization problem.
+#' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -965,8 +965,7 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
-#' @param lambda numeric, penalty on change for the battery power profile.
-#' This is a factor used in the optimization problem.
+#' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1076,8 +1075,7 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost).
-#' @param lambda numeric, penalty on change for the battery power profile.
-#' This is a factor used in the optimization problem.
+#' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal

@@ -34,10 +34,17 @@
 #' - `price_exported`: price for exported energy (€/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
+#' - `price_turn_down`: price for turn-down energy use (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_turn_up`: price for turn-up energy use (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
 #' If columns of `opt_data` are user profiles names, these are used as setpoints
 #' and no optimization is performed for the corresponding user profiles.
 #'
-#' @param opt_objective character, optimization objective being `"none"`, `"grid"` or `"cost"`.
+#' @param opt_objective character, optimization objective being `"none"`, `"grid"`,
+#'  `"cost"` or a value between 0 (cost) and 1 (grid).
 #' See details section for more information about the different objectives.
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
 #' If `none`, the scheduling part is skipped and the sessions returned in the

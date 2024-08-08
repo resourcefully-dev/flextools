@@ -248,7 +248,8 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' - `price_turn_up`: price for turn-up energy use (€/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' @param opt_objective character, optimization objective being `"grid"` (default) or `"cost"`
+#' @param opt_objective character, optimization objective being `"grid"` (default),
+#'  `"cost"` or a value between 0 (cost) and 1 (grid).
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from.
 #'  If `NULL`, the `time_horizon` will be the number of rows of `op_data`.

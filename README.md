@@ -12,7 +12,7 @@
 
 ## Overview
 
-`flextools` package provides the functions for:
+`flextools` package provides functions for:
 
 - Optimizing time-series power loads for minimizing net power
   interaction with the grid or energy cost

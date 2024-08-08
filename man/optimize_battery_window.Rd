@@ -51,8 +51,7 @@ optimize_battery_window(
 
 \item{w}{numeric, optimization objective weight (\code{w=1} minimizes net power while \code{w=0} minimizes cost).}
 
-\item{lambda}{numeric, penalty on change for the battery power profile.
-This is a factor used in the optimization problem.}
+\item{lambda}{numeric, penalty on change for the flexible load.}
 }
 \value{
 numeric vector

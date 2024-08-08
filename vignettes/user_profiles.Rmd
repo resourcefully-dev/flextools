@@ -1,0 +1,220 @@
+---
+title: "User profiles in smart charging"
+output: html_document
+---
+
+
+```{r setup, echo=FALSE, message=F, warning=FALSE, fig.width=12}
+library(flextools)
+# devtools::load_all()
+library(dplyr)
+library(lubridate)
+library(dygraphs)
+library(dutils)
+library(ggplot2)
+library(evsim)
+library(purrr)
+```
+
+
+This article is based on the [EV user profile concept](https://mcanigueral.github.io/evprof/articles/evprof.html) from package `evprof`, and how the extra-knowledge that a classification of EV users into user profiles could help in the smart charging ecosystem. 
+
+A **user profile** is defined by a pattern in the connection times of EV users, so in most of cases, there are EV user profiles with more flexibility potential than others. A Charging Point Operator (CPO) can take advantage of this knowledge and use this classification to set priorities when scheduling EV charging sessions.
+
+Shifting only the sessions of specific EV user profiles can increase the efficiency of the system since the forecast of the flexibility potential form EV users is more reliable. The lower number of EV sessions that have to be re-scheduled, the better the solution, for both the CPO and the final EV user.
+
+## EV charging sessions simulation
+
+First of all, we can simulate EV sessions using the `evsim` package, which provides the function `evsim::get_custom_ev_model` to create a custom EV model to later simulate EV sessions with `evsim::simulate_sessions()` function. We can create an EV model with custom time-cycles and user profiles. In this case, we will consider two different EV user profiles:
+
+* **Worktime**: present during working days. Low-variability in connection times. High flexibility potential.
+* **Visit**: present the whole week but with different behaviour on weekends. High variability in connection times. Low flexibility potential.
+
+```{r}
+# For workdays time cycle
+workdays_parameters <- dplyr::tibble(
+  profile = c("Worktime", "Visit"),
+  ratio = c(50, 50),
+  start_mean = c(9, 11),
+  start_sd = c(1, 4),
+  duration_mean = c(8, 4),
+  duration_sd = c(0.5, 2),
+  energy_mean = c(15, 6),
+  energy_sd = c(4, 3)
+)
+
+# For weekends time cycle
+weekends_parameters <- dplyr::tibble(
+  profile = "Visit",
+  ratio = 100,
+  start_mean = 12,
+  start_sd = 4,
+  duration_mean = 3,
+  duration_sd = 2,
+  energy_mean = 4,
+  energy_sd = 4
+)
+
+parameters_lst <- list(workdays_parameters, weekends_parameters)
+
+# Get the whole model
+ev_model <- get_custom_ev_model(
+  names = c("Workdays", "Weekends"),
+  months_lst = list(1:12, 1:12),
+  wdays_lst = list(1:5, 6:7),
+  parameters_lst = parameters_lst,
+  connection_log = FALSE,
+  energy_log = FALSE,
+  data_tz = "Europe/Amsterdam"
+)
+```
+
+Once we have our own model, we can simulate EV sessions for three different days as example:
+
+```{r}
+set.seed(12345)
+ev_sessions <- simulate_sessions(
+  evmodel = ev_model, 
+  sessions_day = tibble(time_cycle = c("Workdays", "Weekends"), n_sessions = c(10, 10)),
+  user_profiles = NULL,
+  charging_powers = tibble(power = 3.7, ratio = 1), 
+  dates = seq.Date(from = today(), to = today()+days(2), by = "day"), 
+  resolution = 15
+)
+```
+
+```{r, echo=FALSE}
+print(ev_sessions)
+```
+
+
+Finally we can calculate the time-series power demand from each EV with function `evsim::get_demand()`, using parameter `by="Sessions"`:
+
+```{r}
+ev_demand <- ev_sessions %>% 
+  get_demand(by = "Profile") 
+```
+```{r, echo=FALSE}
+ev_demand %>% 
+  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T)
+```
+
+
+## Smart charging to solve grid congestion
+
+Imagine that we have to charge these EVs in an installation that has a **maximum grid connection of 12 kW**:
+
+```{r}
+grid_capacity <- 12
+```
+
+Since our peak goes above 12kW, we need to use smart charging to allow the EV users to charge under the grid capacity. In our case, we decide to only use the flexibility from the **Worktime user profile**, since it has a clear flexibility potential compared to the Visit user profile.
+
+
+In order to define a **grid capacity** in the `smart_charing()` function, a column with the same name than the EV user profile in the `sessions` parameter (in this example "Worktime") must be found in the `opt_data` parameter. Therefore, a `"Worktime"` column is added to the `opt_data` object as a setpoint for the EV user profile "Worktime", and it is defined as the **difference between the grid capacity and the rest of power demand** (in this case the "Visit" demand):
+
+```{r}
+opt_data <- tibble(
+  datetime = ev_demand$datetime, # Same date-time sequence than the demand
+  Worktime = grid_capacity - ev_demand$Visit
+)
+```
+
+```{r}
+opt_data %>% 
+  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 200) %>% 
+  dySeries("Worktime", "Worktime free capacity", color = "navy", strokeWidth = 2, strokePattern = "dashed") %>% 
+  dyLimit(grid_capacity, "Grid capacity", color = "red")
+```
+
+Considering optimization windows of 24 hours from 6:00AM to 6:00AM, and `"curtail"` as a smart charging method:
+
+```{r}
+sc_results <- ev_sessions %>% 
+  smart_charging(
+    opt_data = opt_data, 
+    opt_objective = "none",
+    method = "curtail",
+    window_days = 1, 
+    window_start_hour = 6
+  )
+```
+
+```{r}
+ev_demand_opt <- sc_results$sessions %>% 
+  get_demand(by = "Profile") 
+```
+
+```{r, echo = F}
+ev_demand_opt %>% 
+  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
+  dyLimit(grid_capacity, "Grid capacity", color = "red")
+```
+
+We can see that the Worktime power demand has been adapted to the non-flexbile users, i.e. Visit user profile, in order to not surpass the capacity limit of 12 kW. 
+
+Moreover, we can define which percentage of every user profile is responsive to the smart charging signals with the parameter `responsive` from `smart_charging()` function. For example, we can set that, during working days, 60% of the Worktime users and 30% of the Visit user accept to participate to the demand-response program, while during Workdays, 60% of the Visit user accept:
+
+
+```{r}
+set.seed(1234)
+sc_results <- ev_sessions %>% 
+  smart_charging(
+    opt_data = opt_data, 
+    opt_objective = "none",
+    method = "curtail",
+    window_days = 1, 
+    window_start_hour = 6,
+    responsive = list(
+      Workdays = list(Worktime = 0.6, Visit = 1),
+      Weekends = list(Visit = 0.6)
+    )
+  )
+```
+
+```{r}
+ev_demand_opt <- sc_results$sessions %>% 
+  get_demand(by = "Profile") 
+```
+
+```{r, echo = F}
+ev_demand_opt %>% 
+  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
+  dyLimit(grid_capacity, "Grid capacity", color = "red")
+```
+```{r}
+scs <<- sc_results$sessions
+```
+
+
+We see that now the participation of EV users is not enough to reach our objective. If we increase the participation of Worktime users up to 80% then we accomplish with our grid capacity again:
+
+```{r}
+set.seed(1234)
+sc_results <- ev_sessions %>% 
+  smart_charging(
+    opt_data = opt_data, 
+    opt_objective = "none",
+    method = "curtail",
+    window_days = 1, 
+    window_start_hour = 6,
+    responsive = list(
+      Workdays = list(Worktime = 0.8, Visit = 0.3),
+      Weekends = list(Visit = 0.6)
+    )
+  )
+```
+
+```{r}
+ev_demand_opt <- sc_results$sessions %>% 
+  get_demand(by = "Profile") 
+```
+
+```{r, echo = F}
+ev_demand_opt %>% 
+  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
+  dyLimit(grid_capacity, "Grid capacity", color = "red")
+```
+
+
+

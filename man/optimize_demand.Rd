@@ -59,8 +59,7 @@ If \code{NULL}, the \code{time_horizon} will be the number of rows of \code{op_d
 This optional feature lets you apply flexibility only during few hours from the \code{window_start_hour}.
 It must be lower than \code{window_days*24} hours.}
 
-\item{lambda}{numeric, penalty on change for the flexible load.
-This is a factor used in the optimization problem.}
+\item{lambda}{numeric, penalty on change for the flexible load.}
 
 \item{mc.cores}{integer, number of cores to use.
 Must be at least one, and parallelization requires at least two cores.}
@@ -69,5 +68,6 @@ Must be at least one, and parallelization requires at least two cores.}
 numeric vector
 }
 \description{
-Optimize a vector of flexible demand
+See the formulation of the optimization problems in the
+\href{https://mcanigueral.github.io/flextools/}{documentation website}.
 }

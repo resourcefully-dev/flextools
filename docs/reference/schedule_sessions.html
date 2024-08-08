@@ -27,10 +27,14 @@
 <li class="nav-item dropdown">
   <a href="#" class="nav-link dropdown-toggle" data-bs-toggle="dropdown" role="button" aria-expanded="false" aria-haspopup="true" id="dropdown-articles">Articles</a>
   <div class="dropdown-menu" aria-labelledby="dropdown-articles">
+    <h6 class="dropdown-header" data-toc-skip>Optimization problems</h6>
     <a class="dropdown-item" href="../articles/minimize_net_power.html">Net power optimization</a>
     <a class="dropdown-item" href="../articles/minimize_cost.html">Energy cost optimization</a>
     <a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a>
+    <div class="dropdown-divider"></div>
+    <h6 class="dropdown-header" data-toc-skip>Demand-response</h6>
     <a class="dropdown-item" href="../articles/smart_charging.html">Smart charging</a>
+    <a class="dropdown-item" href="../articles/user_profiles.html">User profiles in smart charging</a>
   </div>
 </li>
 <li class="nav-item">
@@ -63,6 +67,7 @@
 <span>  <span class="va">method</span>,</span>
 <span>  power_th <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  charging_power_min <span class="op">=</span> <span class="fl">0.5</span>,</span>
+<span>  energy_min <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  include_log <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  show_progress <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -71,15 +76,16 @@
     <div class="section level2">
     <h2 id="arguments">Arguments<a class="anchor" aria-label="anchor" href="#arguments"></a></h2>
     <dl><dt>sessions</dt>
-<dd><p>tibble, sessions data set normalized from <code>normalize_sessions</code> function</p></dd>
+<dd><p>tibble, sessions data set in standard format marked by <code>{evprof}</code> package
+(see <a href="https://mcanigueral.github.io/evprof/articles/sessions-format.html" class="external-link">this article</a>)</p></dd>
 
 
 <dt>setpoint</dt>
-<dd><p>tibble with columns <code>datetime</code>, <code>timeslot</code> and rest of columns being the names of user profiles</p></dd>
+<dd><p>tibble with columns <code>datetime</code> and rest of columns being the names of user profiles</p></dd>
 
 
 <dt>method</dt>
-<dd><p>character, being <code>postpone</code>, <code>curtail</code> or <code>interrupt</code>.</p></dd>
+<dd><p>character, being <code>"postpone"</code>, <code>"curtail"</code> or <code>"interrupt"</code>.</p></dd>
 
 
 <dt>power_th</dt>
@@ -92,6 +98,10 @@ then sessions' demand can reach a value of <code>110</code> without needing to s
 <dd><p>numeric, minimum allowed ratio (between 0 and 1) of nominal power.
 For example, if <code>charging_power_min = 0.5</code> and <code>method = 'curtail'</code>, sessions' charging power can only
 be curtailed until the 50% of the nominal charging power (i.e. <code>Power</code> variable in <code>sessions</code> tibble).</p></dd>
+
+
+<dt>energy_min</dt>
+<dd><p>numeric, minimum allowed ratio (between 0 and 1) of required energy.</p></dd>
 
 
 <dt>include_log</dt>

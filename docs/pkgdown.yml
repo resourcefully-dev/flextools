@@ -7,7 +7,8 @@ articles:
   minimize_cost: minimize_cost.html
   minimize_net_power: minimize_net_power.html
   smart_charging: smart_charging.html
-last_built: 2024-07-23T11:52Z
+  user_profiles: user_profiles.html
+last_built: 2024-08-08T09:05Z
 urls:
   reference: mcanigueral.github.io/flextools/reference
   article: mcanigueral.github.io/flextools/articles

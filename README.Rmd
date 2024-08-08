@@ -23,7 +23,7 @@ knitr::opts_chunk$set(
 
 ## Overview
 
-`flextools` package provides the functions for:
+`flextools` package provides functions for:
 
 * Optimizing time-series power loads for minimizing net power interaction with the grid or energy cost
 * Smart charging simulation considering different methods to coordinate charging sessions, such as postpone, curtail or interrupt

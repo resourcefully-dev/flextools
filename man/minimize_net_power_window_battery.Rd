@@ -36,8 +36,7 @@ minimize_net_power_window_battery(
 
 \item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
 
-\item{lambda}{numeric, penalty on change for the battery power profile.
-This is a factor used in the optimization problem.}
+\item{lambda}{numeric, penalty on change for the flexible load.}
 }
 \value{
 numeric vector

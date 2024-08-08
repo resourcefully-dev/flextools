@@ -34,9 +34,13 @@ reference:
 
 articles:
   - title: Articles
-    navbar: ~
+    navbar: Optimization problems
     contents:
       - minimize_net_power
       - minimize_cost
       - combined_optimization
+  - title: Demand-response
+    navbar: Demand-response
+    contents:
       - smart_charging
+      - user_profiles

@@ -75,22 +75,23 @@
 #' An important parameter of this function is `opt_data`, which defines the time
 #' sequence of the smart charging algorithm and the optimization variables.
 #' The `opt_data` parameter is directly related with the `opt_objective` parameter.
-#' There are two different optimization objectives implemented by this function:
+#' There are three different optimization objectives implemented by this function:
 #'
-#' - Minimize grid interaction (`opt_objective = "grid"`): performs a quadratic
-#' optimization to minimize the peak of the flexible load and the amount of
-#' imported power from the grid. If `production` is not found in `opt_data`, only
-#' a peak shaving objective will be considered.
+#' - Minimize grid interaction (`opt_objective = "grid"`): minimizes the peak of
+#' the flexible load and the amount of imported power from the grid.
+#' If `production` is not found in `opt_data`, only a peak shaving objective
+#' will be considered.
 #'
-#' - Minimize the energy cost (`opt_objective = "cost"`): performs a linear
-#' optimization to minimize the energy cost. In this case, the columns
+#' - Minimize the energy cost (`opt_objective = "cost"`): minimizes the energy cost.
+#' In this case, the columns
 #' `grid_capacity`, `price_imported`, `price_exported`,
 #' `price_turn_up` and `price_turn_down` of tibble `opt_data` are important.
 #' If these variables are not configured, default values of `grid_capacity = Inf`,
-#' `price_imported = 1` and `price_exported = 0` are considered to minimize the
-#' imported energy.
-#' For this linear optimization the `grid_capacity` should be configured since
-#' all possible power will be allocated in the time slots with lower prices.
+#' `price_imported = 1`, `price_exported = 0`, `price_turn_up = 0` and
+#' `price_turn_down = 0` are considered to just minimize the imported energy.
+#'
+#' - Combined optimization (`opt_objective` between `0` and `1`): minimizes both
+#' the net power peaks and energy cost.
 #'
 #' - No optimization (`opt_objective = "none"`): this will skip optimization.
 #' If a user profile name appears in `opt_data` columns, then this will be
@@ -99,11 +100,7 @@
 #'
 #' @examples
 #' # Example: we will use the example data set of charging sessions
-#' # from the California Technological Institute (Caltech), obtained
-#' # through the ACN-Data website (https://ev.caltech.edu/dataset).
-#' # This data set has been clustered into different user profiles
-#' # using the R package `{evprof}`. See the article in:
-#' # https://mcanigueral.github.io/evprof/articles/california.html.
+#' # from the [`evsim`] package.
 #'
 #' # The user profiles of this data set are `Visit` and `Worktime`,
 #' # identified in two different time cycles `Workday` and `Weekend`.

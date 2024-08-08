@@ -96,21 +96,21 @@ the formulation of the optimization problems in the
 An important parameter of this function is \code{opt_data}, which defines the time
 sequence of the smart charging algorithm and the optimization variables.
 The \code{opt_data} parameter is directly related with the \code{opt_objective} parameter.
-There are two different optimization objectives implemented by this function:
+There are three different optimization objectives implemented by this function:
 \itemize{
-\item Minimize grid interaction (\code{opt_objective = "grid"}): performs a quadratic
-optimization to minimize the peak of the flexible load and the amount of
-imported power from the grid. If \code{production} is not found in \code{opt_data}, only
-a peak shaving objective will be considered.
-\item Minimize the energy cost (\code{opt_objective = "cost"}): performs a linear
-optimization to minimize the energy cost. In this case, the columns
+\item Minimize grid interaction (\code{opt_objective = "grid"}): minimizes the peak of
+the flexible load and the amount of imported power from the grid.
+If \code{production} is not found in \code{opt_data}, only a peak shaving objective
+will be considered.
+\item Minimize the energy cost (\code{opt_objective = "cost"}): minimizes the energy cost.
+In this case, the columns
 \code{grid_capacity}, \code{price_imported}, \code{price_exported},
 \code{price_turn_up} and \code{price_turn_down} of tibble \code{opt_data} are important.
 If these variables are not configured, default values of \code{grid_capacity = Inf},
-\code{price_imported = 1} and \code{price_exported = 0} are considered to minimize the
-imported energy.
-For this linear optimization the \code{grid_capacity} should be configured since
-all possible power will be allocated in the time slots with lower prices.
+\code{price_imported = 1}, \code{price_exported = 0}, \code{price_turn_up = 0} and
+\code{price_turn_down = 0} are considered to just minimize the imported energy.
+\item Combined optimization (\code{opt_objective} between \code{0} and \code{1}): minimizes both
+the net power peaks and energy cost.
 \item No optimization (\code{opt_objective = "none"}): this will skip optimization.
 If a user profile name appears in \code{opt_data} columns, then this will be
 considered as a setpoint for the scheduling algorithm. If not, then this
@@ -119,11 +119,7 @@ user profile will not be optimized.
 }
 \examples{
 # Example: we will use the example data set of charging sessions
-# from the California Technological Institute (Caltech), obtained
-# through the ACN-Data website (https://ev.caltech.edu/dataset).
-# This data set has been clustered into different user profiles
-# using the R package `{evprof}`. See the article in:
-# https://mcanigueral.github.io/evprof/articles/california.html.
+# from the [`evsim`] package.
 
 # The user profiles of this data set are `Visit` and `Worktime`,
 # identified in two different time cycles `Workday` and `Weekend`.

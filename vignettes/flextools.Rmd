@@ -12,7 +12,7 @@ library(dutils)
 library(ggplot2)
 ```
 
-Function `flextools::optimize_demand` and `flextools::add_battery_optimization` provide a framework to optimize time-series demand profiles according to different parameters, such as:
+Functions `optimize_demand()`, `smart_charging()` and `add_battery_optimization()` provide a framework to optimize time-series demand profiles according to different parameters, such as:
 
 * **Contextual variables** for the optimization problem (local energy generation, static load, grid capacity, etc.). These values must be collected in a data frame through the `opt_data` parameter.
 * **Optimization objective**, whether to minimize the net power, the energy cost or both.
@@ -47,7 +47,7 @@ opt_data %>%
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_turn_up","Turn-up price",  axis = "y2", color = "#003300", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_turn_down","Turn-down price",  axis = "y2", color = "#669900", strokePattern = "dashed", strokeWidth = 2) %>% 
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -80,7 +80,7 @@ opt_data %>%
   dySeries("building", "Original building", "gray") %>%
   dySeries("opt_building", "Optimal building", "navy") %>%
   dySeries("production", "Production", "orange") %>% 
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -108,7 +108,7 @@ opt_data %>%
   dySeries("building", "Original building", "gray") %>%
   dySeries("opt_building", "Optimal building", "navy") %>%
   dySeries("production", "Production", "orange") %>% 
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -141,7 +141,7 @@ opt_data %>%
   dySeries("building", "Building", "navy") %>%
   dySeries("battery", "Battery", "purple") %>%
   dySeries("production", "Production", "orange") %>% 
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -178,7 +178,7 @@ opt_data %>%
   dySeries("production", "Production", "orange") %>% 
   dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -217,7 +217,7 @@ opt_data %>%
   dySeries("production", "Production", "orange") %>% 
   dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -250,7 +250,7 @@ opt_data %>%
   dySeries("production", "Production", "orange") %>% 
   dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -284,7 +284,7 @@ opt_data %>%
   dySeries("production", "Production", "orange") %>% 
   dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -370,7 +370,7 @@ opt_data %>%
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
   dySeries("price_turn_up","Turn-up price",  axis = "y2", color = "#003300", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_turn_down","Turn-down price",  axis = "y2", color = "#669900", strokePattern = "dashed", strokeWidth = 2) %>%
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -413,7 +413,7 @@ opt_data %>%
   dySeries("production", "Production", "orange") %>% 
   dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 
@@ -452,7 +452,7 @@ opt_data %>%
   dySeries("production", "Production", "orange") %>% 
   dySeries("price_imported", "Imported APX price", axis = "y2", color = "red", strokePattern = "dashed", strokeWidth = 2) %>% 
   dySeries("price_exported","Exported fixed price",  axis = "y2", color = "green", strokePattern = "dashed", strokeWidth = 2) %>%
-  dyLegend(width = 200, show = "onmouseover") %>% 
+  dyLegend(width = 200, show = "always") %>% 
   dyOptions(strokeWidth = 2)
 ```
 

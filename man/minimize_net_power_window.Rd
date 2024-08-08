@@ -30,8 +30,7 @@ minimize_net_power_window(
 
 \item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
 
-\item{lambda}{numeric, penalty on change for the flexible load.
-This is a factor used in the optimization problem.}
+\item{lambda}{numeric, penalty on change for the flexible load.}
 }
 \value{
 numeric vector

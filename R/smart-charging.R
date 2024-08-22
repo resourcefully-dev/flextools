@@ -288,19 +288,20 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       start_time_sd <- sd(as.numeric(sessions_window_prof$ConnectionStartDateTime))
       end_time_mean <- mean(as.numeric(sessions_window_prof$ConnectionEndDateTime))
       end_time_sd <- sd(as.numeric(sessions_window_prof$ConnectionEndDateTime))
-      sessions_window_prof <- sessions_window_prof %>%
-        filter(
+      sessions_window_prof$FlexibilityHours[
+        !(
           between(
-            as.numeric(.data$ConnectionStartDateTime),
+            as.numeric(sessions_window_prof$ConnectionStartDateTime),
             round_to_interval(start_time_mean - 2*start_time_sd, time_resolution*60),
             round_to_interval(start_time_mean + 2*start_time_sd, time_resolution*60)
-          ),
-          between(
-            as.numeric(.data$ConnectionEndDateTime),
-            round_to_interval(end_time_mean - 2*end_time_sd, time_resolution*60),
-            round_to_interval(end_time_mean + 2*end_time_sd, time_resolution*60)
-          )
+          ) &
+            between(
+              as.numeric(sessions_window_prof$ConnectionEndDateTime),
+              round_to_interval(end_time_mean - 2*end_time_sd, time_resolution*60),
+              round_to_interval(end_time_mean + 2*end_time_sd, time_resolution*60)
+            )
         )
+      ] <- 0
 
       if (nrow(sessions_window_prof) == 0) next
 
@@ -513,6 +514,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
                               charging_power_min = 0.5, energy_min = 1,
                               include_log = FALSE, show_progress = TRUE) {
     log <- c()
+
 
   resolution <- as.integer(as.numeric(setpoint$datetime[2] - setpoint$datetime[1], unit = 'hours')*60)
   sessions_expanded <- sessions %>%

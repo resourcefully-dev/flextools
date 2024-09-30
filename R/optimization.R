@@ -14,8 +14,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
     opt_data$static <- 0
   }
   if (!("production" %in% names(opt_data))) {
-    message("Warning: `production` variable not found in `opt_data`.
-              No local energy production will be considered.")
+    message("Warning: `production` variable not found in `opt_data`. No local energy production will be considered.")
     opt_data$production <- 0
   }
   if (!("grid_capacity" %in% names(opt_data))) {
@@ -429,7 +428,7 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   if (time_horizon > time_slots) {
     time_horizon <- time_slots
   }
-  LFmax_vct <- pmin(grid_capacity + G - LS, LFmax)
+  LFmax_vct <- round(pmin(grid_capacity + G - LS, LFmax), 2)
   if (any(LFmax_vct < 0)) {
     message("Warning: `grid_capacity` too low. Skipping optimization.")
     return(LF)
@@ -467,7 +466,10 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
   O <- solver$Solve()
-  if (O$info$status == "solved") {
+
+  # Status values: https://osqp.org/docs/interfaces/status_values.html
+  # Admit "solved" (1) and "solved inaccurate" (2)
+  if (O$info$status_val <= 2) {
     return( pmin(abs(round(O$x, 2)), LFmax) )
   } else {
     message(paste("Optimization warning:", O$info$status))
@@ -510,6 +512,10 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
     time_horizon <- time_slots
   }
   LFmax_vct <- round(pmin(grid_capacity + G - LS, LFmax), 2)
+  if (any(LFmax_vct < 0)) {
+    message("Warning: `grid_capacity` too low. Skipping optimization.")
+    return(LF)
+  }
   identityMat <- diag(time_slots)
 
   # Objective function terms
@@ -581,8 +587,11 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
   O <- solver$Solve()
-  if (O$info$status == "solved") {
-    return( abs(round(O$x, 2)[seq_len(time_slots)]) )
+
+  # Status values: https://osqp.org/docs/interfaces/status_values.html
+  # Admit "solved" (1) and "solved inaccurate" (2)
+  if (O$info$status_val <= 2) {
+    return( pmin(abs(round(O$x, 2))[seq_len(time_slots)], LFmax) )
   } else {
     message(paste("Optimization warning:", O$info$status))
     return( LF )
@@ -623,6 +632,10 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
     time_horizon <- time_slots
   }
   LFmax_vct <- round(pmin(grid_capacity + G - LS, LFmax), 2)
+  if (any(LFmax_vct < 0)) {
+    message("Warning: `grid_capacity` too low. Skipping optimization.")
+    return(LF)
+  }
   identityMat <- diag(time_slots)
 
   # Objective function terms
@@ -694,8 +707,11 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
   O <- solver$Solve()
-  if (O$info$status == "solved") {
-    return( abs(round(O$x, 2)[seq_len(time_slots)]) )
+
+  # Status values: https://osqp.org/docs/interfaces/status_values.html
+  # Admit "solved" (1) and "solved inaccurate" (2)
+  if (O$info$status_val <= 2) {
+    return( pmin(abs(round(O$x, 2))[seq_len(time_slots)], LFmax) )
   } else {
     message(paste("Optimization warning:", O$info$status))
     return( LF )
@@ -942,7 +958,10 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
   B <- solver$Solve()
-  if (B$info$status == "solved") {
+
+  # Status values: https://osqp.org/docs/interfaces/status_values.html
+  # Admit "solved" (1) and "solved inaccurate" (2)
+  if (B$info$status_val <= 2) {
     return( round(B$x, 2) )
   } else {
     message(paste("Optimization warning:", B$info$status))
@@ -1049,7 +1068,10 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
   B <- solver$Solve()
-  if (B$info$status == "solved") {
+
+  # Status values: https://osqp.org/docs/interfaces/status_values.html
+  # Admit "solved" (1) and "solved inaccurate" (2)
+  if (B$info$status_val <= 2) {
     return( round(B$x[seq_len(time_slots)], 2) )
   } else {
     message(paste("Optimization warning:", B$info$status))
@@ -1172,7 +1194,10 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
   B <- solver$Solve()
-  if (B$info$status == "solved") {
+
+  # Status values: https://osqp.org/docs/interfaces/status_values.html
+  # Admit "solved" (1) and "solved inaccurate" (2)
+  if (B$info$status_val <= 2) {
     return( round(B$x[seq_len(time_slots)], 2) )
   } else {
     message(paste("Optimization warning:", B$info$status))

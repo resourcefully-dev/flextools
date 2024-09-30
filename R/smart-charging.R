@@ -75,7 +75,10 @@
 #' @importFrom purrr set_names
 #' @importFrom evsim get_demand adapt_charging_features
 #'
-#' @return a list with three elements: optimal setpoints, sessions schedule and log messages.
+#' @return a list with three elements:
+#' optimal setpoints (tibble), sessions schedule (tibble) and log messages
+#' (list with character strings). The date-time values in the log list are in
+#' the time zone of the `opt_data`.
 #' @export
 #'
 #' @details
@@ -100,10 +103,10 @@
 #' - Combined optimization (`opt_objective` between `0` and `1`): minimizes both
 #' the net power peaks and energy cost.
 #'
-#' - No optimization (`opt_objective = "none"`): this will skip optimization.
-#' If a user profile name appears in `opt_data` columns, then this will be
-#' considered as a setpoint for the scheduling algorithm. If not, then this
-#' user profile will not be optimized.
+#' - No optimization (`opt_objective = "none"`): this will skip optimization and
+#' at least one user profile name must be in an `opt_data` column to be
+#' considered as a setpoint for the scheduling algorithm. The user profiles that
+#' don't appear in `opt_data` will not be optimized.
 #'
 #' @examples
 #' # Example: we will use the example data set of charging sessions
@@ -117,27 +120,31 @@
 #' # `Worktime` sessions instead of all sessions.
 #'
 #' # For this example we want the following:
-#' # - Postpone only `Worktime` sessions, which have a responsiveness rate of
+#' # - Curtail only `Worktime` sessions, which have a responsiveness rate of
 #' # 0.9 (i.e. 90% of Worktime users accept to postpone the session).
 #' # - Minimize the power peak of the sessions (peak shaving)
 #' # - Time series resolution of 15 minutes
 #' # - Optimization window of 24 hours from 6:00AM to 6:00 AM
+#' # - The energy charged can be reduced up to 50% of the original requirement
 #'
-#' \dontrun{
-#' sessions <- evsim::california_ev_sessions_profiles
-#' sessions_demand <- evsim::get_demand(sessions, resolution = 15, mc.cores = 4)
+#' library(dplyr)
+#' sessions <- evsim::california_ev_sessions_profiles %>%
+#'   slice_head(n = 50) %>%
+#'   evsim::adapt_charging_features(time_resolution = 15)
+#' sessions_demand <- evsim::get_demand(sessions, resolution = 15)
 #'
 #' # Don't require any other variable than datetime, since we don't
 #' # care about local generation (just peak shaving objective)
 #' opt_data <- tibble(
-#'   datetime = sessions_demand$datetime
+#'   datetime = sessions_demand$datetime,
+#'   production = 0
 #' )
-#' smart_charging(
-#'   sessions, opt_data, opt_objective = "grid", method = "postpone",
-#'   window_length = 24*60/15, window_start_hour = 6,
-#'   responsive = list(Workday = list(Worktime = 0.9))
+#' sc_results <- smart_charging(
+#'   sessions, opt_data, opt_objective = "grid", method = "curtail",
+#'   window_days = 1, window_start_hour = 6,
+#'   responsive = list(Workday = list(Worktime = 0.9)),
+#'   energy_min = 0.5
 #' )
-#' }
 #'
 #'
 smart_charging <- function(sessions, opt_data, opt_objective, method,
@@ -157,15 +164,28 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     "ConnectionHours", "Power", "Energy"
   )
   if (!all(sessions_basic_vars %in% colnames(sessions))) {
-    message("Error: `sessions` does not contain all required variables (see Arguments description).")
+    message("Error: `sessions` does not contain all required variables (see Arguments description)")
     return( NULL )
   }
   if (is.null(opt_data)) {
     return( NULL )
   }
+  if (!("datetime" %in% colnames(opt_data))) {
+    message("Error: `opt_data` does not contain `datetime` variable")
+    return( NULL )
+  }
+  if (!any(sessions$ConnectionStartDateTime %in% opt_data$datetime)) {
+    message("Error: `sessions` do not charge during `datetime` period in `opt_data`")
+    return( NULL )
+  }
   if (opt_objective != "none") {
     opt_data$flexible <- 0
     opt_data <- check_optimization_data(opt_data, opt_objective)
+  } else {
+    if (!any(unique(sessions$Profile) %in% names(opt_data))) {
+      message("Error: when `opt_objective` = 'none', at least one EV user profile from `sessions` must appear as a column in `opt_data` to be considered as a setpoint")
+      return( NULL )
+    }
   }
   if (is.null(responsive)) {
     responsive <- map(
@@ -175,11 +195,27 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
         ~ 1
       )
     )
+  } else {
+    responsive_time_cycles <- names(responsive)
+    responsive_user_profiles <- unlist(map(responsive, names))
+    sessions_time_cycles <- unique(sessions$Timecycle)
+    sessions_user_profiles <- unique(sessions$Profile)
+
+    # Check that all content in `responsive` match the content in `sessions`
+    if (!all(responsive_time_cycles %in% sessions_time_cycles)) {
+      message("Error: time cycle name in `responsive` not found in `sessions`")
+      return( NULL )
+    }
+    if (!all(responsive_user_profiles %in% sessions_user_profiles)) {
+      message("Error: user profile name in `responsive` not found in `sessions`")
+      return( NULL )
+    }
   }
+
 
   # Adapt the data set for the current time resolution
   dttm_seq <- opt_data$datetime
-  time_resolution <- as.integer(as.numeric(dttm_seq[2] - dttm_seq[1], unit = 'hours')*60)
+  time_resolution <- get_time_resolution(dttm_seq, units = "mins")
   sessions <- sessions %>%
     adapt_charging_features(time_resolution = time_resolution) %>%
     mutate(
@@ -239,11 +275,11 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     # Find most common time-cycle in this window
     window_timecycle <- names(sort(table(sessions_window$Timecycle), decreasing = TRUE))[1]
     # Responsiveness of the user profiles in this time-cycle
-    if (!(window_timecycle %in% names(responsive))) {
-      message("Error: time cycle in `responsive` not found in `sessions` data.")
-    }
+    # If the time cycle is not configured in `responsive` then skip smart charging
+    if (!(window_timecycle %in% names(responsive))) next
     window_responsive <- responsive[[window_timecycle]]
 
+    if (length(window_responsive) == 0) next
 
     # Profiles subjected to optimization:
     #   1. appearing in the sessions set for this optimization window
@@ -252,6 +288,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       (names(window_responsive) %in% unique(sessions_window$Profile)) &
         (names(window_responsive) %in% names(window_responsive)[as.numeric(window_responsive) > 0])
     ]
+
+    if (length(opt_profiles) == 0) next
 
     # For each optimization profile
     for (profile in opt_profiles) {
@@ -319,7 +357,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       sessions_window_prof[["Responsive"]] <- sample(
         c(T, F),
         nrow(sessions_window_prof),
-        replace = T,
+        replace = TRUE,
         prob = c(window_responsive[[profile]], (1-window_responsive[[profile]]))
       )
       sessions_window_prof_flex <- sessions_window_prof %>%
@@ -470,11 +508,15 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
   }
 
-  return(list(
+  results <- list(
     setpoints = setpoints,
     sessions = sessions_opt,
     log = log
-  ))
+  )
+
+  class(results) <- "SmartCharging"
+
+  return(results)
 }
 
 
@@ -516,7 +558,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     log <- c()
 
 
-  resolution <- as.integer(as.numeric(setpoint$datetime[2] - setpoint$datetime[1], unit = 'hours')*60)
+  resolution <- get_time_resolution(setpoint$datetime, units = "mins")
   sessions_expanded <- sessions %>%
     expand_sessions(resolution = resolution) %>%
     mutate(
@@ -601,8 +643,6 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
         if (method == "postpone") {
           sessions_timeslot <- sessions_timeslot %>%
             mutate(
-              # MinEnergyLeft = pmax(.data$EnergyRequired*energy_min - .data$EnergyCharged, 0),
-              # PossibleEnergyRest = .data$PowerNominal*pmax(.data$ConnectionHoursLeft - resolution/60, 0),
               Flexible = ifelse(
                 (.data$EnergyCharged == 0) & (.data$MinEnergyLeft <= .data$PossibleEnergyRest),
                 TRUE, FALSE
@@ -611,8 +651,6 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
         } else {
           sessions_timeslot <- sessions_timeslot %>%
             mutate(
-              # MinEnergyLeft = pmax(.data$EnergyRequired*energy_min - .data$EnergyCharged, 0),
-              # PossibleEnergyRest = .data$PowerNominal*pmax(.data$ConnectionHoursLeft - resolution/60, 0),
               Flexible = ifelse(
                 (.data$EnergyLeft > 0) & (.data$MinEnergyLeft <= .data$PossibleEnergyRest),
                 TRUE, FALSE
@@ -692,15 +730,13 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
         # Flexible sessions:
         # If the minimum power that can be charged in this time slot is lower
-        # than the nomnal power. The minimum power is defined by:
+        # than the nominal power. The minimum power is defined by:
         #  - The `charging_power_min` parameter
         #  - The minimum energy that must be charged in the time slot, defined by
         #      - The minimum energy that must be charged in total (considering `energy_min`)
         #      - The energy that can be charged at nominal power the rest of connection hours
         sessions_timeslot <- sessions_timeslot %>%
           mutate(
-            # MinEnergyLeft = pmax(.data$EnergyRequired*energy_min - .data$EnergyCharged, 0),
-            # PossibleEnergyRest = .data$PowerNominal*pmax(.data$ConnectionHoursLeft-resolution/60, 0),
             MinEnergyTimeslot = pmax(.data$MinEnergyLeft - .data$PossibleEnergyRest, 0),
             MinPowerTimeslot = pmax(.data$MinEnergyTimeslot/(resolution/60), .data$PowerTimeslot*charging_power_min),
             Flexible = ifelse(
@@ -803,7 +839,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       if (length(session_after_idx) > 0) {
 
         # Update `EnergyLeft`
-        session_energy <- sessions_timeslot$Power[s]*resolution/60
+        session_energy <- round(sessions_timeslot$Power[s]*resolution/60, 2)
         session_energy_left <- round(sessions_timeslot$EnergyLeft[s] - session_energy, 2)
         sessions_expanded$EnergyLeft[session_after_idx] <- session_energy_left
 
@@ -872,7 +908,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       ChargingEndDateTime = .data$Timeslot + minutes(resolution),
       ConnectionHours = resolution/60,
       ChargingHours = resolution/60,
-      Energy = .data$Power*.data$ChargingHours
+      Energy = round(.data$Power*.data$ChargingHours, 2)
     ) %>%
     select(any_of(names(sessions)), 'EnergyLeft', 'ConnectionHoursLeft', 'Flexible', 'Exploited')
 
@@ -884,6 +920,50 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
   )
 }
 
+
+
+#' `print` method for `SmartCharging` object class
+#'
+#' @param x  `SmartCharging` object returned by `smart_charging`  function
+#' @param ... further arguments passed to or from other methods.
+#'
+#' @returns nothing but prints information about the `SmartCharging` object
+#' @export
+#' @keywords internal
+#'
+#' @importFrom dplyr select all_of group_by summarise_all summarise mutate_if n
+#' @importFrom tidyr drop_na pivot_longer
+#'
+#'
+print.SmartCharging <- function(x, ...) {
+  nS <- length(unique(x$sessions$Session))
+  scS <- x$sessions %>%
+    select(all_of(c("Session", "Responsive", "Flexible", "Exploited"))) %>%
+    drop_na()
+  nscS <- length(unique(scS$Session))
+  scS2 <- scS %>%
+    group_by(.data$Session) %>%
+    summarise_all(sum)
+  summaryS <- scS2 %>%
+    replace(is.na(scS2), 0) %>%
+    mutate_if(is.numeric, ~ ifelse(.x > 0, TRUE, FALSE)) %>%
+    pivot_longer(- "Session") %>% group_by(.data$name) %>%
+    summarise(pct = round(sum(.data$value, na.rm = TRUE)/n()*100))
+  cat('Smart charging results as a list of 3 objects: charging sessions, user profiles setpoints and log messages.\n')
+  cat('Simulation from', as.character(min(date(x$setpoints$datetime))),
+      'to', as.character(max(date(x$setpoints$datetime))), 'with a time resolution of',
+      get_time_resolution(x$setpoints$datetime, units = "mins"), 'minutes.\n')
+  cat('For this time period,', nscS, 'charging sessions could participate (',
+      round(nscS/nS*100), '% of total data set), from which:\n')
+  cat('  - Responsive sessions:', summaryS$pct[summaryS$name == "Responsive"], '%\n')
+  cat('  - Flexible sessions:', summaryS$pct[summaryS$name == "Flexible"], '%\n')
+  cat('  - Exploited sessions:', summaryS$pct[summaryS$name == "Exploited"], '%\n')
+  if (length(x$log) == 0) {
+    cat('No log messages in this simulation.\n')
+  } else {
+    cat('For more information see the log messages.\n')
+  }
+}
 
 
 #' #' Simulate charging power limitation based on grid capacity signals

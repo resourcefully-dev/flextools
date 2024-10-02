@@ -738,9 +738,15 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
         sessions_timeslot <- sessions_timeslot %>%
           mutate(
             MinEnergyTimeslot = pmax(.data$MinEnergyLeft - .data$PossibleEnergyRest, 0),
-            MinPowerTimeslot = pmax(.data$MinEnergyTimeslot/(resolution/60), .data$PowerTimeslot*charging_power_min),
+            MinPowerTimeslot = pmax(
+              .data$MinEnergyTimeslot/(resolution/60),
+              .data$PowerNominal*charging_power_min
+            ),
             Flexible = ifelse(
-              (.data$EnergyLeft > 0) & (.data$MinPowerTimeslot < .data$PowerTimeslot), TRUE, FALSE
+              (.data$EnergyLeft > 0) &
+                (.data$MinPowerTimeslot < .data$PowerTimeslot),
+              TRUE,
+              FALSE
             )
           )
 

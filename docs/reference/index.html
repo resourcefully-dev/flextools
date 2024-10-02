@@ -33,8 +33,9 @@
     <a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a>
     <div class="dropdown-divider"></div>
     <h6 class="dropdown-header" data-toc-skip>Demand-response</h6>
-    <a class="dropdown-item" href="../articles/smart_charging.html">Smart charging</a>
-    <a class="dropdown-item" href="../articles/user_profiles.html">User profiles in smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging.html">Smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging-advanced.html">Advanced smart charging</a>
+    <a class="dropdown-item" href="../articles/user-profiles.html">User profiles in smart charging</a>
   </div>
 </li>
 <li class="nav-item">
@@ -54,6 +55,37 @@
     </div>
 
     <div class="section level2">
+      <h2 id="time-series-utils">Time-series utils<a class="anchor" aria-label="anchor" href="#time-series-utils"></a></h2>
+      
+      
+
+      
+    </div><div id="" class="section level2">
+      
+      
+      
+
+      <dl><dt>
+          
+          <code><a href="get_time_resolution.html">get_time_resolution()</a></code> 
+        </dt>
+        <dd>Return the time resolution of a datetime sequence</dd>
+      </dl><dl><dt>
+          
+          <code><a href="change_timeseries_resolution.html">change_timeseries_resolution()</a></code> 
+        </dt>
+        <dd>Change time resolution of a time-series data frame</dd>
+      </dl><dl><dt>
+          
+          <code><a href="change_timeseries_year.html">change_timeseries_year()</a></code> 
+        </dt>
+        <dd>Change the year of a time series data frame keeping the original weekdays</dd>
+      </dl><dl><dt>
+          
+          <code><a href="aggregate_timeseries.html">aggregate_timeseries()</a></code> 
+        </dt>
+        <dd>Aggregate multiple timeseries columns to a single one</dd>
+      </dl></div><div class="section level2">
       <h2 id="optimization">Optimization<a class="anchor" aria-label="anchor" href="#optimization"></a></h2>
       
       
@@ -100,6 +132,11 @@
           <code><a href="schedule_sessions.html">schedule_sessions()</a></code> 
         </dt>
         <dd>Schedule sessions according to optimal setpoint</dd>
+      </dl><dl><dt>
+          
+          <code><a href="plot_smart_charging.html">plot_smart_charging()</a></code> 
+        </dt>
+        <dd>Plot smart charging results</dd>
       </dl></div><div class="section level2">
       <h2 id="battery">Battery<a class="anchor" aria-label="anchor" href="#battery"></a></h2>
       
@@ -132,7 +169,7 @@
         </dt>
         <dd>Losses due to charging/discharging process</dd>
       </dl></div><div class="section level2">
-      <h2 id="calculations">Calculations<a class="anchor" aria-label="anchor" href="#calculations"></a></h2>
+      <h2 id="evaluation-of-results">Evaluation of results<a class="anchor" aria-label="anchor" href="#evaluation-of-results"></a></h2>
       
       
 
@@ -144,24 +181,59 @@
 
       <dl><dt>
           
-          <code><a href="get_energy_balance.html">get_energy_balance()</a></code> 
-        </dt>
-        <dd>Get energy balance time-series</dd>
-      </dl><dl><dt>
-          
           <code><a href="get_energy_kpis.html">get_energy_kpis()</a></code> 
         </dt>
         <dd>Obtain a list of energy indicators given the energy profiles</dd>
       </dl><dl><dt>
           
+          <code><a href="get_energy_balance.html">get_energy_balance()</a></code> 
+        </dt>
+        <dd>Get energy balance time-series</dd>
+      </dl><dl><dt>
+          
+          <code><a href="plot_net_power.html">plot_net_power()</a></code> 
+        </dt>
+        <dd>Plot net power interaction with the grid</dd>
+      </dl><dl><dt>
+          
           <code><a href="get_energy_cost.html">get_energy_cost()</a></code> 
         </dt>
-        <dd>Get energy cost</dd>
+        <dd>Get energy cost time-series</dd>
+      </dl><dl><dt>
+          
+          <code><a href="get_energy_total_cost.html">get_energy_total_cost()</a></code> 
+        </dt>
+        <dd>Get energy total cost (one number)</dd>
+      </dl><dl><dt>
+          
+          <code><a href="plot_energy_cost.html">plot_energy_cost()</a></code> 
+        </dt>
+        <dd>Plot hourly energy cost</dd>
       </dl><dl><dt>
           
           <code><a href="get_imbalance_income.html">get_imbalance_income()</a></code> 
         </dt>
-        <dd>Get imbalance income</dd>
+        <dd>Get imbalance income time-series</dd>
+      </dl><dl><dt>
+          
+          <code><a href="get_imbalance_total_income.html">get_imbalance_total_income()</a></code> 
+        </dt>
+        <dd>Get imbalance total income (one number)</dd>
+      </dl><dl><dt>
+          
+          <code><a href="get_load_duration_curve.html">get_load_duration_curve()</a></code> 
+        </dt>
+        <dd>Load duration curve table</dd>
+      </dl><dl><dt>
+          
+          <code><a href="plot_load_duration_curve.html">plot_load_duration_curve()</a></code> 
+        </dt>
+        <dd>Plot of the load duration curve</dd>
+      </dl><dl><dt>
+          
+          <code><a href="summarise_energy_charged.html">summarise_energy_charged()</a></code> 
+        </dt>
+        <dd>Get a summary of the energy charged per session</dd>
       </dl></div>
   </main><aside class="col-md-3"><nav id="toc"><h2>On this page</h2>
     </nav></aside></div>

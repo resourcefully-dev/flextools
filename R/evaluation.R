@@ -17,8 +17,14 @@
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   production = solar,
+#'   consumption = building
+#' )
 #' head(df)
+#'
 #' head(get_energy_balance(df))
 #'
 #'
@@ -45,8 +51,14 @@ get_energy_balance <- function(df) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   production = solar,
+#'   consumption = building
+#' )
 #' head(df)
+#'
 #' get_energy_kpis(df)
 #'
 get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
@@ -152,8 +164,17 @@ summarise_energy_charged <- function(smart_charging, sessions) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   production = solar,
+#'   consumption = building,
+#'   price_imported,
+#'   price_exported
+#' )
+#' df <- dplyr::slice_head(df, n = 300)
 #' head(df)
+#'
 #' head(get_energy_cost(df))
 #'
 get_energy_cost <- function(df) {
@@ -179,8 +200,16 @@ get_energy_cost <- function(df) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   production = solar,
+#'   consumption = building,
+#'   price_imported,
+#'   price_exported
+#' )
 #' head(df)
+#'
 #' get_energy_total_cost(df)
 #'
 get_energy_total_cost <- function(df) {
@@ -208,8 +237,12 @@ get_energy_total_cost <- function(df) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(
-#'   energy_profiles, production = solar, demand_baseline = building
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   demand_baseline = building,
+#'   price_turn_up,
+#'   price_turn_down
 #' )
 #'
 #' # Build another random consumption profile
@@ -217,6 +250,7 @@ get_energy_total_cost <- function(df) {
 #' df <- dplyr::mutate(
 #'   df, demand_final = demand_baseline + building_variation
 #' )
+#' head(df)
 #'
 #' head(get_imbalance_income(df))
 #'
@@ -251,8 +285,12 @@ get_imbalance_income <- function(df) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(
-#'   energy_profiles, production = solar, demand_baseline = building
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   demand_baseline = building,
+#'   price_turn_up,
+#'   price_turn_down
 #' )
 #'
 #' # Build another random consumption profile
@@ -260,6 +298,7 @@ get_imbalance_income <- function(df) {
 #' df <- dplyr::mutate(
 #'   df, demand_final = demand_baseline + building_variation
 #' )
+#' head(df)
 #'
 #' get_imbalance_total_income(df)
 #'
@@ -281,7 +320,8 @@ get_imbalance_total_income <- function(df) {
 #'
 #' @param smart_charging SmartCharging object, returned by function `smart_charging()`
 #' @param sessions tibble, sessions data set containig the following variables:
-#' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`.
+#' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`
+#' @param ... extra arguments to pass to dygraphs::dyOptions function
 #'
 #' @return dygraphs plot
 #' @export
@@ -316,7 +356,7 @@ get_imbalance_total_income <- function(df) {
 #' # Or use the base function `plot`
 #' plot(sc_results, sessions)
 #'
-plot_smart_charging <- function(smart_charging, sessions = NULL) {
+plot_smart_charging <- function(smart_charging, sessions = NULL, ...) {
 
   plot_df <- smart_charging$setpoints['datetime'] %>%
     mutate(
@@ -345,7 +385,7 @@ plot_smart_charging <- function(smart_charging, sessions = NULL) {
   }
 
   plot_dy <- plot_df %>%
-    plot_ts() %>%
+    plot_ts(ylab = "Power (kW)", strokeWidth = 2, ...) %>%
     dySeries("Setpoint", strokePattern = "dashed", color = "red")%>%
     dySeries("Flexible EVs", color = "navy")
 
@@ -381,8 +421,9 @@ plot.SmartCharging <- function(x, ...) {
 #'
 #' @param df tibble, with columns `datetime`, `consumption`, `production`
 #' @param original_df tibble with same columns than `df` corresponding to the
-#' original scenario (e.g. without flexibility).
+#' original scenario (e.g. without flexibility)
 #' @param grid_capacity numeric, maximum power that the grid can handle (in kW)
+#' @param ... extra arguments to pass to dygraphs::dyOptions function
 #'
 #' @return dygraphs plot
 #' @export
@@ -392,9 +433,15 @@ plot.SmartCharging <- function(x, ...) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
-#' df <- dplyr::slice_head(df, n = 1000)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   production = solar,
+#'   consumption = building
+#' )
+#' df <- dplyr::slice_head(df, n = 300)
 #' head(df)
+#'
 #' plot_net_power(df)
 #'
 #' # Build another random building profile
@@ -402,7 +449,7 @@ plot.SmartCharging <- function(x, ...) {
 #' df2 <- dplyr::mutate(df, consumption = consumption + building_variation)
 #' plot_net_power(df2, original_df = df)
 #'
-plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL) {
+plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL, ...) {
 
   plot_df <- df %>%
     get_energy_balance() %>%
@@ -411,7 +458,7 @@ plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL) {
   if (is.null(original_df)) {
     plot_dy <- plot_df %>%
       select(any_of(c("datetime", "consumption", "production", "net_flex"))) %>%
-      plot_ts(ylab = "Power demand (kW)", fillGraph = TRUE, strokeWidth = 2) %>%
+      plot_ts(ylab = "Power demand (kW)", fillGraph = TRUE, strokeWidth = 2, ...) %>%
       dySeries("production", "Production", color = "orange") %>%
       dySeries("consumption", "Consumption",  color = "navy") %>%
       dySeries("net_flex", "Net power", color = "brown", fillGraph = FALSE)
@@ -434,7 +481,7 @@ plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL) {
         )
       ) %>%
       select(any_of(c("datetime", "net_static", "net_flex", "lwr", "upr"))) %>%
-      plot_ts(ylab = "Net power (kW)") %>%
+      plot_ts(ylab = "Net power (kW)", ...) %>%
       dySeries(c("lwr", "net_static", "upr"), label = "Original case", color = "red", strokePattern = "dashed") %>%
       dySeries("net_flex", label = "Flexible case", color = "darkgreen", strokeWidth = 2)
   }
@@ -460,6 +507,7 @@ plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL) {
 #'  also required.
 #' @param original_df tibble with same columns than `df` corresponding to the
 #' original scenario (e.g. without flexibility).
+#' @param ... extra arguments to pass to dygraphs::dyOptions function.
 #'
 #' @return dygraphs plot
 #' @export
@@ -469,9 +517,17 @@ plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
-#' df <- dplyr::slice_head(df, n = 1000)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   production = solar,
+#'   consumption = building,
+#'   price_imported,
+#'   price_exported
+#' )
+#' df <- dplyr::slice_head(df, n = 300)
 #' head(df)
+#'
 #' plot_energy_cost(df)
 #'
 #' # Build another random building profile
@@ -479,7 +535,7 @@ plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL) {
 #' df2 <- dplyr::mutate(df, consumption = consumption + building_variation)
 #' plot_energy_cost(df2, original_df = df)
 #'
-plot_energy_cost <- function(df, original_df = NULL) {
+plot_energy_cost <- function(df, original_df = NULL, ...) {
 
   plot_df <- df %>%
     get_energy_cost() %>%
@@ -488,7 +544,7 @@ plot_energy_cost <- function(df, original_df = NULL) {
   if (is.null(original_df)) {
     plot_dy <- plot_df %>%
       select(all_of(c("datetime", "cost_flex"))) %>%
-      plot_ts(ylab = "Power demand (kW)", fillGraph = TRUE, strokeWidth = 2) %>%
+      plot_ts(ylab = "Cost (Euros)", fillGraph = TRUE, strokeWidth = 2, ...) %>%
       dySeries("cost_flex", "Cost", color = "navy")
   } else {
     original_df <- original_df %>%
@@ -509,7 +565,7 @@ plot_energy_cost <- function(df, original_df = NULL) {
         )
       ) %>%
       select(any_of(c("datetime", "cost_static", "cost_flex", "lwr", "upr"))) %>%
-      plot_ts(ylab = "Cost (Euros)") %>%
+      plot_ts(ylab = "Cost (Euros)", ...) %>%
       dySeries(c("lwr", "cost_static", "upr"), label = "Original case", color = "red", strokePattern = "dashed") %>%
       dySeries("cost_flex", label = "Flexible case", color = "darkgreen", strokeWidth = 2)
   }
@@ -549,11 +605,23 @@ get_percentage_hours <- function(vct, threshold) {
 #' @importFrom rlang .data
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   consumption = building
+#' )
+#'
 #' head(df)
+#'
 #' get_load_duration_curve(df)
 #'
 get_load_duration_curve <- function(df) {
+  if (!("consumption" %in% names(df))) {
+    df$consumption <- 0
+  }
+  if (!("production" %in% names(df))) {
+    df$production <- 0
+  }
   net <- df$consumption - df$production
   load_data <- tibble(
     power = seq(min(net), max(net), by = 1),
@@ -588,8 +656,13 @@ get_load_duration_curve <- function(df) {
 #' @importFrom stats setNames
 #'
 #' @examples
-#' df <- dplyr::rename(energy_profiles, production = solar, consumption = building)
+#' df <- dplyr::select(
+#'   energy_profiles,
+#'   datetime,
+#'   consumption = building
+#' )
 #' head(df)
+#'
 #' plot_load_duration_curve(df)
 #'
 #' # Build another random building profile

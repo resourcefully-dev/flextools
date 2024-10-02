@@ -88,7 +88,10 @@ be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} var
 Must be at least one, and parallelization requires at least two cores.}
 }
 \value{
-a list with three elements: optimal setpoints, sessions schedule and log messages.
+a list with three elements:
+optimal setpoints (tibble), sessions schedule (tibble) and log messages
+(list with character strings). The date-time values in the log list are in
+the time zone of the \code{opt_data}.
 }
 \description{
 This function provides a framework to simulate different smart charging methods
@@ -116,10 +119,10 @@ If these variables are not configured, default values of \code{grid_capacity = I
 \code{price_turn_down = 0} are considered to just minimize the imported energy.
 \item Combined optimization (\code{opt_objective} between \code{0} and \code{1}): minimizes both
 the net power peaks and energy cost.
-\item No optimization (\code{opt_objective = "none"}): this will skip optimization.
-If a user profile name appears in \code{opt_data} columns, then this will be
-considered as a setpoint for the scheduling algorithm. If not, then this
-user profile will not be optimized.
+\item No optimization (\code{opt_objective = "none"}): this will skip optimization and
+at least one user profile name must be in an \code{opt_data} column to be
+considered as a setpoint for the scheduling algorithm. The user profiles that
+don't appear in \code{opt_data} will not be optimized.
 }
 }
 \examples{
@@ -134,27 +137,31 @@ user profile will not be optimized.
 # `Worktime` sessions instead of all sessions.
 
 # For this example we want the following:
-# - Postpone only `Worktime` sessions, which have a responsiveness rate of
+# - Curtail only `Worktime` sessions, which have a responsiveness rate of
 # 0.9 (i.e. 90\% of Worktime users accept to postpone the session).
 # - Minimize the power peak of the sessions (peak shaving)
 # - Time series resolution of 15 minutes
 # - Optimization window of 24 hours from 6:00AM to 6:00 AM
+# - The energy charged can be reduced up to 50\% of the original requirement
 
-\dontrun{
-sessions <- evsim::california_ev_sessions_profiles
-sessions_demand <- evsim::get_demand(sessions, resolution = 15, mc.cores = 4)
+library(dplyr)
+sessions <- evsim::california_ev_sessions_profiles \%>\%
+  slice_head(n = 50) \%>\%
+  evsim::adapt_charging_features(time_resolution = 15)
+sessions_demand <- evsim::get_demand(sessions, resolution = 15)
 
 # Don't require any other variable than datetime, since we don't
 # care about local generation (just peak shaving objective)
 opt_data <- tibble(
-  datetime = sessions_demand$datetime
+  datetime = sessions_demand$datetime,
+  production = 0
 )
-smart_charging(
-  sessions, opt_data, opt_objective = "grid", method = "postpone",
-  window_length = 24*60/15, window_start_hour = 6,
-  responsive = list(Workday = list(Worktime = 0.9))
+sc_results <- smart_charging(
+  sessions, opt_data, opt_objective = "grid", method = "curtail",
+  window_days = 1, window_start_hour = 6,
+  responsive = list(Workday = list(Worktime = 0.9)),
+  energy_min = 0.5
 )
-}
 
 
 }

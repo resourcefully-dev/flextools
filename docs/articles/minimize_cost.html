@@ -57,8 +57,9 @@
     <a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a>
     <div class="dropdown-divider"></div>
     <h6 class="dropdown-header" data-toc-skip>Demand-response</h6>
-    <a class="dropdown-item" href="../articles/smart_charging.html">Smart charging</a>
-    <a class="dropdown-item" href="../articles/user_profiles.html">User profiles in smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging.html">Smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging-advanced.html">Advanced smart charging</a>
+    <a class="dropdown-item" href="../articles/user-profiles.html">User profiles in smart charging</a>
   </div>
 </li>
 <li class="nav-item">
@@ -181,7 +182,7 @@ the expected behavior:</li>
 the grid capacity <span class="math inline">\(GC_t\)</span>:</li>
 </ul>
 <p><span class="math display">\[
-0 \le O_t \le GC_t + G_t - LS_t \quad t \in T
+O_t + LS_t - G_t \le GC_t \quad t \in T
 \]</span></p>
 <ul>
 <li>The imported energy must remain between 0 and the corresponding

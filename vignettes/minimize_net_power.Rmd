@@ -48,7 +48,7 @@ $$
 * The energy balance between generation and loads must be lower than the grid capacity $GC_t$:
 
 $$
-0 \le O_t + LS_t - G_t \le GC_t \quad t \in T
+O_t + LS_t - G_t \le GC_t \quad t \in T
 $$
 
 At the same time, we can optimize the flexible energy demand with two opposite approaches:

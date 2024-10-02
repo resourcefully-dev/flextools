@@ -19,6 +19,7 @@ Depends:
     R (>= 2.10)
 Imports: 
     dplyr,
+    tidyr,
     lubridate,
     rlang,
     purrr,
@@ -26,6 +27,8 @@ Imports:
     parallel,
     osqp,
     Matrix,
-    evsim
+    evsim,
+    dygraphs,
+    ggplot2
 Suggests: 
     rmarkdown

@@ -57,8 +57,9 @@
     <a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a>
     <div class="dropdown-divider"></div>
     <h6 class="dropdown-header" data-toc-skip>Demand-response</h6>
-    <a class="dropdown-item" href="../articles/smart_charging.html">Smart charging</a>
-    <a class="dropdown-item" href="../articles/user_profiles.html">User profiles in smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging.html">Smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging-advanced.html">Advanced smart charging</a>
+    <a class="dropdown-item" href="../articles/user-profiles.html">User profiles in smart charging</a>
   </div>
 </li>
 <li class="nav-item">
@@ -97,8 +98,10 @@ Quadratic programming problem can be formulated according to multiple
 objectives. Currently, <code>flextools</code> package allows to optimize
 a time-series power load considering two different goals:</p>
 <ul>
-<li>Minimize the power exchanged with the grid (net power)</li>
-<li>Minimize the energy cost</li>
+<li><a href="https://mcanigueral.github.io/flextools/articles/minimize_net_power.html">Minimize
+the power exchanged with the grid (net power)</a></li>
+<li><a href="https://mcanigueral.github.io/flextools/articles/minimize_cost.html">Minimize
+the energy cost</a></li>
 </ul>
 <p>In this article, we’ll cover the optimization problem for the
 combination of both objectives, <strong>net power minimization</strong>
@@ -171,6 +174,9 @@ turn-down power</li>
 <span class="math inline">\(\lambda\)</span> : penalty on change for
 the flexible load</li>
 </ul>
+<p>Moreover, this optimization problem has the constraints described in
+<a href="https://mcanigueral.github.io/flextools/articles/minimize_cost.html#demand-optimization">Energy
+cost optimization article (demand section)</a>.</p>
 </div>
 <div class="section level2">
 <h2 id="battery-optimization">Battery optimization<a class="anchor" aria-label="anchor" href="#battery-optimization"></a>
@@ -217,6 +223,9 @@ turn-down power</li>
 <span class="math inline">\(\lambda\)</span> : penalty on change for
 the flexible load</li>
 </ul>
+<p>Moreover, this optimization problem has the constraints described in
+<a href="https://mcanigueral.github.io/flextools/articles/minimize_cost.html#battery-optimization">Energy
+cost optimization article (battery section)</a>.</p>
 </div>
   </main><aside class="col-md-3"><nav id="toc"><h2>On this page</h2>
     </nav></aside>

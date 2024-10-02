@@ -1,0 +1,273 @@
+---
+title: "Advanced smart charging"
+output: html_document
+---
+
+
+```{r setup, echo=FALSE, message=F, warning=FALSE, fig.width=12}
+library(flextools)
+# devtools::load_all()
+library(dplyr)
+library(lubridate)
+library(dygraphs)
+library(ggplot2)
+library(evsim)
+library(purrr)
+```
+
+The `smart_charging()` function provides some parameters that may not be required in most of simulations but configuring them in specific cases can make a huge difference. This article raises some cases where a more advanced knowledge and configuration of these parameters may be required to obtain the desired results.
+
+For the smart charging examples in this article, the same example data sets `energy_data` and `ev_sessions` from the article Smart charging will be used:
+
+```{r, echo = FALSE}
+energy_data <- flextools::energy_profiles %>% 
+  filter(isoweek(datetime) == 18, wday(datetime, week_start = 1) <= 5) %>% 
+  mutate(
+    solar = solar*4,
+    building = building*2
+  )
+```
+```{r}
+head(energy_data)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ev_sessions <- readr::read_csv("sessions_smart_charging.csv") %>% 
+  mutate_if(is.timepoint, with_tz, "Europe/Amsterdam")
+```
+```{r}
+head(ev_sessions)
+```
+
+
+```{r, echo = FALSE}
+ev_demand <- get_demand(ev_sessions)
+ev_demand %>% 
+  plot_ts(ylab = "Power demand (kW)", fillGraph = T, strokeWidth = 2)
+```
+
+
+For all smart charging simulations the following parameters will be considered:
+
+* scheduling method: curtail
+* optimization window days: 1
+* optimization window start hour: 6:00 AM
+
+
+# The EV demand is pushed to the end of the optimization window
+
+Usually applying the `smart_charging()` function with default configuration will not prevent that some EV users surpass their setpoints, due to a lack of flexibility from the EV sessions. When this happens, normally it results in a higher demand at the end of the optimization window because the smart charging algorithm tries to match the setpoint until there's no more flexibility from the EV users and the EV must be charged.
+
+Below, we will see examples of these situations for the 2 types of setpoints that `smart_charging()` function can consider (grid capacity setpoint and optimization setpoint), and how to deal with that. 
+
+## Setpoint as grid capacity
+
+Imagine that there's a **maximum grid connection has to be reduced to 4 kW**, so that we can charge only one EV at a time:
+
+```{r}
+grid_capacity <- 4
+```
+
+We configure this grid capacity as a setpoint for the EV user profile:
+
+```{r}
+opt_data <- tibble(
+  datetime = ev_demand$datetime, # Same date-time sequence than the demand
+  HomeEV = grid_capacity
+)
+head(opt_data)
+```
+
+
+```{r}
+sc_results <- smart_charging(
+  sessions = ev_sessions,
+  opt_data = opt_data, 
+  opt_objective = "none",
+  method = "curtail",
+  window_days = 1, 
+  window_start_hour = 6
+)
+```
+
+```{r}
+plot(sc_results, sessions = ev_sessions)
+```
+
+The demand is being postponed by the smart charging algorithm to match the setpoint during all possible hours, but when the **end of the optimization window** is reaching, the vehicle must charge to accomplish with the **energy requirements** by the EV user. This means that all EV users are not able to charge all their requirements under these grid conditions. 
+
+Therefore, in these scenarios where the grid stability is the priority we have to assume that **not all EV can be completely charged**, and we should be able to simulate this impact to the EV user. This scenario can be configured with the parameter `energy_min`, as the required minimum ratio of the energy required by the EV user. With `energy_min = 0` the algorithm considers that EVs may disconnect without charging all their energy requirements, while with `energy_min = 1` the algorithm will make sure that all EV users charge their energy requirements, even though the setpoint is not achieved.
+
+Let's try a value of `energy_min = 0` to see how the algorithm works and the corresponding impact to the vehicles:
+
+```{r}
+sc_results <- smart_charging(
+  sessions = ev_sessions,
+  opt_data = opt_data, 
+  opt_objective = "none",
+  method = "curtail",
+  window_days = 1, 
+  window_start_hour = 6,
+  energy_min = 0
+)
+```
+
+```{r}
+plot(sc_results, sessions = ev_sessions)
+```
+
+Now we see that the grid capacity constraint is completely respected. **But at which price?**
+
+We can calculate the impact on the EV user in terms of **percentage of energy charged** with the function `summarise_energy_charged()`:
+
+```{r}
+summarise_energy_charged(sc_results, sessions = ev_sessions) %>% 
+  knitr::kable(caption = "Percentage of energy charged (%)")
+```
+
+We see that, to achieve our setpoint, some EV users can only charge a bit more than the 50% of their energy requirements.
+
+We can also check that setting `energy_min = 0.7`, for example, results in surpassing the setpoint again, but all EV users charge at least a 70% of their energy requirements:
+
+```{r}
+sc_results <- smart_charging(
+  sessions = ev_sessions,
+  opt_data = opt_data, 
+  opt_objective = "none",
+  method = "curtail",
+  window_days = 1, 
+  window_start_hour = 6,
+  energy_min = 0.7
+)
+plot(sc_results, sessions = ev_sessions)
+```
+
+
+```{r}
+summarise_energy_charged(sc_results, sessions = ev_sessions) %>% 
+  knitr::kable(caption = "Percentage of energy charged (%) - `energy_min = 0.7`")
+```
+
+
+<!-- ```{r, echo=FALSE} -->
+<!-- sc_results$postpone$sessions %>% -->
+<!--   group_by(Session) %>% summarise(Energy = sum(Energy)) %>%  -->
+<!--   left_join(ev_sessions %>% select(Session, EnergyRequired = Energy), by = "Session") %>%  -->
+<!--   mutate(EnergyCharged = round(Energy/EnergyRequired*100)) %>%  -->
+<!--   select(Session, Postpone = EnergyCharged) %>%  -->
+<!--   left_join( -->
+<!--     sc_results$interrupt$sessions %>% -->
+<!--       group_by(Session) %>% summarise(Energy = sum(Energy)) %>%  -->
+<!--       left_join(ev_sessions %>% select(Session, EnergyRequired = Energy), by = "Session") %>%  -->
+<!--       mutate(EnergyCharged = round(Energy/EnergyRequired*100)) %>%  -->
+<!--       select(Session, Interrupt = EnergyCharged), -->
+<!--     by = "Session" -->
+<!--   ) %>%  -->
+<!--   left_join( -->
+<!--     sc_results$curtail$sessions %>% -->
+<!--       group_by(Session) %>% summarise(Energy = sum(Energy)) %>%  -->
+<!--       left_join(ev_sessions %>% select(Session, EnergyRequired = Energy), by = "Session") %>%  -->
+<!--       mutate(EnergyCharged = round(Energy/EnergyRequired*100)) %>%  -->
+<!--       select(Session, Curtail = EnergyCharged), -->
+<!--     by = "Session" -->
+<!--   ) %>%  -->
+<!--   bind_rows( -->
+<!--     tibble(Session = "Mean", Postpone = round(mean(.$Postpone)), -->
+<!--            Interrupt = round(mean(.$Interrupt)), Curtail = round(mean(.$Curtail))) -->
+<!--   ) %>%  -->
+<!--   knitr::kable(caption = "Percentage of energy charged (%)") -->
+<!-- ``` -->
+
+<!-- We see that the curtail strategy is the one with lowest average impact on the users, in contrast to postpone which has the highest impact, specially in late charging sessions. Therefore, we can say that, if we want the EV users to charge at least 50% of their energy requirements, the only suitable strategies are curtail and interrupt. -->
+
+
+
+## Setpoint as optimal demand
+
+Let's consider a **grid optimization** for our EV demand in the context of the following energy flows:
+
+```{r}
+energy_data %>% 
+  left_join(ev_demand, by = "datetime") %>% 
+  select(-starts_with("price")) %>% 
+  plot_ts(ylab = "Power (kW)", strokeWidth = 2) %>% 
+  dySeries("solar", color = "orange") %>% 
+  dyStackedRibbonGroup(c("HomeEV","building"), color = c("purple", "navy"))
+```
+
+```{r}
+ev_sessions %>% 
+  smart_charging(
+    opt_data = energy_data %>% rename(static = building, production = solar), 
+    opt_objective = "grid",
+    method = "curtail",
+    window_days = 1, 
+    window_start_hour = 6
+  ) %>% 
+  plot()
+```
+
+From the plot above we see that during most of the time the EV demand can be adapted to the setpoint but in the second optimization window, the EV demand that is not charged during the morning has to be charged during the night surpassing the setpoint.
+
+If the setpoint is calculated for an **optimization** objective (e.g. `"grid"` or `"cost"`), then surpassing the setpoint may not suppose a risk but only a not optimal solution. Even though, situations like the one above should be avoided since we can have a rebound effect at the end of the optimization window. A solution to these situations is the parameter `power_th`, which allows a certain threshold between the setpoint value and the EV demand in every time slot. See the application of `power_th = 0.05` to allow a threshold of 5% of the setpoint:
+
+```{r}
+ev_sessions %>% 
+  smart_charging(
+    opt_data = energy_data %>% rename(static = building, production = solar), 
+    opt_objective = "grid",
+    method = "curtail",
+    window_days = 1, 
+    window_start_hour = 6,
+    power_th = 0.05
+  ) %>% 
+  plot()
+```
+
+
+# The EV model has a minimum charging power
+
+It is known that some EV models have a minimum charging power, so below this power they can't be charged at all. Therefore, a possible solution is to specify a minimum charging power with the parameter `charging_power_min`. When `charging_power_min = 0` and `method = "curtail"`, the charging power can be reduced until 0 kW (interrupted), while a value of `charging_power_min = 0.5` would only allow curtailing the EV charging power until the 50% of its nominal charging power.
+
+Let's simulate that all EVs must charge at least at a 30% of their power requirements:
+
+```{r}
+sc_results <- ev_sessions %>% 
+  smart_charging(
+    opt_data = energy_data %>% rename(static = building, production = solar), 
+    opt_objective = "grid",
+    method = "curtail",
+    window_days = 1, 
+    window_start_hour = 6,
+    charging_power_min = 0.3
+  )
+```
+
+Check that the minimum power of the `Exploited` sessions (i.e. the ones that provided flexibility) corresponds to the 30% of 3.7 (1.11kW):
+
+```{r}
+sc_results$sessions %>% 
+  filter(Exploited) %>% 
+  pull(Power) %>% 
+  min()
+```
+
+We can also make a histogram to show the distribution of charging power values. It is visible that the limit of 30% of the nominal power (1.11 kW) is actually limiting the flexibility, since a lot of sessions have been charged at this minium chaging rate:
+
+```{r}
+sc_results$sessions %>% 
+  filter(Exploited) %>% 
+  ggplot(aes(Power)) + 
+  geom_histogram()
+```
+And if we compare the final EV demand with the setpoint, in general we see a good result even though the setpoint is not achieved during the most restrictive periods:
+
+```{r}
+plot(sc_results)
+```
+
+
+<!-- # Which scheduling method is better? -->
+
+
+

@@ -10,6 +10,12 @@ navbar:
     right: [github]
 
 reference:
+  - title: Time-series utils
+  - contents:
+    - get_time_resolution
+    - change_timeseries_resolution
+    - change_timeseries_year
+    - aggregate_timeseries
   - title: Optimization
   - contents:
     - add_extra_days
@@ -19,18 +25,28 @@ reference:
   - contents:
     - smart_charging
     - schedule_sessions
+    - plot_smart_charging
   - title: Battery
   - contents:
     - add_battery_simple
     - get_storage_level
     - get_storage_losses
     - get_conversion_losses
-  - title: Calculations
+  - title: Evaluation of results
   - contents:
-    - get_energy_balance
     - get_energy_kpis
+    - get_energy_balance
+    - plot_net_power
     - get_energy_cost
+    - get_energy_total_cost
+    - plot_energy_cost
     - get_imbalance_income
+    - get_imbalance_total_income
+    - get_load_duration_curve
+    - plot_load_duration_curve
+    - summarise_energy_charged
+
+
 
 articles:
   - title: Articles
@@ -42,5 +58,6 @@ articles:
   - title: Demand-response
     navbar: Demand-response
     contents:
-      - smart_charging
-      - user_profiles
+      - smart-charging
+      - smart-charging-advanced
+      - user-profiles

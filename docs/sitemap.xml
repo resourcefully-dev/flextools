@@ -40,7 +40,16 @@
     <loc>mcanigueral.github.io/flextools/articles/optimize_demand.html</loc>
   </url>
   <url>
+    <loc>mcanigueral.github.io/flextools/articles/smart-charging-advanced.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/articles/smart-charging.html</loc>
+  </url>
+  <url>
     <loc>mcanigueral.github.io/flextools/articles/smart_charging.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/articles/user-profiles.html</loc>
   </url>
   <url>
     <loc>mcanigueral.github.io/flextools/articles/user_profiles.html</loc>
@@ -67,7 +76,22 @@
     <loc>mcanigueral.github.io/flextools/reference/add_storage_level.html</loc>
   </url>
   <url>
+    <loc>mcanigueral.github.io/flextools/reference/aggregate_timeseries.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/change_timeseries_resolution.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/change_timeseries_year.html</loc>
+  </url>
+  <url>
     <loc>mcanigueral.github.io/flextools/reference/convert_time_num_to_period.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/decrease_numeric_resolution.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/decrease_timeseries_resolution.html</loc>
   </url>
   <url>
     <loc>mcanigueral.github.io/flextools/reference/energy_profiles.html</loc>
@@ -85,7 +109,19 @@
     <loc>mcanigueral.github.io/flextools/reference/get_energy_kpis.html</loc>
   </url>
   <url>
+    <loc>mcanigueral.github.io/flextools/reference/get_energy_total_cost.html</loc>
+  </url>
+  <url>
     <loc>mcanigueral.github.io/flextools/reference/get_imbalance_income.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/get_imbalance_total_income.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/get_load_duration_curve.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/get_percentage_hours.html</loc>
   </url>
   <url>
     <loc>mcanigueral.github.io/flextools/reference/get_storage_level.html</loc>
@@ -94,7 +130,22 @@
     <loc>mcanigueral.github.io/flextools/reference/get_storage_losses.html</loc>
   </url>
   <url>
+    <loc>mcanigueral.github.io/flextools/reference/get_time_resolution.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/increase_datetime_resolution.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/increase_numeric_resolution.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/increase_timeseries_resolution.html</loc>
+  </url>
+  <url>
     <loc>mcanigueral.github.io/flextools/reference/index.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/interpolation.html</loc>
   </url>
   <url>
     <loc>mcanigueral.github.io/flextools/reference/mclapply.windows.html</loc>
@@ -130,6 +181,24 @@
     <loc>mcanigueral.github.io/flextools/reference/optimize_demand_window.html</loc>
   </url>
   <url>
+    <loc>mcanigueral.github.io/flextools/reference/plot.SmartCharging.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/plot_energy_cost.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/plot_load_duration_curve.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/plot_net_power.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/plot_smart_charging.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/print.SmartCharging.html</loc>
+  </url>
+  <url>
     <loc>mcanigueral.github.io/flextools/reference/round_to_interval.html</loc>
   </url>
   <url>
@@ -137,5 +206,8 @@
   </url>
   <url>
     <loc>mcanigueral.github.io/flextools/reference/smart_charging.html</loc>
+  </url>
+  <url>
+    <loc>mcanigueral.github.io/flextools/reference/summarise_energy_charged.html</loc>
   </url>
 </urlset>

@@ -321,7 +321,7 @@ for (i in seq_len(nrow(lambdas_tbl))) {
     mutate(
       consumption = static + battery
     ) %>% 
-    get_energy_cost()
+    get_energy_total_cost()
   lambdas_tbl$crossover_times[i] <- sum(diff(sign(opt_data_batt$battery)) != 0)
 }
 lambdas_tbl$energy_cost <- flextools:::normalize(lambdas_tbl$energy_cost)

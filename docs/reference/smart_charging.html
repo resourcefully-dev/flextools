@@ -41,8 +41,9 @@ documentation website."><meta property="og:image" content="mcanigueral.github.io
     <a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a>
     <div class="dropdown-divider"></div>
     <h6 class="dropdown-header" data-toc-skip>Demand-response</h6>
-    <a class="dropdown-item" href="../articles/smart_charging.html">Smart charging</a>
-    <a class="dropdown-item" href="../articles/user_profiles.html">User profiles in smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging.html">Smart charging</a>
+    <a class="dropdown-item" href="../articles/smart-charging-advanced.html">Advanced smart charging</a>
+    <a class="dropdown-item" href="../articles/user-profiles.html">User profiles in smart charging</a>
   </div>
 </li>
 <li class="nav-item">
@@ -114,12 +115,17 @@ This is used when <code>opt_objective = "grid"</code>.</p></li>
 This is used when <code>opt_objective = "cost"</code>.</p></li>
 <li><p><code>price_exported</code>: price for exported energy (€/kWh).
 This is used when <code>opt_objective = "cost"</code>.</p></li>
+<li><p><code>price_turn_down</code>: price for turn-down energy use (€/kWh).
+This is used when <code>opt_objective = "cost"</code>.</p></li>
+<li><p><code>price_turn_up</code>: price for turn-up energy use (€/kWh).
+This is used when <code>opt_objective = "cost"</code>.</p></li>
 </ul><p>If columns of <code>opt_data</code> are user profiles names, these are used as setpoints
 and no optimization is performed for the corresponding user profiles.</p></dd>
 
 
 <dt>opt_objective</dt>
-<dd><p>character, optimization objective being <code>"none"</code>, <code>"grid"</code> or <code>"cost"</code>.
+<dd><p>character, optimization objective being <code>"none"</code>, <code>"grid"</code>,
+<code>"cost"</code> or a value between 0 (cost) and 1 (grid).
 See details section for more information about the different objectives.</p></dd>
 
 
@@ -181,7 +187,10 @@ Must be at least one, and parallelization requires at least two cores.</p></dd>
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     
 
-<p>a list with three elements: optimal setpoints, sessions schedule and log messages.</p>
+<p>a list with three elements:
+optimal setpoints (tibble), sessions schedule (tibble) and log messages
+(list with character strings). The date-time values in the log list are in
+the time zone of the <code>opt_data</code>.</p>
     </div>
     <div class="section level2">
     <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
@@ -201,10 +210,10 @@ If these variables are not configured, default values of <code>grid_capacity = I
 <code>price_turn_down = 0</code> are considered to just minimize the imported energy.</p></li>
 <li><p>Combined optimization (<code>opt_objective</code> between <code>0</code> and <code>1</code>): minimizes both
 the net power peaks and energy cost.</p></li>
-<li><p>No optimization (<code>opt_objective = "none"</code>): this will skip optimization.
-If a user profile name appears in <code>opt_data</code> columns, then this will be
-considered as a setpoint for the scheduling algorithm. If not, then this
-user profile will not be optimized.</p></li>
+<li><p>No optimization (<code>opt_objective = "none"</code>): this will skip optimization and
+at least one user profile name must be in an <code>opt_data</code> column to be
+considered as a setpoint for the scheduling algorithm. The user profiles that
+don't appear in <code>opt_data</code> will not be optimized.</p></li>
 </ul></div>
 
     <div class="section level2">
@@ -220,27 +229,31 @@ user profile will not be optimized.</p></li>
 <span class="r-in"><span><span class="co"># `Worktime` sessions instead of all sessions.</span></span></span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># For this example we want the following:</span></span></span>
-<span class="r-in"><span><span class="co"># - Postpone only `Worktime` sessions, which have a responsiveness rate of</span></span></span>
+<span class="r-in"><span><span class="co"># - Curtail only `Worktime` sessions, which have a responsiveness rate of</span></span></span>
 <span class="r-in"><span><span class="co"># 0.9 (i.e. 90% of Worktime users accept to postpone the session).</span></span></span>
 <span class="r-in"><span><span class="co"># - Minimize the power peak of the sessions (peak shaving)</span></span></span>
 <span class="r-in"><span><span class="co"># - Time series resolution of 15 minutes</span></span></span>
 <span class="r-in"><span><span class="co"># - Optimization window of 24 hours from 6:00AM to 6:00 AM</span></span></span>
+<span class="r-in"><span><span class="co"># - The energy charged can be reduced up to 50% of the original requirement</span></span></span>
 <span class="r-in"><span></span></span>
-<span class="r-in"><span><span class="kw">if</span> <span class="op">(</span><span class="cn">FALSE</span><span class="op">)</span> <span class="op">{</span></span></span>
-<span class="r-in"><span><span class="va">sessions</span> <span class="op">&lt;-</span> <span class="fu">evsim</span><span class="fu">::</span><span class="va"><a href="mcanigueral.github.io/evsim/reference/california_ev_sessions_profiles.html">california_ev_sessions_profiles</a></span></span></span>
-<span class="r-in"><span><span class="va">sessions_demand</span> <span class="op">&lt;-</span> <span class="fu">evsim</span><span class="fu">::</span><span class="fu"><a href="mcanigueral.github.io/evsim/reference/get_demand.html">get_demand</a></span><span class="op">(</span><span class="va">sessions</span>, resolution <span class="op">=</span> <span class="fl">15</span>, mc.cores <span class="op">=</span> <span class="fl">4</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://dplyr.tidyverse.org" class="external-link">dplyr</a></span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">sessions</span> <span class="op">&lt;-</span> <span class="fu">evsim</span><span class="fu">::</span><span class="va"><a href="mcanigueral.github.io/evsim/reference/california_ev_sessions_profiles.html">california_ev_sessions_profiles</a></span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/slice.html" class="external-link">slice_head</a></span><span class="op">(</span>n <span class="op">=</span> <span class="fl">50</span><span class="op">)</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
+<span class="r-in"><span>  <span class="fu">evsim</span><span class="fu">::</span><span class="fu"><a href="mcanigueral.github.io/evsim/reference/adapt_charging_features.html">adapt_charging_features</a></span><span class="op">(</span>time_resolution <span class="op">=</span> <span class="fl">15</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">sessions_demand</span> <span class="op">&lt;-</span> <span class="fu">evsim</span><span class="fu">::</span><span class="fu"><a href="mcanigueral.github.io/evsim/reference/get_demand.html">get_demand</a></span><span class="op">(</span><span class="va">sessions</span>, resolution <span class="op">=</span> <span class="fl">15</span><span class="op">)</span></span></span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span><span class="co"># Don't require any other variable than datetime, since we don't</span></span></span>
 <span class="r-in"><span><span class="co"># care about local generation (just peak shaving objective)</span></span></span>
-<span class="r-in"><span><span class="va">opt_data</span> <span class="op">&lt;-</span> <span class="fu">tibble</span><span class="op">(</span></span></span>
-<span class="r-in"><span>  datetime <span class="op">=</span> <span class="va">sessions_demand</span><span class="op">$</span><span class="va">datetime</span></span></span>
+<span class="r-in"><span><span class="va">opt_data</span> <span class="op">&lt;-</span> <span class="fu"><a href="https://tibble.tidyverse.org/reference/tibble.html" class="external-link">tibble</a></span><span class="op">(</span></span></span>
+<span class="r-in"><span>  datetime <span class="op">=</span> <span class="va">sessions_demand</span><span class="op">$</span><span class="va">datetime</span>,</span></span>
+<span class="r-in"><span>  production <span class="op">=</span> <span class="fl">0</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="fu">smart_charging</span><span class="op">(</span></span></span>
-<span class="r-in"><span>  <span class="va">sessions</span>, <span class="va">opt_data</span>, opt_objective <span class="op">=</span> <span class="st">"grid"</span>, method <span class="op">=</span> <span class="st">"postpone"</span>,</span></span>
-<span class="r-in"><span>  window_length <span class="op">=</span> <span class="fl">24</span><span class="op">*</span><span class="fl">60</span><span class="op">/</span><span class="fl">15</span>, window_start_hour <span class="op">=</span> <span class="fl">6</span>,</span></span>
-<span class="r-in"><span>  responsive <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>Workday <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>Worktime <span class="op">=</span> <span class="fl">0.9</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">sc_results</span> <span class="op">&lt;-</span> <span class="fu">smart_charging</span><span class="op">(</span></span></span>
+<span class="r-in"><span>  <span class="va">sessions</span>, <span class="va">opt_data</span>, opt_objective <span class="op">=</span> <span class="st">"grid"</span>, method <span class="op">=</span> <span class="st">"curtail"</span>,</span></span>
+<span class="r-in"><span>  window_days <span class="op">=</span> <span class="fl">1</span>, window_start_hour <span class="op">=</span> <span class="fl">6</span>,</span></span>
+<span class="r-in"><span>  responsive <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>Workday <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/list.html" class="external-link">list</a></span><span class="op">(</span>Worktime <span class="op">=</span> <span class="fl">0.9</span><span class="op">)</span><span class="op">)</span>,</span></span>
+<span class="r-in"><span>  energy_min <span class="op">=</span> <span class="fl">0.5</span></span></span>
 <span class="r-in"><span><span class="op">)</span></span></span>
-<span class="r-in"><span><span class="op">}</span></span></span>
 <span class="r-in"><span></span></span>
 <span class="r-in"><span></span></span>
 </code></pre></div>

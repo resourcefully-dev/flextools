@@ -30,7 +30,7 @@ First of all, we can simulate EV sessions using the `evsim` package, which provi
 * **Worktime**: present during working days. Low-variability in connection times. High flexibility potential.
 * **Visit**: present the whole week but with different behaviour on weekends. High variability in connection times. Low flexibility potential.
 
-```{r}
+```{r, eval = FALSE}
 # For workdays time cycle
 workdays_parameters <- dplyr::tibble(
   profile = c("Worktime", "Visit"),
@@ -71,17 +71,22 @@ ev_model <- get_custom_ev_model(
 
 Once we have our own model, we can simulate EV sessions for three different days as example:
 
-```{r}
-set.seed(12345)
+```{r, eval = FALSE}
+set.seed(1234)
 ev_sessions <- simulate_sessions(
   evmodel = ev_model, 
   sessions_day = tibble(time_cycle = c("Workdays", "Weekends"), n_sessions = c(10, 10)),
   user_profiles = NULL,
   charging_powers = tibble(power = 3.7, ratio = 1), 
-  dates = seq.Date(from = today(), to = today()+days(2), by = "day"), 
+  dates = seq.Date(from = dmy("05-08-2024"), to = dmy("05-08-2024")+days(2), by = "day"), 
   resolution = 15
 )
 ```
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+ev_sessions <- readr::read_csv("sessions_user_profiles.csv") %>% 
+  mutate_if(is.timepoint, with_tz, "Europe/Amsterdam")
+```
+
 
 ```{r, echo=FALSE}
 print(ev_sessions)
@@ -147,17 +152,17 @@ ev_demand_opt <- sc_results$sessions %>%
 
 ```{r, echo = F}
 ev_demand_opt %>% 
+  filter(date(datetime) < dmy("07-08-2024")) %>% 
   dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
   dyLimit(grid_capacity, "Grid capacity", color = "red")
 ```
 
 We can see that the Worktime power demand has been adapted to the non-flexbile users, i.e. Visit user profile, in order to not surpass the capacity limit of 12 kW. 
 
-Moreover, we can define which percentage of every user profile is responsive to the smart charging signals with the parameter `responsive` from `smart_charging()` function. For example, we can set that, during working days, 60% of the Worktime users and 30% of the Visit user accept to participate to the demand-response program, while during Workdays, 60% of the Visit user accept:
+Moreover, we can define which percentage of every user profile is responsive to the smart charging signals with the parameter `responsive` from `smart_charging()` function. For example, we can set that, during working days, 60% of the Worktime users and 30% of the Visit user accept to participate to the demand-response program:
 
 
 ```{r}
-set.seed(1234)
 sc_results <- ev_sessions %>% 
   smart_charging(
     opt_data = opt_data, 
@@ -166,8 +171,7 @@ sc_results <- ev_sessions %>%
     window_days = 1, 
     window_start_hour = 6,
     responsive = list(
-      Workdays = list(Worktime = 0.6, Visit = 1),
-      Weekends = list(Visit = 0.6)
+      Workdays = list(Worktime = 0.6, Visit = 0.3)
     )
   )
 ```
@@ -179,18 +183,15 @@ ev_demand_opt <- sc_results$sessions %>%
 
 ```{r, echo = F}
 ev_demand_opt %>% 
+  filter(date(datetime) < dmy("07-08-2024")) %>% 
   dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
   dyLimit(grid_capacity, "Grid capacity", color = "red")
 ```
-```{r}
-scs <<- sc_results$sessions
-```
 
 
-We see that now the participation of EV users is not enough to reach our objective. If we increase the participation of Worktime users up to 80% then we accomplish with our grid capacity again:
+We see that now the participation of EV users is not enough to reach our objective. If we increase the participation of Worktime users up to 90% then we accomplish with our grid capacity again:
 
 ```{r}
-set.seed(1234)
 sc_results <- ev_sessions %>% 
   smart_charging(
     opt_data = opt_data, 
@@ -199,8 +200,7 @@ sc_results <- ev_sessions %>%
     window_days = 1, 
     window_start_hour = 6,
     responsive = list(
-      Workdays = list(Worktime = 0.8, Visit = 0.3),
-      Weekends = list(Visit = 0.6)
+      Workdays = list(Worktime = 0.9, Visit = 0.3)
     )
   )
 ```
@@ -212,9 +212,10 @@ ev_demand_opt <- sc_results$sessions %>%
 
 ```{r, echo = F}
 ev_demand_opt %>% 
+  filter(date(datetime) < dmy("07-08-2024")) %>% 
   dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
   dyLimit(grid_capacity, "Grid capacity", color = "red")
 ```
 
-
+Then we can say that we need at least 90% of the Worktime users to participate if we want to respect our grid constraints.
 

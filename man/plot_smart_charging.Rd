@@ -22,30 +22,3 @@ HTML interactive plot showing the comparison between the smart charging setpoint
 and the actual EV demand after the smart charging program. Also, it is possible
 to plot the original EV demand.
 }
-\examples{
-library(dplyr)
-
-sessions <- evsim::california_ev_sessions_profiles \%>\%
-  slice_head(n = 50) \%>\%
-  evsim::adapt_charging_features(time_resolution = 15)
-sessions_demand <- evsim::get_demand(sessions, resolution = 15)
-
-# Don't require any other variable than datetime, since we don't
-# care about local generation (just peak shaving objective)
-opt_data <- tibble(
-  datetime = sessions_demand$datetime,
-  production = 0
-)
-sc_results <- smart_charging(
-  sessions, opt_data, opt_objective = "grid", method = "curtail",
-  window_days = 1, window_start_hour = 6,
-  responsive = list(Workday = list(Worktime = 0.9)),
-  energy_min = 0.5
-)
-
-plot_smart_charging(sc_results, sessions)
-
-# Or use the base function `plot`
-plot(sc_results, sessions)
-
-}

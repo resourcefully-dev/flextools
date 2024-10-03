@@ -127,7 +127,7 @@ don't appear in \code{opt_data} will not be optimized.
 }
 \examples{
 # Example: we will use the example data set of charging sessions
-# from the [`evsim`] package.
+# from the `evsim` package.
 
 # The user profiles of this data set are `Visit` and `Worktime`,
 # identified in two different time cycles `Workday` and `Weekend`.

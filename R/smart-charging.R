@@ -110,7 +110,7 @@
 #'
 #' @examples
 #' # Example: we will use the example data set of charging sessions
-#' # from the [`evsim`] package.
+#' # from the `evsim` package.
 #'
 #' # The user profiles of this data set are `Visit` and `Worktime`,
 #' # identified in two different time cycles `Workday` and `Weekend`.
@@ -560,10 +560,11 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
   resolution <- get_time_resolution(setpoint$datetime, units = "mins")
   sessions_expanded <- sessions %>%
-    expand_sessions(resolution = resolution) %>%
+    expand_sessions(resolution = resolution)
+  sessions_expanded <- sessions_expanded %>%
     mutate(
       Power = 0,
-      EnergyLeft = .data$EnergyRequired,
+      EnergyLeft = sessions_expanded$EnergyRequired,
       Flexible = FALSE,
       Exploited = FALSE
     ) %>%

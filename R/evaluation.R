@@ -330,6 +330,36 @@ get_imbalance_total_income <- function(df) {
 #' @importFrom evsim get_demand plot_ts
 #' @importFrom rlang .data
 #'
+#' @examples
+#' library(dplyr)
+#' sessions <- evsim::california_ev_sessions_profiles %>%
+#'   slice_head(n = 50) %>%
+#'   evsim::adapt_charging_features(time_resolution = 15)
+#' sessions_demand <- evsim::get_demand(sessions, resolution = 15)
+#'
+#' # Don't require any other variable than datetime, since we don't
+#' # care about local generation (just peak shaving objective)
+#' opt_data <- tibble(
+#'   datetime = sessions_demand$datetime,
+#'   production = 0
+#' )
+#'
+#' sc_results <- smart_charging(
+#'   sessions, opt_data,
+#'   opt_objective = "grid",
+#'   method = "curtail",
+#'   window_days = 1, window_start_hour = 6
+#' )
+#'
+#' # Plot of setpoint and final EV demand
+#' plot_smart_charging(sc_results)
+#'
+#' # Plot with original demand
+#' plot_smart_charging(sc_results, sessions = sessions)
+#'
+#' # Native `plot` function also works
+#' plot(sc_results)
+#'
 plot_smart_charging <- function(smart_charging, sessions = NULL, ...) {
 
   plot_df <- smart_charging$setpoints['datetime'] %>%

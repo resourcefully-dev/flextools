@@ -16,10 +16,13 @@ schedule_sessions(
 )
 }
 \arguments{
-\item{sessions}{tibble, sessions data set in standard format marked by \code{{evprof}} package
-(see \href{https://mcanigueral.github.io/evprof/articles/sessions-format.html}{this article})}
+\item{sessions}{tibble, sessions data set containing the following variables:
+\code{"Session"}, \code{"ConnectionStartDateTime"}, \code{"ConnectionHours"}, \code{"Power"} and \code{"Energy"}.
 
-\item{setpoint}{tibble with columns \code{datetime} and rest of columns being the names of user profiles}
+IMPORTANT: Make sure that the \code{sessions} \code{ConnectionStartDateTime} and
+\code{ChargingStartDateTime} are in the same time resolution than \code{setpoint$datetime}.}
+
+\item{setpoint}{tibble with columns \code{datetime} and \code{setpoint}.}
 
 \item{method}{character, being \code{"postpone"}, \code{"curtail"} or \code{"interrupt"}.}
 

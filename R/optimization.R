@@ -599,7 +599,7 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
 }
 
 
-#' Demand optimization (just a window)
+#' Combined optimization (just a window)
 #'
 #' @param G numeric vector, being the renewable generation power profile
 #' @param LF numeric vector, being the flexible load power profile

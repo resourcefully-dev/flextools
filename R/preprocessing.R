@@ -52,7 +52,7 @@ normalize <- function(x) {
 #' print(resolution)
 #'
 get_time_resolution <- function(dttm_seq, units = 'mins') {
-  as.numeric(dttm_seq[2] - dttm_seq[1], units = "mins")
+  as.numeric(dttm_seq[2] - dttm_seq[1], units)
 }
 
 

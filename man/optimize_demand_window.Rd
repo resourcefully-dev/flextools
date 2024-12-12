@@ -2,7 +2,7 @@
 % Please edit documentation in R/optimization.R
 \name{optimize_demand_window}
 \alias{optimize_demand_window}
-\title{Demand optimization (just a window)}
+\title{Combined optimization (just a window)}
 \usage{
 optimize_demand_window(
   G,
@@ -51,6 +51,6 @@ optimize_demand_window(
 numeric vector
 }
 \description{
-Demand optimization (just a window)
+Combined optimization (just a window)
 }
 \keyword{internal}

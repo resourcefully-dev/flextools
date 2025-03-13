@@ -58,9 +58,14 @@
 #' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
 #' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
 #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
-#' @param charging_power_min numeric, minimum allowed ratio (between 0 and 1) of nominal power.
+#' @param charging_power_min numeric. It can be configured in two ways:
+#' (1) minimum allowed ratio (between 0 and 1) of nominal power (i.e. `Power` column in `sessions`), or
+#' (2) specific value of minimum power (in kW) higher than 1 kW.
+#'
 #' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
-#' be curtailed until the 50% of the nominal charging power (i.e. `Power` variable in `sessions` tibble).
+#' be curtailed until the 50% of the nominal charging power.
+#' And if `charging_power_min = 2`, sessions' charging power can be curtailed until 2 kW.
+#'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
@@ -203,15 +208,14 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
     # Check that all content in `responsive` match the content in `sessions`
     if (!all(responsive_time_cycles %in% sessions_time_cycles)) {
-      message("Error: time cycle name in `responsive` not found in `sessions`")
-      return( NULL )
+      message("Warning: time cycle name in `responsive` not found in `sessions`")
+      # return( NULL )
     }
     if (!all(responsive_user_profiles %in% sessions_user_profiles)) {
-      message("Error: user profile name in `responsive` not found in `sessions`")
-      return( NULL )
+      message("Warning: user profile name in `responsive` not found in `sessions`")
+      # return( NULL )
     }
   }
-
 
   # Adapt the data set for the current time resolution
   dttm_seq <- opt_data$datetime
@@ -222,13 +226,10 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       Responsive = FALSE
     )
 
-
   # Optimization windows according to `window_days` and `window_start_hour`
   flex_windows_idx <- get_flex_windows(
     dttm_seq, window_days, window_start_hour
   )
-
-
 
   # Get user profiles demand
   if (include_log) message("Getting EV demand profiles")
@@ -760,6 +761,18 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
         # Power flexibility (Curtail) ----------------------------------------------------------------
 
+        if (!is.numeric(charging_power_min)) {
+          stop("`charging_power_min` should be numeric")
+        }
+
+        if (charging_power_min <= 1) {
+          charging_power_min_ratio <- charging_power_min
+          charging_power_min_kW <- Inf
+        } else {
+          charging_power_min_ratio <- 1
+          charging_power_min_kW <- charging_power_min
+        }
+
         # Flexible sessions:
         # If the minimum power that can be charged in this time slot is lower
         # than the nominal power. The minimum power is defined by:
@@ -772,7 +785,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
             MinEnergyTimeslot = pmax(.data$MinEnergyLeft - .data$PossibleEnergyRest, 0),
             MinPowerTimeslot = pmax(
               .data$MinEnergyTimeslot/(resolution/60),
-              .data$PowerNominal*charging_power_min
+              min(.data$PowerNominal*charging_power_min_ratio, charging_power_min_kW)
             ),
             Flexible = ifelse(
               (.data$EnergyLeft > 0) &

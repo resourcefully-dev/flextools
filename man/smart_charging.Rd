@@ -72,9 +72,13 @@ For example: \code{list(Monday = list(Worktime = 1, Shortstay = 0.1))}}
 For example, with \code{power_th = 0.1} and \code{setpoint = 100} for a certain time slot,
 then sessions' demand can reach a value of \code{110} without needing to schedule sessions.}
 
-\item{charging_power_min}{numeric, minimum allowed ratio (between 0 and 1) of nominal power.
+\item{charging_power_min}{numeric. It can be configured in two ways:
+(1) minimum allowed ratio (between 0 and 1) of nominal power (i.e. \code{Power} column in \code{sessions}), or
+(2) specific value of minimum power (in kW) higher than 1 kW.
+
 For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
-be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} variable in \code{sessions} tibble).}
+be curtailed until the 50\% of the nominal charging power.
+And if \code{charging_power_min = 2}, sessions' charging power can be curtailed until 2 kW.}
 
 \item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.}
 

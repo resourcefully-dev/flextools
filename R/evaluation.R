@@ -426,7 +426,8 @@ plot.SmartCharging <- function(x, ...) {
 #' @param df tibble, with columns `datetime`, `consumption`, `production`
 #' @param original_df tibble with same columns than `df` corresponding to the
 #' original scenario (e.g. without flexibility)
-#' @param grid_capacity numeric, maximum power that the grid can handle (in kW)
+#' @param import_capacity numeric, maximum power to import from the grid (in kW)
+#' @param export_capacity numeric, maximum power to export to the grid (in kW, positive).
 #' @param ... extra arguments to pass to dygraphs::dyOptions function
 #'
 #' @return dygraphs plot
@@ -453,7 +454,7 @@ plot.SmartCharging <- function(x, ...) {
 #' df2 <- dplyr::mutate(df, consumption = consumption + building_variation)
 #' plot_net_power(df2, original_df = df)
 #'
-plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL, ...) {
+plot_net_power <- function(df, original_df = NULL, import_capacity = NULL, export_capacity = NULL, ...) {
 
   plot_df <- df %>%
     get_energy_balance() %>%
@@ -490,9 +491,14 @@ plot_net_power <- function(df, original_df = NULL, grid_capacity = NULL, ...) {
       dySeries("net_flex", label = "Flexible case", color = "darkgreen", strokeWidth = 2)
   }
 
-  if (!is.null(grid_capacity)) {
+  if (!is.null(import_capacity)) {
     plot_dy <- plot_dy %>%
-      dyLimit(grid_capacity, label = "Grid capacity limit", color = "black")
+      dyLimit(import_capacity, color = "brown")
+  }
+
+  if (!is.null(export_capacity)) {
+    plot_dy <- plot_dy %>%
+      dyLimit(-export_capacity, color = "brown")
   }
 
   plot_dy

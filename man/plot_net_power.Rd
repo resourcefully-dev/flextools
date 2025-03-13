@@ -4,7 +4,13 @@
 \alias{plot_net_power}
 \title{Plot net power interaction with the grid}
 \usage{
-plot_net_power(df, original_df = NULL, grid_capacity = NULL, ...)
+plot_net_power(
+  df,
+  original_df = NULL,
+  import_capacity = NULL,
+  export_capacity = NULL,
+  ...
+)
 }
 \arguments{
 \item{df}{tibble, with columns \code{datetime}, \code{consumption}, \code{production}}
@@ -12,7 +18,9 @@ plot_net_power(df, original_df = NULL, grid_capacity = NULL, ...)
 \item{original_df}{tibble with same columns than \code{df} corresponding to the
 original scenario (e.g. without flexibility)}
 
-\item{grid_capacity}{numeric, maximum power that the grid can handle (in kW)}
+\item{import_capacity}{numeric, maximum power to import from the grid (in kW)}
+
+\item{export_capacity}{numeric, maximum power to export to the grid (in kW, positive).}
 
 \item{...}{extra arguments to pass to dygraphs::dyOptions function}
 }

@@ -10,7 +10,7 @@ Authors@R:
 Description: Simulate demand-response scenarios with flexibility from 
   electric vehicles, batteries or any time-series power demand profile, using
   custom algorithms and Quadratic programming methods.
-URL: https://mcanigueral.github.io/flextools/, https://github.com/mcanigueral/flextools/
+URL: https://github.com/mcanigueral/flextools/, https://mcanigueral.github.io/flextools/
 BugReports: https://github.com/mcanigueral/flextools/issues
 License: GPL-3
 Encoding: UTF-8

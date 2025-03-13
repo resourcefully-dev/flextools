@@ -3,7 +3,7 @@
 and the actual EV demand after the smart charging program. Also, it is possible
 to plot the original EV demand."><meta property="og:description" content="HTML interactive plot showing the comparison between the smart charging setpoint
 and the actual EV demand after the smart charging program. Also, it is possible
-to plot the original EV demand."><meta property="og:image" content="mcanigueral.github.io/flextools/logo.png"><!-- dependencies from examples --><script src="libs/htmlwidgets-1.6.4/htmlwidgets.js"></script><link href="libs/dygraphs-1.1.1/dygraph.css" rel="stylesheet"><script src="libs/dygraphs-1.1.1/dygraph-combined.js"></script><script src="libs/dygraphs-1.1.1/shapes.js"></script><script src="libs/moment-2.8.4/moment.js"></script><script src="libs/moment-timezone-0.2.5/moment-timezone-with-data.js"></script><script src="libs/moment-fquarter-1.0.0/moment-fquarter.min.js"></script><script src="libs/dygraphs-binding-1.1.1.6/dygraphs.js"></script></head><body>
+to plot the original EV demand."><meta property="og:image" content="https://mcanigueral.github.io/flextools/logo.png"><!-- dependencies from examples --><script src="libs/htmlwidgets-1.6.4/htmlwidgets.js"></script><link href="libs/dygraphs-1.1.1/dygraph.css" rel="stylesheet"><script src="libs/dygraphs-1.1.1/dygraph-combined.js"></script><script src="libs/dygraphs-1.1.1/shapes.js"></script><script src="libs/moment-2.8.4/moment.js"></script><script src="libs/moment-timezone-0.2.5/moment-timezone-with-data.js"></script><script src="libs/moment-fquarter-1.0.0/moment-fquarter.min.js"></script><script src="libs/dygraphs-binding-1.1.1.6/dygraphs.js"></script></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
 
 
@@ -35,7 +35,8 @@ to plot the original EV demand."><meta property="og:image" content="mcanigueral.
     <li><a class="dropdown-item" href="../articles/user-profiles.html">User profiles in smart charging</a></li>
   </ul></li>
 <li class="nav-item"><a class="nav-link" href="../news/index.html">Changelog</a></li>
-      </ul><ul class="navbar-nav"></ul></div>
+      </ul><ul class="navbar-nav"><li class="nav-item"><a class="external-link nav-link" href="https://github.com/mcanigueral/flextools/" aria-label="GitHub"><span class="fa fab fa-github fa-lg"></span></a></li>
+      </ul></div>
 
 
   </div>
@@ -43,7 +44,7 @@ to plot the original EV demand."><meta property="og:image" content="mcanigueral.
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
       <img src="../logo.png" class="logo" alt=""><h1>Plot smart charging results</h1>
-
+      <small class="dont-index">Source: <a href="https://github.com/mcanigueral/flextools/blob/HEAD/R/evaluation.R" class="external-link"><code>R/evaluation.R</code></a></small>
       <div class="d-none name"><code>plot_smart_charging.Rd</code></div>
     </div>
 
@@ -83,14 +84,6 @@ to plot the original EV demand.</p>
     <div class="section level2">
     <h2 id="ref-examples">Examples<a class="anchor" aria-label="anchor" href="#ref-examples"></a></h2>
     <div class="sourceCode"><pre class="sourceCode r"><code><span class="r-in"><span><span class="kw"><a href="https://rdrr.io/r/base/library.html" class="external-link">library</a></span><span class="op">(</span><span class="va"><a href="https://dplyr.tidyverse.org" class="external-link">dplyr</a></span><span class="op">)</span></span></span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> Attaching package: ‘dplyr’</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> The following objects are masked from ‘package:stats’:</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>     filter, lag</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> The following objects are masked from ‘package:base’:</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> </span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span>     intersect, setdiff, setequal, union</span>
 <span class="r-in"><span><span class="va">sessions</span> <span class="op">&lt;-</span> <span class="fu">evsim</span><span class="fu">::</span><span class="va"><a href="mcanigueral.github.io/evsim/reference/california_ev_sessions_profiles.html">california_ev_sessions_profiles</a></span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/slice.html" class="external-link">slice_head</a></span><span class="op">(</span>n <span class="op">=</span> <span class="fl">50</span><span class="op">)</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
 <span class="r-in"><span>  <span class="fu">evsim</span><span class="fu">::</span><span class="fu"><a href="mcanigueral.github.io/evsim/reference/adapt_charging_features.html">adapt_charging_features</a></span><span class="op">(</span>time_resolution <span class="op">=</span> <span class="fl">15</span><span class="op">)</span></span></span>

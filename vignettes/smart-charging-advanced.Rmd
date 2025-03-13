@@ -252,9 +252,11 @@ sc_results$sessions %>%
   min()
 ```
 
-We can also make a histogram to show the distribution of charging power values. It is visible that the limit of 30% of the nominal power (1.11 kW) is actually limiting the flexibility, since a lot of sessions have been charged at this minium chaging rate:
+We can also make a histogram to show the distribution of charging power values. It is visible that the limit of 30% of the nominal power (1.11 kW) is actually limiting the flexibility, since a lot of sessions have been charged at this minimum charging rate:
 
 ```{r}
+#| fig.alt: >
+#|   Histogram of charging power values
 sc_results$sessions %>% 
   filter(Exploited) %>% 
   ggplot(aes(Power)) + 

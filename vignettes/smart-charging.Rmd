@@ -754,11 +754,11 @@ df_static <- energy_data %>%
 plot_net_power(df_static)
 ```
 
-So let's assume that for the current demand we have a **grid capacity of 10 kW**. We can visualize with the `grid_capacity` parameter in the `plot_net_power()` function to see if the net power surpasses the grid capacity:
+So let's assume that for the current demand we have a **grid capacity of 10 kW**. We can visualize with the `import_capacity` parameter in the `plot_net_power()` function to see if the net power surpasses the grid capacity:
 
 
 ```{r}
-plot_net_power(df_static, grid_capacity = 10)
+plot_net_power(df_static, import_capacity = 10)
 ```
 
 Then we can perform a cost optimization with the parameter `opt_objective = 0.1` meaning 90% cost minimization and 10% net power minimization. For that, we will also include the `grid_capacity` variable in the `opt_data` object:

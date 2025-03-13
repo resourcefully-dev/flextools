@@ -30,8 +30,8 @@ in the package website.
 
 ## Installation
 
-Since at this moment it is not yet in CRAN, you can install the the
-latest development version from GitHub:
+Since at this moment flextools is not yet in CRAN, you can install the
+the latest development version from GitHub:
 
 ``` r
 # Latest development version
@@ -50,15 +50,20 @@ and other discussion, please send me a mail to
 For further technical details, you can read the following academic
 articles about the algorithms used in this package:
 
-- **Flexibility management of electric vehicles based on user profiles:
-  The Arnhem case study**. International Journal of Electrical Power and
-  Energy Systems, vol. 133. Elsevier BV, p. 107195, Dec. 2021. [DOI
-  link](https://doi.org/10.1016/j.ijepes.2021.107195).
+- **Increasing hosting capacity of low-voltage distribution network
+  using smart charging based on local and dynamic capacity limits**.
+  Sustainable Energy, Grids and Networks, vol. 41. Elsevier BV,
+  p. 101626, March 2025. [DOI
+  link](https://doi.org/10.1016/j.segan.2025.101626).
 - **Potential benefits of scheduling electric vehicle sessions over
   limiting charging power**. CIRED Porto Workshop 2022: E-mobility and
   power distribution systems. Institution of Engineering and
   Technology, 2022. [DOI
   link](https://ieeexplore.ieee.org/abstract/document/9841653).
+- **Flexibility management of electric vehicles based on user profiles:
+  The Arnhem case study**. International Journal of Electrical Power and
+  Energy Systems, vol. 133. Elsevier BV, p. 107195, Dec. 2021. [DOI
+  link](https://doi.org/10.1016/j.ijepes.2021.107195).
 
 ## Acknowledgements
 

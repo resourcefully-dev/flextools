@@ -50,7 +50,7 @@
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">get_storage_level</span><span class="op">(</span><span class="va">power</span>, init <span class="op">=</span> <span class="fl">0</span>, loss <span class="op">=</span> <span class="fl">0</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">get_storage_level</span><span class="op">(</span><span class="va">power</span>, init <span class="op">=</span> <span class="fl">0</span>, loss <span class="op">=</span> <span class="fl">0</span>, time_resolution <span class="op">=</span> <span class="fl">60</span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -67,6 +67,10 @@
 
 <dt id="arg-loss">loss<a class="anchor" aria-label="anchor" href="#arg-loss"></a></dt>
 <dd><p>numeric, the hourly storage loss in percentage (%/hour), passed to <code>get_storage_losses</code> function</p></dd>
+
+
+<dt id="arg-time-resolution">time_resolution<a class="anchor" aria-label="anchor" href="#arg-time-resolution"></a></dt>
+<dd><p>numeric, time resolution of the time-series (in minutes)</p></dd>
 
 </dl></div>
     <div class="section level2">

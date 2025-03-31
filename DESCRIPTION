@@ -2,11 +2,9 @@ Package: flextools
 Title: Tools for demand-response simulations
 Version: 1.0.0
 Authors@R: 
-    person(given = "Marc",
-           family = "Cañigueral",
-           role = c("aut", "cre"),
-           email = "marc.canigueral@udg.edu",
-           comment = c(ORCID = "https://orcid.org/0000-0001-9724-5829"))
+    person(given = "Marc", family = "Cañigueral", role = c("aut", "cre"),
+           email = "m.canigueral@resourcefully.nl",
+           comment = c(ORCID = "0000-0001-9724-5829"))
 Description: Simulate demand-response scenarios with flexibility from 
   electric vehicles, batteries or any time-series power demand profile, using
   custom algorithms and Quadratic programming methods.
@@ -33,4 +31,6 @@ Imports:
     dygraphs,
     ggplot2
 Suggests: 
-    rmarkdown
+    rmarkdown,
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3

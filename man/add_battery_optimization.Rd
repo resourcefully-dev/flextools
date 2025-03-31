@@ -76,3 +76,24 @@ numeric vector
 See the formulation of the optimization problems in the
 \href{https://mcanigueral.github.io/flextools/}{documentation website}.
 }
+\examples{
+library(dplyr)
+opt_data <- flextools::energy_profiles \%>\%
+  filter(lubridate::isoweek(datetime) == 18) \%>\%
+  rename(
+    production = "solar"
+  ) \%>\%
+  select(any_of(c(
+    "datetime", "production", "building", "price_imported", "price_exported"
+  ))) \%>\%
+  mutate(
+    static = .data$building
+  )
+  opt_battery <- opt_data \%>\%
+    add_battery_optimization(
+      opt_objective = 0.5,
+      Bcap = 50, Bc = 4, Bd = 4,
+      window_start_hour = 5
+    )
+
+}

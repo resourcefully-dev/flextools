@@ -4,7 +4,7 @@
 \alias{get_storage_level}
 \title{Accumulated storage level}
 \usage{
-get_storage_level(power, init = 0, loss = 0)
+get_storage_level(power, init = 0, loss = 0, time_resolution = 60)
 }
 \arguments{
 \item{power}{numeric vector, being positive when charging and negative when discharging}
@@ -12,6 +12,8 @@ get_storage_level(power, init = 0, loss = 0)
 \item{init}{numeric, initial storage level (in energy units, not \%)}
 
 \item{loss}{numeric, the hourly storage loss in percentage (\%/hour), passed to \code{get_storage_losses} function}
+
+\item{time_resolution}{numeric, time resolution of the time-series (in minutes)}
 }
 \value{
 numeric vector

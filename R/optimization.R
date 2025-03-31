@@ -3,12 +3,10 @@
 
 check_optimization_data <- function(opt_data, opt_objective) {
   if (!("datetime" %in% names(opt_data))) {
-    message("Error: `datetime` variable must exist in `opt_data`")
-    return( NULL )
+    stop("Error: `datetime` variable must exist in `opt_data`")
   }
   if (!("flexible" %in% names(opt_data))) {
-    message("Error: variable `flexible` must exist in `opt_data`")
-    return( NULL )
+    stop("Error: variable `flexible` must exist in `opt_data`")
   }
   if (!("static" %in% names(opt_data))) {
     opt_data$static <- 0
@@ -22,6 +20,10 @@ check_optimization_data <- function(opt_data, opt_objective) {
   }
   if (!("load_capacity" %in% names(opt_data))) {
     opt_data$load_capacity <- Inf
+  }
+
+  if (!(opt_objective %in% c("grid", "cost")) & !is.numeric(opt_objective)) {
+    stop("Error: `opt_objective` not valid")
   }
 
   if (opt_objective == "cost" | is.numeric(opt_objective)) {
@@ -74,9 +76,6 @@ triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
     return( as.matrix(Matrix::tril(mat, k = k)) )
   } else if (direction == 'u') {
     return( as.matrix(Matrix::triu(mat, k = k)) )
-  } else {
-    message('Error: not valid direction.')
-    return( NULL )
   }
 }
 
@@ -277,12 +276,11 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
   # Parameters check
   opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
-    return( NULL )
+    stop("Error: `opt_data` parameter is empty.")
   }
 
   if (((direction != 'forward') & (direction != 'backward'))) {
-    message("Error: `direction` must be 'forward' or 'backward'")
-    return( NULL )
+    stop("Error: `direction` must be 'forward' or 'backward'")
   }
 
   # Multi-core parameter check
@@ -309,9 +307,6 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
     window_start_hour = window_start_hour,
     flex_window_hours = flex_window_hours
   )
-  if (is.null(flex_windows_idxs)) {
-    return( NULL )
-  }
   flex_windows_idxs_seq <- as.numeric(unlist(flex_windows_idxs$flex_idx))
 
   # Optimization
@@ -369,8 +364,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
       )
     )
   } else {
-    message("Error: invalid `opt_objective`")
-    return( NULL )
+    stop("Error: invalid `opt_objective`")
   }
 
   O <- as.numeric(unlist(O_windows))
@@ -780,6 +774,26 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' @importFrom purrr map
 #' @importFrom parallel detectCores mclapply
 #'
+#' @examples
+#' library(dplyr)
+#' opt_data <- flextools::energy_profiles %>%
+#'   filter(lubridate::isoweek(datetime) == 18) %>%
+#'   rename(
+#'     production = "solar"
+#'   ) %>%
+#'   select(any_of(c(
+#'     "datetime", "production", "building", "price_imported", "price_exported"
+#'   ))) %>%
+#'   mutate(
+#'     static = .data$building
+#'   )
+#'   opt_battery <- opt_data %>%
+#'     add_battery_optimization(
+#'       opt_objective = 0.5,
+#'       Bcap = 50, Bc = 4, Bd = 4,
+#'       window_start_hour = 5
+#'     )
+#'
 add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc, Bd,
                                      SOCmin = 0, SOCmax = 100, SOCini = NULL,
                                      window_days = 1, window_start_hour = 0,
@@ -790,7 +804,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   opt_data <- opt_data %>% mutate(flexible = 0)
   opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
-    return( NULL )
+    stop("Error: `opt_data` parameter is empty.")
   }
 
   if (Bcap == 0 | Bc == 0 | Bd == 0 | SOCmin == SOCmax) {
@@ -826,9 +840,6 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
     window_start_hour = window_start_hour,
     flex_window_hours = flex_window_hours
   )
-  if (is.null(flex_windows_idxs)) {
-    return( NULL )
-  }
   flex_windows_idxs_seq <- as.numeric(unlist(flex_windows_idxs$flex_idx))
 
   # Optimization
@@ -869,8 +880,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
       )
     )
   } else {
-    message("Error: invalid `opt_objective`")
-    return( NULL )
+    stop("Error: invalid `opt_objective`")
   }
 
   B <- as.numeric(unlist(B_windows))

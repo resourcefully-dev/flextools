@@ -90,8 +90,7 @@ change_timeseries_year <- function(df, year_out) {
 
   # Checks
   if (length(df_year) > 1) {
-    message("Error: more than one year in date time sequence of data")
-    return( NULL )
+    stop("Error: more than one year in date time sequence of data")
   }
   if (year_out == df_year) {
     return( df )
@@ -166,15 +165,13 @@ change_timeseries_resolution <- function(df, resolution_out, method) {
     if (method %in% c("average", "first", "sum")) {
       return(decrease_timeseries_resolution(df, resolution_out, method))
     } else {
-      return( NULL )
-      message("Error: method not valid for decreasing resolution")
+      stop("Error: method not valid for decreasing resolution")
     }
   } else {
     if (method %in%  c("interpolate", "repeat", "divide")) {
       return(increase_timeseries_resolution(df, resolution_out, method))
     } else {
-      return( NULL )
-      message("Error: method not valid for increasing resolution")
+      stop("Error: method not valid for increasing resolution")
     }
   }
 }
@@ -245,8 +242,7 @@ increase_numeric_resolution <- function(y, n, method = c('interpolate', 'repeat'
   } else if (method == 'divide') {
     rep(y/n, each = n)
   } else {
-    message("Error: method not allowed.")
-    return( NULL )
+    stop("Error: method not valid")
   }
 }
 
@@ -301,8 +297,7 @@ increase_timeseries_resolution <- function(df, resolution_mins, method = c('inte
 #'
 decrease_numeric_resolution <- function(y, n, method = c('average', 'first', 'sum')) {
   if ((length(y)%%n) > 0) {
-    message("Error decreasing resolution: the original vector should have a length multiple of `n`.")
-    return( NULL )
+    stop("Error decreasing resolution: the original vector should have a length multiple of `n`.")
   }
 
   if (method == 'average') {
@@ -332,8 +327,7 @@ decrease_numeric_resolution <- function(y, n, method = c('average', 'first', 'su
         as.numeric()
     )
   } else {
-    message("Error: method not allowed.")
-    return( NULL )
+    stop("Error: method not valid")
   }
 }
 
@@ -364,8 +358,14 @@ decrease_timeseries_resolution <- function(df, resolution_mins, method = c('aver
       df2 %>%
         distinct(.data$datetime, .keep_all = T)
     )
+  } else if (method == 'sum') {
+    return(
+      df2 %>%
+        group_by(.data$datetime) %>%
+        summarise_all(sum)
+    )
   } else {
-    return( NULL )
+    stop("Error: method not valid")
   }
 }
 

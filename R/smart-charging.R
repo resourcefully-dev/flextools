@@ -133,6 +133,8 @@
 #' # - The energy charged can be reduced up to 50% of the original requirement
 #'
 #' library(dplyr)
+#'
+#' # Use first 50 sessions
 #' sessions <- evsim::california_ev_sessions_profiles %>%
 #'   slice_head(n = 50) %>%
 #'   evsim::adapt_charging_features(time_resolution = 15)
@@ -161,35 +163,30 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
   # Parameters check
   if (is.null(sessions) | nrow(sessions) == 0) {
-    message("Error: `sessions` parameter is empty.")
-    return( NULL )
+    stop("Error: `sessions` parameter is empty.")
   }
   sessions_basic_vars <- c(
     "Session", "Timecycle", "Profile", "ConnectionStartDateTime",
     "ConnectionHours", "Power", "Energy"
   )
   if (!all(sessions_basic_vars %in% colnames(sessions))) {
-    message("Error: `sessions` does not contain all required variables (see Arguments description)")
-    return( NULL )
+    stop("Error: `sessions` does not contain all required variables (see Arguments description)")
   }
   if (is.null(opt_data)) {
-    return( NULL )
+    stop("Error: `opt_data` parameter is empty.")
   }
   if (!("datetime" %in% colnames(opt_data))) {
-    message("Error: `opt_data` does not contain `datetime` variable")
-    return( NULL )
+    stop("Error: `opt_data` does not contain `datetime` variable")
   }
   if (!any(sessions$ConnectionStartDateTime %in% opt_data$datetime)) {
-    message("Error: `sessions` do not charge during `datetime` period in `opt_data`")
-    return( NULL )
+    stop("Error: `sessions` do not charge during `datetime` period in `opt_data`")
   }
   if (opt_objective != "none") {
     opt_data$flexible <- 0
     opt_data <- check_optimization_data(opt_data, opt_objective)
   } else {
     if (!any(unique(sessions$Profile) %in% names(opt_data))) {
-      message("Error: when `opt_objective` = 'none', at least one EV user profile from `sessions` must appear as a column in `opt_data` to be considered as a setpoint")
-      return( NULL )
+      stop("Error: when `opt_objective` = 'none', at least one EV user profile from `sessions` must appear as a column in `opt_data` to be considered as a setpoint")
     }
   }
   if (is.null(responsive)) {
@@ -564,19 +561,19 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
   # Parameters check
   if (is.null(sessions) | nrow(sessions) == 0) {
-    message("Error: `sessions` parameter is empty.")
-    return( NULL )
+    stop("Error: `sessions` parameter is empty.")
   }
   sessions_basic_vars <- c(
     "Session", "ConnectionStartDateTime", "ConnectionHours", "Power", "Energy"
   )
   if (!all(sessions_basic_vars %in% colnames(sessions))) {
-    message("Error: `sessions` does not contain all required variables (see Arguments description)")
-    return( NULL )
+    stop("Error: `sessions` does not contain all required variables (see Arguments description)")
   }
   if (!all(c("datetime", "setpoint") %in% colnames(setpoint))) {
-    message("Error: `setpoint` does not contain all required variables (see Arguments description)")
-    return( NULL )
+    stop("Error: `setpoint` does not contain all required variables (see Arguments description)")
+  }
+  if(!(method %in% c("postpone", "interrupt", "curtail"))) {
+    stop("Error: `method` not valid (see Arguments description)")
   }
 
   sessions_sch <- sessions %>%

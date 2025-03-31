@@ -149,6 +149,8 @@ don't appear in \code{opt_data} will not be optimized.
 # - The energy charged can be reduced up to 50\% of the original requirement
 
 library(dplyr)
+
+# Use first 50 sessions
 sessions <- evsim::california_ev_sessions_profiles \%>\%
   slice_head(n = 50) \%>\%
   evsim::adapt_charging_features(time_resolution = 15)

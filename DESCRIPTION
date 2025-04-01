@@ -3,7 +3,7 @@ Title: Tools for demand-response simulations
 Version: 1.0.0
 Authors@R: 
     person(given = "Marc", family = "Cañigueral", role = c("aut", "cre"),
-           email = "m.canigueral@resourcefully.nl",
+           email = "marccanyigueral@gmail.com",
            comment = c(ORCID = "0000-0001-9724-5829"))
 Description: Simulate demand-response scenarios with flexibility from 
   electric vehicles, batteries or any time-series power demand profile, using

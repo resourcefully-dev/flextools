@@ -7,7 +7,7 @@
 #' (i.e. postpone, interrupt and curtail) to reach multiple goals (e.g. grid congestion,
 #' net power minimization, cost minimization). See implementation examples and
 #' the formulation of the optimization problems in the
-#' [documentation website](https://mcanigueral.github.io/flextools/).
+#' [documentation website](https://resourcefully-dev.github.io/flextools/).
 #'
 #' @param sessions tibble, sessions data set containig the following variables:
 #' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`.

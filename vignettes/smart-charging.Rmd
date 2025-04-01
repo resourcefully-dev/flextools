@@ -44,7 +44,7 @@ Currently, `flextools` allows the following methods to define the setpoint of th
 
 * Setpoint as **maxium EV demand**: a maximum EV demand capacity profile can be configured as a constrain to coordinate charging sessions below the limits. This must be set for every EV user profile in the charging sessions data set.
 
-* Setpoint as **optimal EV demand**: the optinal EV demand is calculated based on a Quadratic programming optimization to minimize the interaction with the power grid (see [Net power optimization](https://mcanigueral.github.io/flextools/articles/minimize_net_power.html)), the energy cost (see [Energy cost optimization](https://mcanigueral.github.io/flextools/articles/minimize_cost.html)) or both (see [Combined optimization](https://mcanigueral.github.io/flextools/articles/combined_optimization.html)), setting the parameter `opt_objective` accordingly. Internally, the `smart_charging()` function is making use of the `optimize_demand()` function internally, using parameters `direction="forward"` to postpone EV sessions and `time_horizon=NULL` to exploit their flexibility until the end of the optimization window.  
+* Setpoint as **optimal EV demand**: the optinal EV demand is calculated based on a Quadratic programming optimization to minimize the interaction with the power grid (see [Net power optimization](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html)), the energy cost (see [Energy cost optimization](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html)) or both (see [Combined optimization](https://resourcefully-dev.github.io/flextools/articles/combined_optimization.html)), setting the parameter `opt_objective` accordingly. Internally, the `smart_charging()` function is making use of the `optimize_demand()` function internally, using parameters `direction="forward"` to postpone EV sessions and `time_horizon=NULL` to exploit their flexibility until the end of the optimization window.  
 
 
 
@@ -74,7 +74,7 @@ To classify a connected EV as a **flexible session** or not, the `flextools` pac
 * Interrupt: the charge is not completed yet, and the energy required can be charged during the rest of the connection time at the nominal charging power. From all flexible sessions in a time slot, the ones that have been charging during less time will have priority over the sessions that have been already charging (rotation system).
 * Curtail: the charge is not completed yet or will not be completed in the current time slot, and the energy required can be charged during the rest of the connection time at a lower power than the nominal charging power.
 
-The energy and power constraints of these conditions can also be defined in function `smart_charging()` with the parameters `energy_min` and `charging_power_min`, representing the minimum allowed ratios of the nominal values. More information about using these parameters can be found in article [Advanced smart charging](https://mcanigueral.github.io/flextools/articles/smart-charging-advanced.html).
+The energy and power constraints of these conditions can also be defined in function `smart_charging()` with the parameters `energy_min` and `charging_power_min`, representing the minimum allowed ratios of the nominal values. More information about using these parameters can be found in article [Advanced smart charging](https://resourcefully-dev.github.io/flextools/articles/smart-charging-advanced.html).
 
 
 
@@ -97,7 +97,7 @@ head(energy_data)
 
 On top of these energy variables, we can simulate some charging sessions using the `evsim` package, which provides the function `evsim::get_custom_ev_model` to create a custom EV model to later simulate EV sessions with `evsim::simulate_sessions()` function.
 
-We can create an EV model with custom time-cycles and user profiles. In this case, we will consider just one EV user profile (see the [EV user profile concept](https://mcanigueral.github.io/evprof/articles/evprof.html) from package `evprof`), "HomeEV", which will represent a "charge-at-home" pattern starting in average at 18:00 until next morning.
+We can create an EV model with custom time-cycles and user profiles. In this case, we will consider just one EV user profile (see the [EV user profile concept](https://resourcefully-dev.github.io/evprof/articles/evprof.html) from package `evprof`), "HomeEV", which will represent a "charge-at-home" pattern starting in average at 18:00 until next morning.
 
 ```{r, eval = FALSE}
 # For workdays time cycle
@@ -211,7 +211,7 @@ print(sc_results)
 ```
 
 * **Responsive**: charging sessions that accept to participate in the smart charging sessions. The ratio of responsive sessions from every EV user profile can be configured with the `responsive` parameter in the `smart_charging()` function. By default, all charging sessions are responsive.
-* **Flexible**: charging sessions that are flexible in a specific time slot that requires flexibility. This depends on the session's features and the scheduling `method` (as described in the [Scheduling algorithm](https://mcanigueral.github.io/flextools/articles/smart_charging.html#scheduling-algorithm) section). If no flexibility is required, then this variable will be `FALSE` even if they could provide flexibility.
+* **Flexible**: charging sessions that are flexible in a specific time slot that requires flexibility. This depends on the session's features and the scheduling `method` (as described in the [Scheduling algorithm](https://resourcefully-dev.github.io/flextools/articles/smart_charging.html#scheduling-algorithm) section). If no flexibility is required, then this variable will be `FALSE` even if they could provide flexibility.
 * **Exploited**: charging sessions that have been modified in the scope of the smart charging program. 
 
 Also note that after applying the smart charging, the `sessions` object from the results has a lot more charging sessions. It is not the number of total charging sessions that has increased, but **all flexible sessions have been divided in multiple time slots**. This allows to modify the charging power of every time slot to 0 (postpone or interrupt methods) or between 0 and the nominal power (curtail method).
@@ -248,7 +248,7 @@ We can visualize the difference between the defined setpoint and the final EV us
 plot(sc_results, sessions = ev_sessions)
 ```
 
-In this case, we see that at the end of the optimization window we have some peaks because the EVs have to charge their energy requirements before the end of the window. For methods to solve this issue see the section "The EV demand is pushed to the end of the optimization window" in the [Advanced smart charging](https://mcanigueral.github.io/flextools/articles/smart-charging-advanced.html) article.
+In this case, we see that at the end of the optimization window we have some peaks because the EVs have to charge their energy requirements before the end of the window. For methods to solve this issue see the section "The EV demand is pushed to the end of the optimization window" in the [Advanced smart charging](https://resourcefully-dev.github.io/flextools/articles/smart-charging-advanced.html) article.
 
 Finally, the `log` object from the results is a list of strings containing all log messages from scheduling charging sessions for every timestamp and EV user profile. To enable the log messages it is required to configure the parameter `log = TRUE` in `smart_charging()` function.
 
@@ -500,7 +500,7 @@ energy_data %>%
   dyStackedRibbonGroup(c("HomeEV","building"), color = c("purple", "navy"))
 ```
 
-We see that the EV demand cause an even higher demand peak during the evening peak hours. To solve this issue, the EV sessions can be coordinated with the building demand profile to obtain a lower aggregated peak. This can be done with function `smart_charging()`, using a net power optimization (i.e. `opt_objective = "grid"`, see more information in [Net power optimization article](https://mcanigueral.github.io/flextools/articles/minimize_net_power.html). We will simulate it using a `"curtail"` method, considering optimization windows of 24 hours from 6:00AM to 6:00AM, and renaming the variable `"solar"` to `"production"` and `"building"` to `"static"` in the `opt_data` object:
+We see that the EV demand cause an even higher demand peak during the evening peak hours. To solve this issue, the EV sessions can be coordinated with the building demand profile to obtain a lower aggregated peak. This can be done with function `smart_charging()`, using a net power optimization (i.e. `opt_objective = "grid"`, see more information in [Net power optimization article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html). We will simulate it using a `"curtail"` method, considering optimization windows of 24 hours from 6:00AM to 6:00AM, and renaming the variable `"solar"` to `"production"` and `"building"` to `"static"` in the `opt_data` object:
 
 ```{r}
 opt_data <- energy_data %>% 
@@ -648,7 +648,7 @@ energy_data %>%
 ```
 
 
-The energy cost can be optimized with function `smart_charging()`, using energy cost optimization (i.e. `opt_objective = "cost"`, see more information in [Energy cost optimization article](https://mcanigueral.github.io/flextools/articles/minimize_net_power.html). We will simulate it using a `"curtail"` method, considering optimization windows of 24 hours from 6:00AM to 6:00AM, and renaming the variable `"solar"` to `"production"` and `"building"` to `"static"` in the `opt_data` object, and keeping the `price_imported` and `price_exported` variables:
+The energy cost can be optimized with function `smart_charging()`, using energy cost optimization (i.e. `opt_objective = "cost"`, see more information in [Energy cost optimization article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html). We will simulate it using a `"curtail"` method, considering optimization windows of 24 hours from 6:00AM to 6:00AM, and renaming the variable `"solar"` to `"production"` and `"building"` to `"static"` in the `opt_data` object, and keeping the `price_imported` and `price_exported` variables:
 
 ```{r}
 opt_data <- energy_data %>% 

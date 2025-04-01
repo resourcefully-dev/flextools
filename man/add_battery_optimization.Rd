@@ -74,7 +74,7 @@ numeric vector
 }
 \description{
 See the formulation of the optimization problems in the
-\href{https://mcanigueral.github.io/flextools/}{documentation website}.
+\href{https://resourcefully-dev.github.io/flextools/}{documentation website}.
 }
 \examples{
 library(dplyr)

@@ -102,7 +102,7 @@ This function provides a framework to simulate different smart charging methods
 (i.e. postpone, interrupt and curtail) to reach multiple goals (e.g. grid congestion,
 net power minimization, cost minimization). See implementation examples and
 the formulation of the optimization problems in the
-\href{https://mcanigueral.github.io/flextools/}{documentation website}.
+\href{https://resourcefully-dev.github.io/flextools/}{documentation website}.
 }
 \details{
 An important parameter of this function is \code{opt_data}, which defines the time

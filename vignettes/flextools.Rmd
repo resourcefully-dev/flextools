@@ -54,7 +54,7 @@ opt_data %>%
 
 # Net power minimization
 
-To minimize the energy exchanged with the distribution grid while maximizing the use of local generation, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Net power optimization](https://mcanigueral.github.io/flextools/articles/minimize_net_power.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
+To minimize the energy exchanged with the distribution grid while maximizing the use of local generation, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Net power optimization](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
 
 ## Demand flexibility
 
@@ -148,7 +148,7 @@ opt_data %>%
 
 # Cost minimization
 
-To minimize the energy cost while maximizing the income from imbalance markets, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Energy cost optimization](https://mcanigueral.github.io/flextools/articles/minimize_cost.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
+To minimize the energy cost while maximizing the income from imbalance markets, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Energy cost optimization](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
 
 ## Demand flexibility
 
@@ -377,7 +377,7 @@ opt_data %>%
 
 # Combined objectives
 
-To minimize the energy cost and the impact in the distribution grid, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Combined optimization](https://mcanigueral.github.io/flextools/articles/combined_optimization.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
+To minimize the energy cost and the impact in the distribution grid, using the flexibility from a power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use of Quadratic programming to obtain the optimal setpoints for the flexible assets. See the article [Combined optimization](https://resourcefully-dev.github.io/flextools/articles/combined_optimization.html) to learn more about the problem formulation for both **demand flexbility** and **battery flexibility**. Below, you can find examples of both applications.
 
 ## Demand flexibility
 

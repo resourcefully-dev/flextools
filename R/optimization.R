@@ -211,7 +211,7 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' Optimize a vector of flexible demand
 #'
 #' See the formulation of the optimization problems in the
-#' [documentation website](https://mcanigueral.github.io/flextools/).
+#' [documentation website](https://resourcefully-dev.github.io/flextools/).
 #'
 #' @param opt_data tibble, optimization contextual data.
 #' The first column must be named `datetime` (mandatory) containing the
@@ -722,7 +722,7 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' Battery optimal charging/discharging profile
 #'
 #' See the formulation of the optimization problems in the
-#' [documentation website](https://mcanigueral.github.io/flextools/).
+#' [documentation website](https://resourcefully-dev.github.io/flextools/).
 #'
 #' @param opt_data tibble, optimization contextual data.
 #' The first column must be named `datetime` (mandatory) containing the

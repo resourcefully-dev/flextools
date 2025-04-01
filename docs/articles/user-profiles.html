@@ -78,8 +78,8 @@
 
     
     
-<p>This article is based on the <a href="https://mcanigueral.github.io/evprof/articles/evprof.html" class="external-link">EV user
-profile concept</a> from package <code>evprof</code>, and how the
+<p>This article is based on the <a href="https://resourcefully-dev.github.io/evprof/articles/evprof.html" class="external-link">EV
+user profile concept</a> from package <code>evprof</code>, and how the
 extra-knowledge that a classification of EV users into user profiles
 could help in the smart charging ecosystem.</p>
 <p>A <strong>user profile</strong> is defined by a pattern in the
@@ -98,8 +98,8 @@ the CPO and the final EV user.</p>
 </h2>
 <p>First of all, we can simulate EV sessions using the
 <code>evsim</code> package, which provides the function
-<code><a href="https://mcanigueral.github.io/evsim/reference/get_custom_ev_model.html" class="external-link">evsim::get_custom_ev_model</a></code> to create a custom EV model to
-later simulate EV sessions with <code><a href="https://mcanigueral.github.io/evsim/reference/simulate_sessions.html" class="external-link">evsim::simulate_sessions()</a></code>
+<code><a href="https://resourcefully-dev.github.io/evsim/reference/get_custom_ev_model.html" class="external-link">evsim::get_custom_ev_model</a></code> to create a custom EV model to
+later simulate EV sessions with <code><a href="https://resourcefully-dev.github.io/evsim/reference/simulate_sessions.html" class="external-link">evsim::simulate_sessions()</a></code>
 function. We can create an EV model with custom time-cycles and user
 profiles. In this case, we will consider two different EV user
 profiles:</p>
@@ -178,7 +178,7 @@ different days as example:</p>
 <span><span class="co">## <span style="color: #949494;"># ℹ 6 more variables: ChargingStartDateTime &lt;dttm&gt;, ChargingEndDateTime &lt;dttm&gt;,</span></span></span>
 <span><span class="co">## <span style="color: #949494;">#   Power &lt;dbl&gt;, Energy &lt;dbl&gt;, ConnectionHours &lt;dbl&gt;, ChargingHours &lt;dbl&gt;</span></span></span></code></pre>
 <p>Finally we can calculate the time-series power demand from each EV
-with function <code><a href="https://mcanigueral.github.io/evsim/reference/get_demand.html" class="external-link">evsim::get_demand()</a></code>, using parameter
+with function <code><a href="https://resourcefully-dev.github.io/evsim/reference/get_demand.html" class="external-link">evsim::get_demand()</a></code>, using parameter
 <code>by="Sessions"</code>:</p>
 <div class="sourceCode" id="cb4"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="va">ev_demand</span> <span class="op">&lt;-</span> <span class="va">ev_sessions</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span> </span>

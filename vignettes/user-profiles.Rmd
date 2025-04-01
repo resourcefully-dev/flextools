@@ -17,7 +17,7 @@ library(purrr)
 ```
 
 
-This article is based on the [EV user profile concept](https://mcanigueral.github.io/evprof/articles/evprof.html) from package `evprof`, and how the extra-knowledge that a classification of EV users into user profiles could help in the smart charging ecosystem. 
+This article is based on the [EV user profile concept](https://resourcefully-dev.github.io/evprof/articles/evprof.html) from package `evprof`, and how the extra-knowledge that a classification of EV users into user profiles could help in the smart charging ecosystem. 
 
 A **user profile** is defined by a pattern in the connection times of EV users, so in most of cases, there are EV user profiles with more flexibility potential than others. A Charging Point Operator (CPO) can take advantage of this knowledge and use this classification to set priorities when scheduling EV charging sessions.
 

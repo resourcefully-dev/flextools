@@ -1,7 +1,7 @@
 
 <!-- README.md is generated from README.Rmd. Please edit that file -->
 
-# flextools <a href='https://mcanigueral.github.io/flextools/'><img src='man/figures/logo.png' align="right" height="139" /></a>
+# flextools <a href='https://resourcefully-dev.github.io/flextools/'><img src='man/figures/logo.png' align="right" height="139" /></a>
 
 <!-- badges: start -->
 <!-- [![CRAN status](https://www.r-pkg.org/badges/version/flextools)](https://cran.r-project.org/package=flextools) -->
@@ -27,7 +27,7 @@ coverage](https://codecov.io/gh/mcanigueral/flextools/graph/badge.svg)](https://
 
 If you want to test `flextools` with your own data set of time-series
 energy, the best place to start is the [Get started
-chapter](https://mcanigueral.github.io/flextools/articles/flextools.html)
+chapter](https://resourcefully-dev.github.io/flextools/articles/flextools.html)
 in the package website.
 
 ## Installation
@@ -38,16 +38,14 @@ the latest development version from GitHub:
 ``` r
 # Latest development version
 # install.packages("remotes")
-remotes::install_github("mcanigueral/flextools")
+remotes::install_github("resourcefully-dev/flextools")
 ```
 
 ## Getting help
 
 If you encounter a clear bug, please open an issue with a minimal
 reproducible example on
-[GitHub](https://github.com/mcanigueral/flextools/issues). For questions
-and other discussion, please send me a mail to
-<marc.canigueral@udg.edu>.
+[GitHub](https://github.com/mcanigueral/flextools/issues).
 
 For further technical details, you can read the following academic
 articles about the algorithms used in this package:

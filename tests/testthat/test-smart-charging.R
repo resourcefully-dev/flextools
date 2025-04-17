@@ -57,12 +57,22 @@ test_that("Get error when `method` is mispelled", {
   )
 })
 
+
+test_that("Get error when no user profiles in `opt_data` and not optimization", {
+  expect_error(smart_charging(
+    sessions, opt_data, opt_objective = "none", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Workday = list(Worktime = 0.9)),
+    charging_power_min = 2, include_log = TRUE, show_progress = TRUE
+  ))
+})
+
 test_that("smart charging works with grid objective, postpone method with power_th and multi-core", {
   sc_results <- smart_charging(
     sessions, opt_data, opt_objective = "grid", method = "postpone",
     window_days = 1, window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
-    power_th = 0.2, mc.cores = 2, include_log = TRUE
+    power_th = 0.2, mc.cores = 2, include_log = F
   )
   print(sc_results) # Check print as well
   expect_type(sc_results, "list")
@@ -85,27 +95,74 @@ test_that("smart charging works with combined objective, curtail method and min 
     sessions, opt_data, opt_objective = 0.5, method = "curtail",
     window_days = 1, window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
-    charging_power_min = 0.5, show_progress = TRUE
+    charging_power_min = 0.5, show_progress = F
   )
   expect_type(sc_results, "list")
 })
 
-test_that("smart charging works without optimization,  curtail method and min charging power of 2kW, including logs and progress", {
+test_that("smart charging works without optimization, curtail method and min charging power of 2kW, including logs and progress", {
   opt_data$Worktime <- 10
   sc_results <- smart_charging(
     sessions, opt_data, opt_objective = "none", method = "curtail",
     window_days = 1, window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
-    charging_power_min = 2, include_log = TRUE, show_progress = TRUE
+    charging_power_min = 2, include_log = F, show_progress = F
   )
   expect_type(sc_results, "list")
 })
 
-test_that("Error when no user profiles in `opt_data` and not optimization", {
-  expect_error(smart_charging(
-    sessions, opt_data, opt_objective = "none", method = "curtail",
+test_that("using responsiveness for specific user profiles", {
+  sc_results <- smart_charging(
+    sessions, opt_data, opt_objective = "grid", method = "curtail",
     window_days = 1, window_start_hour = 6,
-    responsive = list(Workday = list(Worktime = 0.9)),
-    charging_power_min = 2, include_log = TRUE, show_progress = TRUE
-  ))
+    responsive = list(Workday = list(Worktime = 0.5)), include_log = FALSE
+  )
+  summaryS <- summarise_smart_charging_sessions(sc_results)
+  pct_responsive <- round(summaryS$pct[summaryS$subgroup == "Responsive"]/100, 1)
+  expect_equal(pct_responsive, 0.5)
+  expect_type(sc_results, "list")
 })
+
+test_that("using energy_min=NULL all sessions charge 100% for curtail", {
+  sc_results <- smart_charging(
+    sessions, opt_data, opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6
+  )
+  energy_summary <- summarise_energy_charged(sc_results, sessions) %>%
+    filter(PctEnergyCharged < 100)
+  expect_equal(nrow(energy_summary), 0)
+})
+
+test_that("using energy_min=NULL all sessions charge 100% for postpone", {
+  sc_results <- smart_charging(
+    sessions, opt_data, opt_objective = "grid", method = "postpone",
+    window_days = 1, window_start_hour = 6
+  )
+  energy_summary <- summarise_energy_charged(sc_results, sessions) %>%
+    filter(PctEnergyCharged < 100)
+  expect_equal(nrow(energy_summary), 0)
+})
+
+test_that("using energy_min=NULL all sessions charge 100% for interrupt", {
+  sc_results <- smart_charging(
+    sessions, opt_data, opt_objective = "grid", method = "interrupt",
+    window_days = 1, window_start_hour = 6
+  )
+  energy_summary <- summarise_energy_charged(sc_results, sessions) %>%
+    filter(PctEnergyCharged < 100)
+  expect_equal(nrow(energy_summary), 0)
+})
+
+test_that("using energy_min=0 setpoint can be achieved with curtail", {
+  sc_results <- smart_charging(
+    sessions, opt_data, opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6, energy_min = 0
+  )
+  setpoint_df <- aggregate_timeseries(sc_results$setpoints, "setpoint")
+  demand_gt_setpiont <- aggregate_timeseries(get_demand(sc_results$sessions, setpoint_df$datetime), "demand") %>%
+    mutate(setpoint_df['setpoint']) %>%
+    filter(round(demand, 1) > round(setpoint, 1))
+  expect_equal(nrow(demand_gt_setpiont), 0)
+})
+
+

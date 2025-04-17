@@ -1,5 +1,225 @@
 
 
+# Smart charging impact ---------------------------------------------------
+
+#' Get a summary of the new schedule of charging sessions
+#'
+#' A table is provided containing the number of `Considered`, `Responsive`,
+#' `Flexbile` and `Exploited` sessions, by user profile.
+#'
+#' @param smart_charging SmartCharging object, returned by function `smart_charging()`
+#'
+#' @importFrom dplyr  %>% group_by group_split group_keys pull
+#' @importFrom purrr map list_rbind set_names
+#'
+#' @export
+#'
+#' @return tibble with columns:
+#' `timecycle` (time-cycle name),
+#' `profile` (user profile name),
+#' `group` (name of sessions' group),
+#' `subgroup` (nome of sessions' subgroup),
+#' `n_sessions` (number of sessions) and
+#' `pct` (percentage of subgroup sessions from the group)
+#'
+#'
+#' @examples
+#' library(dplyr)
+#'
+#' # Use first 50 sessions
+#' sessions <- evsim::california_ev_sessions_profiles %>%
+#'   slice_head(n = 50) %>%
+#'   evsim::adapt_charging_features(time_resolution = 15)
+#' sessions_demand <- evsim::get_demand(sessions, resolution = 15)
+#'
+#' # Don't require any other variable than datetime, since we don't
+#' # care about local generation (just peak shaving objective)
+#' opt_data <- tibble(
+#'   datetime = sessions_demand$datetime,
+#'   production = 0
+#' )
+#' sc_results <- smart_charging(
+#'   sessions, opt_data, opt_objective = "grid", method = "curtail",
+#'   window_days = 1, window_start_hour = 6,
+#'   responsive = list(Workday = list(Worktime = 0.9)),
+#'   energy_min = 0.5
+#' )
+#'
+#' summarise_smart_charging_sessions(sc_results)
+#'
+summarise_smart_charging_sessions <- function(smart_charging) {
+  grouped_sessions <- smart_charging$sessions %>%
+    group_by(.data$Timecycle)
+
+  grouped_sessions %>%
+    group_split(.keep = FALSE) %>%
+    set_names(group_keys(grouped_sessions)$Timecycle) %>%
+    map(
+      ~ .x %>%
+        group_by(.data$Profile) %>%
+        group_split(.keep = FALSE) %>%
+        set_names(
+          .x %>%
+            group_by(.data$Profile) %>%
+            group_keys() %>%
+            pull(.data$Profile)
+        ) %>%
+        map(summarise_profile_smart_charging_sessions) %>%
+        list_rbind(names_to = "profile")
+    ) %>%
+    list_rbind(names_to = "timecycle")
+}
+
+
+summarise_timecycle_smart_charging_sessions <- function(time_cycle_sessions) {
+  grouped_sessions <- time_cycle_sessions %>%
+    group_by(.data$Profile)
+
+  grouped_sessions %>%
+    group_split() %>%
+    set_names(group_keys(grouped_sessions)$Profile) %>%
+    map(summarise_profile_smart_charging_sessions) %>%
+    list_rbind(names_to = "profile")
+}
+
+
+#' Get a summary of the new schedule of charging sessions
+#'
+#' A table is provided containing the number of `Considered`, `Responsive`,
+#' `Flexible` and `Exploited` sessions.
+#'
+#' @param profile_sessions tibble, charging `sessions` object from `smart_charging()`
+#'
+#' @importFrom dplyr  %>% select group_by all_of summarise mutate_if mutate count filter as_tibble ungroup
+#' @importFrom tidyr pivot_longer
+#' @importFrom purrr map list_rbind
+#'
+#' @keywords internal
+#'
+#' @return tibble with columns
+#' `group` (name of sessions' group),
+#' `subgroup` (nome of sessions' subgroup),
+#' `n_sessions` (number of sessions) and
+#' `pct` (percentage of subgroup sessions from the group)
+#'
+summarise_profile_smart_charging_sessions <- function(profile_sessions) {
+  summaryS <- profile_sessions %>%
+    select(all_of(c("Session", "Responsive", "Flexible", "Exploited"))) %>%
+    group_by(.data$Session) %>%
+    summarise(
+      Responsive = sum(.data$Responsive, na.rm = FALSE),
+      Flexible = sum(.data$Flexible, na.rm = TRUE),
+      Exploited = sum(.data$Exploited, na.rm = TRUE)
+    ) %>%
+    mutate_if(is.numeric, ~ ifelse(.x > 0, TRUE, FALSE)) %>%
+    mutate(
+      Flexible = ifelse(.data$Responsive, .data$Flexible, NA),
+      Exploited = ifelse(.data$Flexible, .data$Exploited, NA)
+    ) %>%
+    pivot_longer(- "Session") %>%
+    group_by(.data$name, .data$value) %>%
+    count() %>%
+    filter(!(.data$name %in% c("Exploited", "Flexible") & is.na(.data$value)))
+  n_sessions <- sum(summaryS$n[summaryS$name == "Responsive"])
+  n_considered <- sum(summaryS$n[
+    summaryS$name == "Responsive" & !is.na(summaryS$value)
+  ], na.rm = T)
+  n_responsive <- sum(summaryS$n[
+    summaryS$name == "Responsive" & summaryS$value == TRUE
+  ], na.rm = T)
+  n_flexible <- sum(summaryS$n[
+    summaryS$name == "Flexible" & summaryS$value == TRUE
+  ], na.rm = T)
+  n_exploited <- sum(summaryS$n[
+    summaryS$name == "Exploited" & summaryS$value == TRUE
+  ], na.rm = T)
+
+  summary_list <- list(
+    "Total" = list(
+      "Considered" = n_considered,
+      "Not considered" = n_sessions - n_considered
+    ),
+    "Considered" = list(
+      "Responsive" = n_responsive,
+      "Non responsive" = n_considered - n_responsive
+    ),
+    "Responsive" = list(
+      "Flexible" = n_flexible,
+      "Non-flexible" = n_responsive - n_flexible
+    ),
+    "Flexible" = list(
+      "Exploited" = n_exploited,
+      "Not exploited" = n_flexible - n_exploited
+    )
+  )
+
+  summary_list %>%
+    map(
+      ~ .x %>%
+        as_tibble() %>%
+        pivot_longer(everything(), names_to = "subgroup", values_to = "n_sessions")
+    ) %>%
+    list_rbind(names_to = "group") %>%
+    group_by(.data$group) %>%
+    mutate(pct = round(.data$n_sessions/sum(.data$n_sessions)*100)) %>%
+    ungroup() %>%
+    filter(n_sessions > 0)
+}
+
+
+#' Get a summary of the energy charged per session
+#'
+#' A table is provided containing the originally required energy for every
+#' session and the actual energy charged with the smart charging program
+#' (also in percentage).
+#'
+#' @param smart_charging SmartCharging object, returned by function `smart_charging()`
+#' @param sessions tibble, sessions data set containig the following variables:
+#' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`.
+#'
+#' @return tibble
+#' @export
+#'
+#' @importFrom dplyr %>% mutate group_by summarise left_join select
+#' @importFrom rlang .data
+#'
+#' @examples
+#' library(dplyr)
+#'
+#' sessions <- evsim::california_ev_sessions_profiles %>%
+#'   slice_head(n = 50) %>%
+#'   evsim::adapt_charging_features(time_resolution = 15)
+#' sessions_demand <- evsim::get_demand(sessions, resolution = 15)
+#'
+#' # Don't require any other variable than datetime, since we don't
+#' # care about local generation (just peak shaving objective)
+#' opt_data <- tibble(
+#'   datetime = sessions_demand$datetime,
+#'   production = 0
+#' )
+#' sc_results <- smart_charging(
+#'   sessions, opt_data, opt_objective = "grid", method = "curtail",
+#'   window_days = 1, window_start_hour = 6,
+#'   responsive = list(Workday = list(Worktime = 0.9)),
+#'   energy_min = 0.5
+#' )
+#'
+#' summarise_energy_charged(sc_results, sessions)
+#'
+summarise_energy_charged <- function(smart_charging, sessions) {
+  smart_charging$sessions %>%
+    group_by(.data$Session) %>%
+    summarise(EnergyCharged = round(sum(.data$Energy), 2)) %>%
+    left_join(
+      sessions %>% select("Session", EnergyRequired = "Energy"),
+      by = "Session"
+    ) %>%
+    mutate(
+      PctEnergyCharged = round(.data$EnergyCharged/.data$EnergyRequired*100)
+    )
+}
+
+
 # Energy calculations -----------------------------------------------------
 
 #' Get energy balance time-series
@@ -96,57 +316,6 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
 }
 
 
-#' Get a summary of the energy charged per session
-#'
-#' A table is provided containing the originally required energy for every
-#' session and the actual energy charged with the smart charging program
-#' (also in percentage).
-#'
-#' @param smart_charging SmartCharging object, returned by function `smart_charging()`
-#' @param sessions tibble, sessions data set containig the following variables:
-#' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`.
-#'
-#' @return tibble
-#' @export
-#'
-#' @importFrom dplyr %>% mutate group_by summarise left_join select
-#' @importFrom rlang .data
-#'
-#' @examples
-#' library(dplyr)
-#'
-#' sessions <- evsim::california_ev_sessions_profiles %>%
-#'   slice_head(n = 50) %>%
-#'   evsim::adapt_charging_features(time_resolution = 15)
-#' sessions_demand <- evsim::get_demand(sessions, resolution = 15)
-#'
-#' # Don't require any other variable than datetime, since we don't
-#' # care about local generation (just peak shaving objective)
-#' opt_data <- tibble(
-#'   datetime = sessions_demand$datetime,
-#'   production = 0
-#' )
-#' sc_results <- smart_charging(
-#'   sessions, opt_data, opt_objective = "grid", method = "curtail",
-#'   window_days = 1, window_start_hour = 6,
-#'   responsive = list(Workday = list(Worktime = 0.9)),
-#'   energy_min = 0.5
-#' )
-#'
-#' summarise_energy_charged(sc_results, sessions)
-#'
-summarise_energy_charged <- function(smart_charging, sessions) {
-  smart_charging$sessions %>%
-    group_by(.data$Session) %>%
-    summarise(EnergyCharged = round(sum(.data$Energy), 2)) %>%
-    left_join(
-      sessions %>% select(.data$Session, EnergyRequired = .data$Energy),
-      by = "Session"
-    ) %>%
-    mutate(
-      PctEnergyCharged = round(.data$EnergyCharged/.data$EnergyRequired*100)
-    )
-}
 
 # Costs calculations ------------------------------------------------------
 
@@ -215,7 +384,7 @@ get_energy_cost <- function(df) {
 get_energy_total_cost <- function(df) {
   df %>%
     get_energy_cost() %>%
-    pull(.data$cost) %>%
+    pull("cost") %>%
     sum(na.rm = T)
 }
 
@@ -458,7 +627,7 @@ plot_net_power <- function(df, original_df = NULL, import_capacity = NULL, expor
 
   plot_df <- df %>%
     get_energy_balance() %>%
-    rename(net_flex = .data$net)
+    rename(net_flex = "net")
 
   if (is.null(original_df)) {
     plot_dy <- plot_df %>%
@@ -470,7 +639,7 @@ plot_net_power <- function(df, original_df = NULL, import_capacity = NULL, expor
   } else {
     original_df <- original_df %>%
       get_energy_balance() %>%
-      rename(net_static = .data$net) %>%
+      rename(net_static = "net") %>%
       select(all_of(c("datetime", "net_static")))
     plot_dy <- plot_df %>%
       select(all_of(c("datetime", "net_flex"))) %>%
@@ -549,7 +718,7 @@ plot_energy_cost <- function(df, original_df = NULL, ...) {
 
   plot_df <- df %>%
     get_energy_cost() %>%
-    rename(cost_flex = .data$cost)
+    rename(cost_flex = "cost")
 
   if (is.null(original_df)) {
     plot_dy <- plot_df %>%
@@ -559,7 +728,7 @@ plot_energy_cost <- function(df, original_df = NULL, ...) {
   } else {
     original_df <- original_df %>%
       get_energy_cost() %>%
-      rename(cost_static = .data$cost) %>%
+      rename(cost_static = "cost") %>%
       select(all_of(c("datetime", "cost_static")))
     plot_dy <- plot_df %>%
       select(all_of(c("datetime", "cost_flex"))) %>%
@@ -687,28 +856,28 @@ plot_load_duration_curve <- function(df, original_df = NULL) {
   if (is.null(original_df)) {
     plot_gg <- plot_df %>%
       ggplot(aes(.data$pct, .data$power)) +
-      geom_line(size = 1.2) +
+      geom_line(linewidth = 1.2) +
       labs(x = "Percentage of hours (%)", y = "Power (kW)") +
       theme_light() +
       theme(legend.position = "top")
   } else {
     plot_df <- plot_df %>%
-      rename(`Flexible case` = .data$power)
+      rename(`Flexible case` = "power")
     plot_df_original <- original_df %>%
       get_load_duration_curve() %>%
-      rename(`Original case` = .data$power)
+      rename(`Original case` = "power")
 
     plot_gg <- full_join(
       plot_df_original,
       plot_df,
       by = "pct"
     ) %>%
-      arrange(.data$pct) %>%
-      fill(.data$`Original case`, .data$`Flexible case`, .direction = "down") %>%
-      pivot_longer(-.data$pct, names_to = "case", values_to = "power") %>%
+      arrange("pct") %>%
+      fill("Original case", "Flexible case", .direction = "down") %>%
+      pivot_longer(-"pct", names_to = "case", values_to = "power") %>%
       ggplot(aes(.data$pct, .data$power, color = .data$case)) +
       scale_color_manual(values = c("red", "darkgreen") %>% setNames(c("Original case", "Flexible case"))) +
-      geom_line(size = 1.2) +
+      geom_line(linewidth = 1.2) +
       labs(x = "Percentage of hours (%)", y = "Power (kW)", color = "") +
       theme_light() +
       theme(legend.position = "top")

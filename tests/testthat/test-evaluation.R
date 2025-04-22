@@ -67,10 +67,17 @@ test_that("smart charging results are plotted", {
   expect_equal(class(plot), c("dygraphs", "htmlwidget"))
 })
 
-test_that("smart charging results are plotted", {
+test_that("smart charging results are plotted with native `plot` function", {
   plot <- plot(sc_results, sessions = sessions)
   expect_equal(class(plot), c("dygraphs", "htmlwidget"))
 })
+
+test_that("smart charging results are plotted by `FlexType`", {
+  plot <- plot_smart_charging(sc_results, sessions = sessions, by = "FlexType")
+  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
+
+
 
 # Energy cost evaluation --------------------------------------------------
 

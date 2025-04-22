@@ -26,6 +26,7 @@ reference:
     - smart_charging
     - schedule_sessions
     - plot_smart_charging
+    - summarise_smart_charging_sessions
   - title: Battery
   - contents:
     - add_battery_simple
@@ -45,8 +46,6 @@ reference:
     - get_load_duration_curve
     - plot_load_duration_curve
     - summarise_energy_charged
-
-
 
 articles:
   - title: Articles

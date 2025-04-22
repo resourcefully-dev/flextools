@@ -84,7 +84,8 @@ ev_sessions <- simulate_sessions(
 ```
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ev_sessions <- readr::read_csv("sessions_user_profiles.csv") %>% 
-  mutate_if(is.timepoint, with_tz, "Europe/Amsterdam")
+  mutate_if(is.timepoint, with_tz, "Europe/Amsterdam") %>% 
+  filter(ConnectionStartDateTime <= dmy_hm("06/08/2024 07:00", tz = "Europe/Amsterdam"))
 ```
 
 
@@ -141,7 +142,8 @@ sc_results <- ev_sessions %>%
     opt_objective = "none",
     method = "curtail",
     window_days = 1, 
-    window_start_hour = 6
+    window_start_hour = 6,
+    responsive = list(Workdays = list(Worktime = 1))
   )
 ```
 
@@ -159,8 +161,18 @@ ev_demand_opt %>%
 
 We can see that the Worktime power demand has been adapted to the non-flexbile users, i.e. Visit user profile, in order to not surpass the capacity limit of 12 kW. 
 
-Moreover, we can define which percentage of every user profile is responsive to the smart charging signals with the parameter `responsive` from `smart_charging()` function. For example, we can set that, during working days, 60% of the Worktime users and 30% of the Visit user accept to participate to the demand-response program:
+Moreover, we can define which percentage of every user profile is responsive to the smart charging signals with the parameter `responsive` from `smart_charging()` function. For example, we can set that, during working days, **60% of the Worktime users** and **30% of the Visit users** accept to participate to the demand-response program. 
 
+To do that, since now we consider different user profiles for an aggregated grid capacity, the grid capacity limit has to be configured in the `opt_data` as `"grid_capacity"` name:
+
+```{r}
+opt_data <- tibble(
+  datetime = ev_demand$datetime, # Same date-time sequence than the demand
+  grid_capacity
+)
+```
+
+We configure the **responsiveness** of every user profile with the `responsive` parameter. **It's always advised that the responsiveness values are sorted from highest to lowest**:
 
 ```{r}
 sc_results <- ev_sessions %>% 
@@ -176,20 +188,37 @@ sc_results <- ev_sessions %>%
   )
 ```
 
+
 ```{r}
-ev_demand_opt <- sc_results$sessions %>% 
-  get_demand(by = "Profile") 
-```
-
-```{r, echo = F}
-ev_demand_opt %>% 
-  filter(date(datetime) < dmy("07-08-2024")) %>% 
-  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
-  dyLimit(grid_capacity, "Grid capacity", color = "red")
+plot(sc_results, ev_sessions, by = "FlexType")
 ```
 
 
-We see that now the participation of EV users is not enough to reach our objective. If we increase the participation of Worktime users up to 90% then we accomplish with our grid capacity again:
+
+We see that now the participation of EV users is not enough to reach our objective. For a more in-depth analysis we can use function `summarise_smart_charging_sessions()`, which shows the percentage of Considered, Responsive, Flexible and Exploited sessions:
+
+```{r}
+summarise_smart_charging_sessions(sc_results) %>% 
+  knitr::kable()
+```
+
+We can extract the following conclusions from this table:
+
+* The not considered sessions correspond to the 7th August, a day that it's not in the optimization windows
+* The Responsive percentages correspond to the 30% of Visit sessions and 60% of Worktime sessions
+* None of the Flexible Visit sessions are Exploited, so they charge in times where flexibility is not needed
+
+
+
+
+```{r}
+sc_results$sessions %>% 
+  filter(is.na(Responsive))
+```
+
+
+
+If we increase the participation of Worktime users up to 90% then we accomplish with our grid capacity again:
 
 ```{r}
 sc_results <- ev_sessions %>% 
@@ -206,16 +235,9 @@ sc_results <- ev_sessions %>%
 ```
 
 ```{r}
-ev_demand_opt <- sc_results$sessions %>% 
-  get_demand(by = "Profile") 
+plot(sc_results, ev_sessions)
 ```
 
-```{r, echo = F}
-ev_demand_opt %>% 
-  filter(date(datetime) < dmy("07-08-2024")) %>% 
-  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
-  dyLimit(grid_capacity, "Grid capacity", color = "red")
-```
 
 Then we can say that we need at least 90% of the Worktime users to participate if we want to respect our grid constraints.
 

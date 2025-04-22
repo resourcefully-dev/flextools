@@ -70,9 +70,9 @@ The scheduling method is defined by the parameter `method` in the `smart_chargin
 
 To classify a connected EV as a **flexible session** or not, the `flextools` package defines the following conditions according to smart charging method used:
 
-* Postpone: the EV has not started charging yet, and the energy required can be charged during the rest of the connection time at the nominal charging power. From all flexible sessions in a time slot, the ones connecting earlier will have priority over the later sessions.
-* Interrupt: the charge is not completed yet, and the energy required can be charged during the rest of the connection time at the nominal charging power. From all flexible sessions in a time slot, the ones that have been charging during less time will have priority over the sessions that have been already charging (rotation system).
-* Curtail: the charge is not completed yet or will not be completed in the current time slot, and the energy required can be charged during the rest of the connection time at a lower power than the nominal charging power.
+* **Postpone**: the EV has not started charging yet, and the energy required can be charged during the rest of the connection time at the nominal charging power. From all flexible sessions in a time slot, the ones connecting earlier will have priority over the later sessions.
+* **Interrupt**: the charge is not completed yet, and the energy required can be charged during the rest of the connection time at the nominal charging power. From all flexible sessions in a time slot, the ones that have been charging during less time will have priority over the sessions that have been already charging (rotation system).
+* **Curtai**l: the charge is not completed yet or will not be completed in the current time slot, and the energy required can be charged during the rest of the connection time at a lower power than the nominal charging power.
 
 The energy and power constraints of these conditions can also be defined in function `smart_charging()` with the parameters `energy_min` and `charging_power_min`, representing the minimum allowed ratios of the nominal values. More information about using these parameters can be found in article [Advanced smart charging](https://resourcefully-dev.github.io/flextools/articles/smart-charging-advanced.html).
 
@@ -204,17 +204,30 @@ names(sc_results)
 * **sessions**: coordinated EV sessions' data frame according to the setpoint
 * **log**: list with messages about the smart charging algorithm (flexibility needs and availability, sessions modified, etc.). This is empty by default and filled with messages when `include_log = TRUE`.
 
-Moreover, if we print the results we see a summary of the charging sessions that have been participating in the smart charging program, differentiating them between *Responsive*, *Flexible* and *Exploited*:
+Moreover, if we print the results we see a summary of the charging sessions that have been participating in the smart charging program, differentiating them between *Considered*, *Responsive*, *Flexible* and *Exploited*:
 
 ```{r}
 print(sc_results)
 ```
 
-* **Responsive**: charging sessions that accept to participate in the smart charging sessions. The ratio of responsive sessions from every EV user profile can be configured with the `responsive` parameter in the `smart_charging()` function. By default, all charging sessions are responsive.
-* **Flexible**: charging sessions that are flexible in a specific time slot that requires flexibility. This depends on the session's features and the scheduling `method` (as described in the [Scheduling algorithm](https://resourcefully-dev.github.io/flextools/articles/smart_charging.html#scheduling-algorithm) section). If no flexibility is required, then this variable will be `FALSE` even if they could provide flexibility.
-* **Exploited**: charging sessions that have been modified in the scope of the smart charging program. 
+This classification is done by the smart charging algorithm according to the optimization window hours, the `method` and the sessions' features:
 
-Also note that after applying the smart charging, the `sessions` object from the results has a lot more charging sessions. It is not the number of total charging sessions that has increased, but **all flexible sessions have been divided in multiple time slots**. This allows to modify the charging power of every time slot to 0 (postpone or interrupt methods) or between 0 and the nominal power (curtail method).
+* **Considered**: charging sessions that charge within the optimization windows and are not considered outliers (their connection times fit the 95% percentile).
+* **Responsive**: charging sessions that accept to participate in the smart charging program. The ratio of responsive sessions from every EV user profile is configured with the `responsive` parameter.
+* **Flexible**: charging sessions that are flexible in a specific time slot. This depends on the session's features and the scheduling `method` (as described in the [Scheduling algorithm](https://resourcefully-dev.github.io/flextools/articles/smart_charging.html#scheduling-algorithm) section).
+* **Exploited**: charging sessions that have been modified in a a specific time slot. 
+
+The following figure illustrates the classification of sessions according to smart charging program participation:
+
+
+```{r, echo=FALSE}
+#| fig.alt: >
+#|   Smart charging sessions classification
+knitr::include_graphics("sessions_classification.png", dpi = NA)
+```
+
+
+Also note that after applying the smart charging, the `sessions` object from the results has more rows than the original `sessions` object. It is not the number of total charging sessions that has increased, but **all flexible sessions have been divided in multiple time slots**. This allows to modify the charging power of every time slot to 0 (postpone or interrupt methods) or between 0 and the nominal power (curtail method).
 
 In the following example you can see how `Session` "S1" has a different `Power` value in different time slots:
 
@@ -268,12 +281,12 @@ ev_demand %>%
   dyLimit(grid_capacity, "Grid capacity", color = "red")
 ```
 
-Since our peak goes above 18kW, we need to use smart charging to allow the EV users to charge under the grid capacity. In order to define a **grid capacity** in the `smart_charing()` function, a column with the same name than the EV user profile in the `sessions` parameter (in this example "HomeEV") must be found in the `opt_data` parameter. Therefore, a `"HomeEV"` column is added to the `opt_data` object as a setpoint for the EV user profile "HomeEV":
+Since our peak goes above 18kW, we need to use smart charging to allow the EV users to charge under the grid capacity. In order to define a **grid capacity** in the `smart_charing()` function, a column with `"grid_capacity"` name must be found in the `opt_data` parameter:
 
 ```{r}
 opt_data <- tibble(
   datetime = ev_demand$datetime, # Same date-time sequence than the demand
-  HomeEV = grid_capacity
+  grid_capacity
 )
 head(opt_data)
 ```

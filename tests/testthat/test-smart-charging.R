@@ -167,6 +167,13 @@ test_that("using energy_min=0 setpoint can be achieved with curtail", {
 
 # Sessions flex type -----------------------------------------------------
 
+sc_results <- smart_charging(
+  sessions, opt_data, opt_objective = "grid", method = "curtail",
+  window_days = 1, window_start_hour = 6,
+  responsive = list(Workday = list(Worktime = 0.9)),
+  energy_min = 0.5
+)
+
 test_that("smart charging sessions are summarised", {
   sc_results <- smart_charging(
     sessions, opt_data, opt_objective = "grid", method = "curtail",

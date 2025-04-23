@@ -23,7 +23,8 @@ plot_smart_charging(
 \item{by}{character, name of a character column in \code{smart_charging$sessions} of \code{"FlexType"}
 (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")}
 
-\item{...}{extra arguments to pass to dygraphs::dyOptions function}
+\item{...}{extra arguments of function \code{evsim::plot_ts()} or other arguments
+to pass to \code{dygraphs::dyOptions()}.}
 }
 \value{
 dygraphs plot

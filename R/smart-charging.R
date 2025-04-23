@@ -1133,7 +1133,8 @@ print.SmartCharging <- function(x, ...) {
 #' @param show_setpoint logical, whether to show the setpoint line or not
 #' @param by character, name of a character column in `smart_charging$sessions` of `"FlexType"`
 #' (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")
-#' @param ... extra arguments to pass to dygraphs::dyOptions function
+#' @param ... extra arguments of function `evsim::plot_ts()` or other arguments
+#' to pass to `dygraphs::dyOptions()`.
 #'
 #' @return dygraphs plot
 #' @export

@@ -368,15 +368,6 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
         L_fixed_prof <- rep(0, window_prof_length)
       }
 
-      # Other profiles load
-      L_others <- setpoints %>%
-        filter(window_prof_idxs) %>%
-        select(- any_of(c(profile, 'datetime'))) %>%
-        rowSums()
-      if (length(L_others) == 0) {
-        L_others <- rep(0, window_prof_length)
-      }
-
       # The optimization static load consists on buildings, lightning, etc.
       if ('static' %in% colnames(opt_data)) {
         L_fixed <- opt_data$static[window_prof_idxs]
@@ -396,6 +387,15 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
           # The optimization flexible load is the load of the responsive sessions
           L_prof <- setpoints[[profile]][window_prof_idxs] - L_fixed_prof
+
+          # Other profiles load
+          L_others <- setpoints %>%
+            filter(window_prof_idxs) %>%
+            select(- any_of(c(profile, 'datetime'))) %>%
+            rowSums()
+          if (length(L_others) == 0) {
+            L_others <- rep(0, window_prof_length)
+          }
 
           # Optimize the flexible profile's load according to `opt_objective`
           if (opt_objective == "grid") {
@@ -444,13 +444,25 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
           setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
       } else if ("grid_capacity" %in% colnames(opt_data)) {
-        # Limit power profile up to grid capacity
+
+        # Other profiles load
+        # Here we consider `profiles_demand` instead of `setpoint` because we
+        # update it in the scheduling (no optimization, just grid capacity)
+        L_others <- profiles_demand %>%
+          filter(window_prof_idxs) %>%
+          select(- any_of(c(profile, 'datetime'))) %>%
+          rowSums()
+        if (length(L_others) == 0) {
+          L_others <- rep(0, window_prof_length)
+        }
+
+        # Limit power profile up to total grid capacity
         profile_power_limited <- pmin(
           pmax(
             opt_data$grid_capacity[window_prof_idxs] - (L_fixed + L_others),
             0
           ),
-          setpoints[[profile]][window_prof_idxs]
+          profiles_demand[[profile]][window_prof_idxs]
         )
         setpoints[[profile]][window_prof_idxs] <- profile_power_limited
       } else {
@@ -458,10 +470,6 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
           "Error: `opt_objective` is 'none' but no setpoint configured in `opt_data` for Profile", profile
         ))
       }
-
-      # if (profile == "Worktime") {
-      #   browser()
-      # }
 
       # SCHEDULING ----------------------------------------------------------
       if ((method != "none")) {
@@ -472,6 +480,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
         if (include_log) message("------ Scheduling")
 
+        # if (profile == "Visit") browser()
+
         results <- schedule_sessions(
           sessions = sessions_window_prof_flex, setpoint = setpoint_prof,
           method = method, power_th = power_th,
@@ -479,16 +489,23 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
           include_log = include_log, show_progress = FALSE
         )
 
-        # Flexible sessions
-        sessions_considered <- bind_rows(
-          sessions_considered,
-          results$sessions
+        # Final profile sessions
+        sessions_window_prof_final <- bind_rows(
+          results$sessions,
+          non_responsive_sessions
         )
 
-        # Non-responsive sessions
+        # Update the time-series demand
+        sessions_window_prof_final_demand <- get_demand(
+          sessions_window_prof_final, dttm_seq = dttm_seq[window_prof_idxs]
+        )
+        profiles_demand[[profile]][window_prof_idxs] <-
+          sessions_window_prof_final_demand[[profile]]
+
+        # Join with the rest of data set
         sessions_considered <- bind_rows(
           sessions_considered,
-          non_responsive_sessions
+          sessions_window_prof_final
         )
 
         if (include_log) {
@@ -526,8 +543,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   }
 
   results <- list(
-    setpoints = setpoints,
     sessions = sessions_opt,
+    setpoints = setpoints,
+    demand = profiles_demand,
     log = log
   )
 
@@ -1112,6 +1130,7 @@ print.SmartCharging <- function(x, ...) {
 #' @param smart_charging SmartCharging object, returned by function `smart_charging()`
 #' @param sessions tibble, sessions data set containig the following variables:
 #' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`
+#' @param show_setpoint logical, whether to show the setpoint line or not
 #' @param by character, name of a character column in `smart_charging$sessions` of `"FlexType"`
 #' (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")
 #' @param ... extra arguments to pass to dygraphs::dyOptions function
@@ -1160,17 +1179,20 @@ print.SmartCharging <- function(x, ...) {
 #' # Plot by user "Profile"
 #' plot_smart_charging(sc_results, sessions = sessions, by = "Profile", legend_show = "onmouseover")
 #'
-plot_smart_charging <- function(smart_charging, sessions = NULL, by = NULL, ...) {
+plot_smart_charging <- function(smart_charging, sessions = NULL, show_setpoint = TRUE, by = NULL, ...) {
 
   opt_sessions <- smart_charging$sessions
 
   # Create setpoint time-series profile
-  plot_df <- smart_charging$setpoints['datetime'] %>%
-    mutate(
-      Setpoint = rowSums(
-        smart_charging$setpoints[seq(2, ncol(smart_charging$setpoints))]
+  plot_df <- smart_charging$setpoints['datetime']
+
+  if (show_setpoint) {
+    plot_df <- plot_df %>%
+      mutate(
+        Setpoint = rowSums(smart_charging$setpoints[-1])
       )
-    )
+  }
+
 
   # Create flexible demand time-series profile
   if (is.null(by)) {
@@ -1230,10 +1252,13 @@ plot_smart_charging <- function(smart_charging, sessions = NULL, by = NULL, ...)
   }
 
   # Make plot
-
   plot_dy <- plot_df %>%
-    plot_ts(ylab = "Power (kW)", strokeWidth = 2, ...) %>%
-    dySeries("Setpoint", strokePattern = "dashed", color = "red", strokeWidth = 2)
+    plot_ts(ylab = "Power (kW)", strokeWidth = 2, ...)
+
+  if (show_setpoint) {
+    plot_dy <- plot_dy %>%
+      dySeries("Setpoint", strokePattern = "dashed", color = "red", strokeWidth = 2)
+  }
 
   if (is.null(by)) {
     plot_dy <- plot_dy %>%

@@ -4,13 +4,21 @@
 \alias{plot_smart_charging}
 \title{Plot smart charging results}
 \usage{
-plot_smart_charging(smart_charging, sessions = NULL, by = NULL, ...)
+plot_smart_charging(
+  smart_charging,
+  sessions = NULL,
+  show_setpoint = TRUE,
+  by = NULL,
+  ...
+)
 }
 \arguments{
 \item{smart_charging}{SmartCharging object, returned by function \code{smart_charging()}}
 
 \item{sessions}{tibble, sessions data set containig the following variables:
 \code{"Session"}, \code{"Timecycle"}, \code{"Profile"}, \code{"ConnectionStartDateTime"}, \code{"ConnectionHours"}, \code{"Power"} and \code{"Energy"}}
+
+\item{show_setpoint}{logical, whether to show the setpoint line or not}
 
 \item{by}{character, name of a character column in \code{smart_charging$sessions} of \code{"FlexType"}
 (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")}

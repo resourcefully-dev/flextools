@@ -85,7 +85,7 @@ ev_sessions <- simulate_sessions(
 ```{r, echo=FALSE, message=FALSE, warning=FALSE}
 ev_sessions <- readr::read_csv("sessions_user_profiles.csv") %>% 
   mutate_if(is.timepoint, with_tz, "Europe/Amsterdam") %>% 
-  filter(ConnectionStartDateTime <= dmy_hm("06/08/2024 07:00", tz = "Europe/Amsterdam"))
+  filter(ConnectionStartDateTime < dmy_hm("07/08/2024 06:00", tz = "Europe/Amsterdam"))
 ```
 
 
@@ -161,7 +161,7 @@ ev_demand_opt %>%
 
 We can see that the Worktime power demand has been adapted to the non-flexbile users, i.e. Visit user profile, in order to not surpass the capacity limit of 12 kW. 
 
-Moreover, we can define which percentage of every user profile is responsive to the smart charging signals with the parameter `responsive` from `smart_charging()` function. For example, we can set that, during working days, **60% of the Worktime users** and **30% of the Visit users** accept to participate to the demand-response program. 
+Moreover, we can define which percentage of every user profile is responsive to the smart charging signals with the parameter `responsive` from `smart_charging()` function. For example, we can set that, during working days, **60% of the Worktime users** and **20% of the Visit users** accept to participate to the demand-response program. 
 
 To do that, since now we consider different user profiles for an aggregated grid capacity, the grid capacity limit has to be configured in the `opt_data` as `"grid_capacity"` name:
 
@@ -183,19 +183,34 @@ sc_results <- ev_sessions %>%
     window_days = 1, 
     window_start_hour = 6,
     responsive = list(
-      Workdays = list(Worktime = 0.6, Visit = 0.3)
+      Workdays = list(Worktime = 0.6, Visit = 0.2)
     )
   )
 ```
 
-
 ```{r}
-plot(sc_results, ev_sessions, by = "FlexType")
+plot(sc_results, ev_sessions)
 ```
 
+From the plot we see that the grid capacity limit of 12 kW can't be always respected. Also, the setpoint in this plot doesn't make a lot of sense because represents the power limitation of the EV demand, but our setpoint is avoiding a demand higher than 12 kW. The setpoint line in the plot can be removed using the parameter `show_setpoint = FALSE`. 
 
+Is it for the lack of flexibility of the responsive sessions? Or maybe there aren't enough responsive sessions? These questions can be answered by plotting the smart charging results **by flexbility type**:
 
-We see that now the participation of EV users is not enough to reach our objective. For a more in-depth analysis we can use function `summarise_smart_charging_sessions()`, which shows the percentage of Considered, Responsive, Flexible and Exploited sessions:
+```{r}
+plot(sc_results, ev_sessions, by = "FlexType", show_setpoint = FALSE) %>% 
+  dyLimit(grid_capacity, "Grid capacity", color = "red")
+```
+
+The results show that during the hours where the grid capacity is surpassed the demand corresponds to **Exploited** and **Not responsive** sessions. Therefore, **more responsive sessions are needed.**
+
+We can also plot the smart charging results **by user profile** to see that the demand causing the peaks over the grid capacity comes from **non-responsive Visit sessions** from 10:00 to 11:00:
+
+```{r}
+plot(sc_results, ev_sessions, by = "Profile", show_setpoint = FALSE) %>% 
+  dyLimit(grid_capacity, "Grid capacity", color = "red")
+```
+
+For a deeper analysis we can use function `summarise_smart_charging_sessions()`, which shows the percentage of Considered, Responsive, Flexible and Exploited sessions:
 
 ```{r}
 summarise_smart_charging_sessions(sc_results) %>% 
@@ -204,21 +219,12 @@ summarise_smart_charging_sessions(sc_results) %>%
 
 We can extract the following conclusions from this table:
 
-* The not considered sessions correspond to the 7th August, a day that it's not in the optimization windows
-* The Responsive percentages correspond to the 30% of Visit sessions and 60% of Worktime sessions
+* The Responsive percentages correspond to the configured 60% for Worktime and 20% for Visit in the `responsive` parameter (the difference is due to the small amount of sessions in the data)
 * None of the Flexible Visit sessions are Exploited, so they charge in times where flexibility is not needed
+* All Worktime Flexible sessions are Exploited, trying to match the setpoint and adapt to the Visit demand
 
 
-
-
-```{r}
-sc_results$sessions %>% 
-  filter(is.na(Responsive))
-```
-
-
-
-If we increase the participation of Worktime users up to 90% then we accomplish with our grid capacity again:
+If we increase the participation of Worktime users up to 70% then we accomplish with our grid capacity again:
 
 ```{r}
 sc_results <- ev_sessions %>% 
@@ -229,15 +235,16 @@ sc_results <- ev_sessions %>%
     window_days = 1, 
     window_start_hour = 6,
     responsive = list(
-      Workdays = list(Worktime = 0.9, Visit = 0.3)
+      Workdays = list(Worktime = 0.7, Visit = 0.2)
     )
   )
 ```
 
 ```{r}
-plot(sc_results, ev_sessions)
+plot(sc_results, ev_sessions, show_setpoint = FALSE) %>% 
+  dyLimit(grid_capacity, "Grid capacity", color = "red")
 ```
 
 
-Then we can say that we need at least 90% of the Worktime users to participate if we want to respect our grid constraints.
+Then we can say that **we need at least 70% of the Worktime users to participate** in the smart charging program if we want to respect our grid constraints.
 

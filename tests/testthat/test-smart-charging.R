@@ -165,4 +165,34 @@ test_that("using energy_min=0 setpoint can be achieved with curtail", {
   expect_equal(nrow(demand_gt_setpiont), 0)
 })
 
+# Sessions flex type -----------------------------------------------------
+
+test_that("smart charging sessions are summarised", {
+  sc_results <- smart_charging(
+    sessions, opt_data, opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6, energy_min = 0
+  )
+  ss_summary <- summarise_smart_charging_sessions(sc_results)
+  expect_true(nrow(ss_summary) > 0)
+})
+
+
+# Plots -------------------------------------------------------------------
+
+test_that("smart charging results are plotted", {
+  plot <- plot_smart_charging(sc_results, sessions = sessions)
+  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
+
+test_that("smart charging results are plotted with native `plot` function, without setpoint", {
+  plot <- plot(sc_results, sessions = sessions, show_setpoint = FALSE)
+  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
+
+test_that("smart charging results are plotted by `FlexType`", {
+  plot <- plot_smart_charging(sc_results, sessions = sessions, by = "FlexType")
+  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
+
+
 

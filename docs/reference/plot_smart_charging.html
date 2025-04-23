@@ -56,7 +56,13 @@ to plot the original EV demand.</p>
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">plot_smart_charging</span><span class="op">(</span><span class="va">smart_charging</span>, sessions <span class="op">=</span> <span class="cn">NULL</span>, by <span class="op">=</span> <span class="cn">NULL</span>, <span class="va">...</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">plot_smart_charging</span><span class="op">(</span></span>
+<span>  <span class="va">smart_charging</span>,</span>
+<span>  sessions <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  show_setpoint <span class="op">=</span> <span class="cn">TRUE</span>,</span>
+<span>  by <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  <span class="va">...</span></span>
+<span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -70,6 +76,10 @@ to plot the original EV demand.</p>
 <dt id="arg-sessions">sessions<a class="anchor" aria-label="anchor" href="#arg-sessions"></a></dt>
 <dd><p>tibble, sessions data set containig the following variables:
 <code>"Session"</code>, <code>"Timecycle"</code>, <code>"Profile"</code>, <code>"ConnectionStartDateTime"</code>, <code>"ConnectionHours"</code>, <code>"Power"</code> and <code>"Energy"</code></p></dd>
+
+
+<dt id="arg-show-setpoint">show_setpoint<a class="anchor" aria-label="anchor" href="#arg-show-setpoint"></a></dt>
+<dd><p>logical, whether to show the setpoint line or not</p></dd>
 
 
 <dt id="arg-by">by<a class="anchor" aria-label="anchor" href="#arg-by"></a></dt>

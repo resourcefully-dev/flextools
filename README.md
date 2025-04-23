@@ -36,9 +36,8 @@ Since at this moment flextools is not yet in CRAN, you can install the
 the latest development version from GitHub:
 
 ``` r
-# Latest development version
-# install.packages("remotes")
-remotes::install_github("resourcefully-dev/flextools")
+# install.packages("pak")
+pak::pak("resourcefully-dev/flextools")
 ```
 
 ## Getting help
@@ -67,8 +66,7 @@ articles about the algorithms used in this package:
 
 ## Acknowledgements
 
-This work has been developed under a PhD program in the
-[eXiT](https://exit.udg.edu) research group from the University of
-Girona (Catalonia) in collaboration with
-[Resourcefully](https://resourcefully.nl/), an energy transition
-consulting company based in Amsterdam, The Netherlands.
+This work started under a PhD program in the the University of Girona in
+collaboration with [Resourcefully](https://resourcefully.nl/), the
+energy transition consulting company that currently supports the
+development and maintenance.

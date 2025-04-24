@@ -161,6 +161,10 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
                            include_log = FALSE, show_progress = FALSE,
                            lambda = 0, mc.cores = 1) {
 
+  if (show_progress) cli::cli_h1("Set up")
+
+  if (show_progress) cli::cli_progress_step("Checking parameters")
+
   # Parameters check
   if (is.null(sessions) | nrow(sessions) == 0) {
     stop("Error: `sessions` parameter is empty.")
@@ -214,6 +218,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     }
   }
 
+  if (show_progress) cli::cli_progress_step("Defining optimization windows")
+
   # Adapt the data set for the current time resolution
   dttm_seq <- opt_data$datetime
   time_resolution <- get_time_resolution(dttm_seq, units = "mins")
@@ -226,7 +232,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   )
 
   # Get user profiles demand
-  if (include_log) message("Getting EV demand profiles")
+  if (show_progress) cli::cli_progress_step("Calculating EV demand")
   profiles_demand <- get_demand(
     sessions, dttm_seq, mc.cores = mc.cores
   )
@@ -236,22 +242,24 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
 
   # SMART CHARGING ----------------------------------------------------------
-  if (include_log) message("Smart charging:")
+  if (show_progress) cli::cli_h1("Smart charging")
   log <- list()
   sessions_considered <- tibble()
 
   # For each optimization window
   n_windows <- nrow(flex_windows_idx)
+  if (show_progress)
+    cli::cli_progress_step("Simulated {i}/{n_windows} windows: {log_window_name}", spinner = TRUE)
   for (i in seq_len(n_windows)) {
     if (show_progress)
-      cli::cli_progress_step("Simulated {i}/{n_windows} windows.")
+      cli::cli_progress_update()
 
     window <- c(flex_windows_idx$start[i], flex_windows_idx$end[i])
     log_window_name <- as.character(date(dttm_seq[window[1]]))
     log[[log_window_name]] <- list() # In the `log` object even though `include_log = FALSE`
-    if (include_log) {
-      message(paste("--", log_window_name))
-    }
+    # if (include_log) {
+    #   message(paste("--", log_window_name))
+    # }
 
     # Filter only sessions that START CHARGING within the time window
     sessions_window <- sessions %>%
@@ -284,7 +292,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     # For each optimization profile
     for (profile in opt_profiles) {
 
-      if (include_log) message(paste("----", profile))
+      # if (include_log) message(paste("----", profile))
 
       # Filter only sessions of this Profile
       sessions_window_prof <- sessions_window %>%
@@ -383,7 +391,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
       } else if (opt_objective != "none") {
 
-          if (include_log) message("------ Optimization")
+          # if (show_progress) cli::cli_h2("Setpoint optimization")
 
           # The optimization flexible load is the load of the responsive sessions
           L_prof <- setpoints[[profile]][window_prof_idxs] - L_fixed_prof
@@ -478,9 +486,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
           setpoint = setpoints[[profile]][window_prof_idxs] - L_fixed_prof
         )
 
-        if (include_log) message("------ Scheduling")
-
-        # if (profile == "Visit") browser()
+        # if (show_progress) cli::cli_h2("Scheduling")
 
         results <- schedule_sessions(
           sessions = sessions_window_prof_flex, setpoint = setpoint_prof,
@@ -514,6 +520,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       }
     }
   }
+
+  if (show_progress) cli::cli_progress_step("Cleaning data set")
 
   if (method == "none") {
     sessions_opt <- sessions
@@ -594,9 +602,14 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
                               charging_power_min = 0.5, energy_min = 1,
                               include_log = FALSE, show_progress = TRUE) {
+
+  if (show_progress) cli::cli_h1("Scheduling charging sessions")
+
   log <- c()
 
   # Parameters check
+  if (show_progress) cli::cli_progress_step("Checking parameters")
+
   if (is.null(sessions) | nrow(sessions) == 0) {
     stop("Error: `sessions` parameter is empty.")
   }
@@ -612,6 +625,11 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
   if(!(method %in% c("postpone", "interrupt", "curtail"))) {
     stop("Error: `method` not valid (see Arguments description)")
   }
+
+  resolution <- get_time_resolution(setpoint$datetime, units = "mins")
+  dttm_tz <- tz(setpoint$datetime)
+
+  if (show_progress) cli::cli_progress_step("Preparing sessions data set")
 
   sessions_sch <- sessions %>%
     filter(.data$ConnectionStartDateTime %in% setpoint$datetime) %>%
@@ -634,7 +652,6 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     return( NULL )
   }
 
-  resolution <- get_time_resolution(setpoint$datetime, units = "mins")
   sessions_expanded <- sessions_sch %>%
     expand_sessions(resolution = resolution)
   sessions_expanded <- sessions_expanded %>%
@@ -649,12 +666,12 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       by = "Session"
     )
 
-  dttm_tz <- tz(setpoint$datetime)
 
   if (show_progress)
-    cli::cli_progress_bar("Simulating timeslots", total = nrow(setpoint))
+    cli::cli_progress_step("Simulating timeslot: {timeslot_dttm}", spinner = TRUE)
 
   for (timeslot in setpoint$datetime) {
+    timeslot_dttm <- as_datetime(timeslot, tz=dttm_tz)
 
     if (show_progress)
       cli::cli_progress_update()
@@ -760,12 +777,12 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
       if (include_log) {
         log_message <- paste(
-          as_datetime(timeslot, tz=dttm_tz),
+          timeslot_dttm,
           "- Flexibility requirement of", flex_req, "kW and",
           nrow(sessions_timeslot), "potentially flexible sessions."
         )
 
-        message(log_message)
+        # message(log_message)
         log <- c(
           log,
           log_message
@@ -826,7 +843,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
             log_message <- paste0(
               " -- Not enough flexibility available (", shift_flex_available, " kW)"
             )
-            message(log_message)
+            # message(log_message)
             log <- c(
               log,
               log_message
@@ -875,7 +892,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
             log_message <- paste0(
               " -- Not enough flexibility available (", flex_provided, " kW)"
             )
-            message(log_message)
+            # message(log_message)
             log <- c(
               log,
               log_message
@@ -981,7 +998,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           }
         }
 
-        message(log_message)
+        # message(log_message)
         log <- c(
           log,
           log_message
@@ -989,6 +1006,8 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       }
     }
   }
+
+  if (show_progress) cli::cli_progress_step("Cleaning data set")
 
   # Update the sessions data set with all variables from the original data set
   sessions_segmented <- sessions_expanded %>%
@@ -1290,6 +1309,100 @@ plot_smart_charging <- function(smart_charging, sessions = NULL, show_setpoint =
 #'
 plot.SmartCharging <- function(x, ...) {
   plot_smart_charging(x, ...)
+}
+
+
+
+# Log viewer --------------------------------------------------------------
+
+#' Interactive Log Viewer
+#'
+#' Launches an interactive Shiny app to explore smart charging logs by window and profile.
+#' This function requires the `shiny` package to be installed.
+#'
+#' @param smart_charging `SmartCharging` object returned by `smart_charging`  function
+#'
+#' @return Opens Viewer with the log viewer mini app
+#' @export
+#' @examples
+#' \dontrun{
+#' library(dplyr)
+#' sessions <- evsim::california_ev_sessions_profiles %>%
+#'   slice_head(n = 50) %>%
+#'   evsim::adapt_charging_features(time_resolution = 15)
+#' sessions_demand <- evsim::get_demand(sessions, resolution = 15)
+#'
+#' # Don't require any other variable than datetime, since we don't
+#' # care about local generation (just peak shaving objective)
+#' opt_data <- tibble(
+#'   datetime = sessions_demand$datetime,
+#'   production = 0
+#' )
+#'
+#' sc_results <- smart_charging(
+#'   sessions, opt_data,
+#'   opt_objective = "grid",
+#'   method = "curtail",
+#'   window_days = 1, window_start_hour = 6,
+#'   include_log = TRUE
+#' )
+#' view_logs(sc_results$log)
+#' }
+view_logs <- function(smart_charging) {
+
+  log <- smart_charging$log
+
+  if (length(log) == 0) {
+    stop("Error: no log messages to visualise.")
+  }
+
+  # Check for required packages
+  if (!requireNamespace("shiny", quietly = TRUE)) {
+    stop("The 'shiny' package is required to use this function. Please install it with:\ninstall.packages('shiny')", call. = FALSE)
+  }
+  if (!requireNamespace("miniUI", quietly = TRUE)) {
+    stop("The 'miniUI' package is required to use this function. Please install it with:\ninstall.packages('miniUI')", call. = FALSE)
+  }
+
+  ui <- miniUI::miniPage(
+    miniUI::gadgetTitleBar("Smart Charging Log Viewer"),
+    miniUI::miniContentPanel(
+      shiny::fluidRow(
+        shiny::column(
+          6,
+          shiny::selectInput("selected_window", "Select Window", choices = names(log))
+        ),
+        shiny::column(
+          6,
+          shiny::uiOutput("profile_selector")  # Dynamically generated profile list
+        )
+      ),
+      shiny::verbatimTextOutput("log_output")
+    )
+  )
+
+  server <- function(input, output, session) {
+
+    # Update profile list based on selected window
+    output$profile_selector <- shiny::renderUI({
+      shiny::req(input$selected_window)
+      profiles <- names(log[[input$selected_window]])
+      if (is.null(profiles)) return("No logs for this window.")
+      shiny::selectInput("selected_profile", "Select Profile", choices = profiles)
+    })
+
+    # Show logs based on both selections
+    output$log_output <- shiny::renderText({
+      shiny::req(input$selected_window, input$selected_profile)
+      msgs <- log[[input$selected_window]][[input$selected_profile]]
+      if (is.null(msgs)) return("No logs for this profile.")
+      paste(msgs, collapse = "\n")
+    })
+
+    shiny::observeEvent(input$done, shiny::stopApp())
+  }
+
+  shiny::runGadget(ui, server, viewer = shiny::paneViewer())
 }
 
 

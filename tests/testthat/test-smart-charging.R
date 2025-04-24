@@ -63,7 +63,7 @@ test_that("Get error when no user profiles in `opt_data` and not optimization", 
     sessions, opt_data, opt_objective = "none", method = "curtail",
     window_days = 1, window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
-    charging_power_min = 2, include_log = TRUE, show_progress = TRUE
+    charging_power_min = 2
   ))
 })
 
@@ -72,7 +72,7 @@ test_that("smart charging works with grid objective, postpone method with power_
     sessions, opt_data, opt_objective = "grid", method = "postpone",
     window_days = 1, window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
-    power_th = 0.2, mc.cores = 2, include_log = F
+    power_th = 0.2, mc.cores = 2
   )
   print(sc_results) # Check print as well
   expect_type(sc_results, "list")
@@ -95,7 +95,7 @@ test_that("smart charging works with combined objective, curtail method and min 
     sessions, opt_data, opt_objective = 0.5, method = "curtail",
     window_days = 1, window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
-    charging_power_min = 0.5, show_progress = F
+    charging_power_min = 0.5
   )
   expect_type(sc_results, "list")
 })
@@ -106,7 +106,7 @@ test_that("smart charging works without optimization, curtail method and min cha
     sessions, opt_data, opt_objective = "none", method = "curtail",
     window_days = 1, window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
-    charging_power_min = 2, include_log = F, show_progress = F
+    charging_power_min = 2, include_log = F
   )
   expect_type(sc_results, "list")
 })
@@ -202,4 +202,17 @@ test_that("smart charging results are plotted by `FlexType`", {
 })
 
 
+# Log viewer --------------------------------------------------------------
+
+sc_results <- smart_charging(
+  sessions, opt_data, opt_objective = "grid", method = "curtail",
+  window_days = 1, window_start_hour = 6,
+  responsive = list(Workday = list(Worktime = 0.9)),
+  energy_min = 0.5, include_log = TRUE, show_progress = TRUE
+)
+
+test_that("smart charging results are plotted by `FlexType`", {
+  log_viewer <- view_logs(sc_results, sessions = sessions, by = "FlexType")
+  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
 

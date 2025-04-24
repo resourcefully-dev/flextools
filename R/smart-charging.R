@@ -1131,8 +1131,8 @@ print.SmartCharging <- function(x, ...) {
 #' @param sessions tibble, sessions data set containig the following variables:
 #' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`
 #' @param show_setpoint logical, whether to show the setpoint line or not
-#' @param by character, name of a character column in `smart_charging$sessions` of `"FlexType"`
-#' (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")
+#' @param by character, name of a character column in `smart_charging$sessions` (e.g. `"Profile"`) or
+#' `"FlexType"` (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")
 #' @param ... extra arguments of function `evsim::plot_ts()` or other arguments
 #' to pass to `dygraphs::dyOptions()`.
 #'

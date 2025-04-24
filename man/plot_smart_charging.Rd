@@ -20,8 +20,8 @@ plot_smart_charging(
 
 \item{show_setpoint}{logical, whether to show the setpoint line or not}
 
-\item{by}{character, name of a character column in \code{smart_charging$sessions} of \code{"FlexType"}
-(i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")}
+\item{by}{character, name of a character column in \code{smart_charging$sessions} (e.g. \code{"Profile"}) or
+\code{"FlexType"} (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")}
 
 \item{...}{extra arguments of function \code{evsim::plot_ts()} or other arguments
 to pass to \code{dygraphs::dyOptions()}.}

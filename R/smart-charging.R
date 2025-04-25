@@ -248,8 +248,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
   # For each optimization window
   n_windows <- nrow(flex_windows_idx)
+  log_window_name <- NULL
   if (show_progress)
-    cli::cli_progress_step("Simulated {i}/{n_windows} windows: {log_window_name}", spinner = TRUE)
+    cli::cli_progress_step("Simulating window: {log_window_name}", spinner = TRUE)
   for (i in seq_len(n_windows)) {
     if (show_progress)
       cli::cli_progress_update()
@@ -667,11 +668,19 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     )
 
 
+  timeslot_dttm <- NULL
   if (show_progress)
     cli::cli_progress_step("Simulating timeslot: {timeslot_dttm}", spinner = TRUE)
 
   for (timeslot in setpoint$datetime) {
-    timeslot_dttm <- as_datetime(timeslot, tz=dttm_tz)
+    timeslot_dttm <- format(as_datetime(timeslot, tz=dttm_tz), "%d/%m/%Y %H:%M")
+
+    if (include_log) {
+      log <- c(
+        log,
+        paste("──", timeslot_dttm, "──────────────────────────────────────────────────")
+      )
+    }
 
     if (show_progress)
       cli::cli_progress_update()
@@ -776,10 +785,9 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     if (flex_req > 0) {
 
       if (include_log) {
-        log_message <- paste(
-          timeslot_dttm,
-          "- Flexibility requirement of", flex_req, "kW and",
-          nrow(sessions_timeslot), "potentially flexible sessions."
+        log_message <- c(
+          paste("ℹ Flexibility requirement of", flex_req, "kW"),
+          paste("ℹ", nrow(sessions_timeslot), "potentially flexible sessions")
         )
 
         # message(log_message)
@@ -841,7 +849,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
           if (include_log) {
             log_message <- paste0(
-              " -- Not enough flexibility available (", shift_flex_available, " kW)"
+              "✖ Not enough flexibility available (", shift_flex_available, " kW)"
             )
             # message(log_message)
             log <- c(
@@ -890,7 +898,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
             sum(sessions_timeslot$Power[sessions_timeslot$Exploited]), 2)
           if (flex_provided < flex_req) {
             log_message <- paste0(
-              " -- Not enough flexibility available (", flex_provided, " kW)"
+              "✖ Not enough flexibility available (", flex_provided, " kW)"
             )
             # message(log_message)
             log <- c(
@@ -980,7 +988,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           original_flexibility <- sessions_sch$FlexibilityHours[sessions$Session == exploited_sessions$Session[s]]
           pct_flexibility_available <- round(session_flexibility_hours/original_flexibility*100, 1)
           log_message <- paste0(
-            "---- Session ", exploited_sessions$Session[s], " shifted (",
+            "| ✔ Session ", exploited_sessions$Session[s], " shifted (",
             exploited_sessions$PowerTimeslot[s], " kW, ",
             pct_flexibility_available, "% of flexible time still available)"
           )
@@ -989,7 +997,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           if (power_reduction > 0) {
             pct_power_reduction <- round(power_reduction/exploited_sessions$PowerTimeslot[s]*100, 1)
             log_message <- paste0(
-              "---- Session ", exploited_sessions$Session[s],
+              "| ✔ Session ", exploited_sessions$Session[s],
               " provides ", power_reduction, " kW of flexibility (",
               pct_power_reduction, "% power reduction)"
             )
@@ -998,7 +1006,6 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           }
         }
 
-        # message(log_message)
         log <- c(
           log,
           log_message
@@ -1364,20 +1371,32 @@ view_logs <- function(smart_charging) {
     stop("The 'miniUI' package is required to use this function. Please install it with:\ninstall.packages('miniUI')", call. = FALSE)
   }
 
-  ui <- miniUI::miniPage(
-    miniUI::gadgetTitleBar("Smart Charging Log Viewer"),
-    miniUI::miniContentPanel(
-      shiny::fluidRow(
-        shiny::column(
-          6,
-          shiny::selectInput("selected_window", "Select Window", choices = names(log))
-        ),
-        shiny::column(
-          6,
-          shiny::uiOutput("profile_selector")  # Dynamically generated profile list
-        )
+  # ui <- miniUI::miniPage(
+  #   miniUI::gadgetTitleBar("Smart Charging Log Viewer"),
+  #   miniUI::miniContentPanel(
+  #     shiny::fluidRow(
+  #       shiny::column(
+  #         6,
+  #         shiny::selectInput("selected_window", "Select Window", choices = names(log))
+  #       ),
+  #       shiny::column(
+  #         6,
+  #         shiny::uiOutput("profile_selector")  # Dynamically generated profile list
+  #       )
+  #     ),
+  #     shiny::verbatimTextOutput("log_output")
+  #   )
+  # )
+
+  ui <- shiny::fluidPage(
+    shiny::sidebarLayout(
+      shiny::sidebarPanel(
+        shiny::selectInput("selected_window", "Select Window", choices = names(log)),
+        shiny::uiOutput("profile_selector")  # Dynamically generated profile list
       ),
-      shiny::verbatimTextOutput("log_output")
+      shiny::mainPanel(
+        shiny::verbatimTextOutput("log_output")
+      )
     )
   )
 

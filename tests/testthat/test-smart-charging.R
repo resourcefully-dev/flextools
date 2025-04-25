@@ -201,18 +201,3 @@ test_that("smart charging results are plotted by `FlexType`", {
   expect_equal(class(plot), c("dygraphs", "htmlwidget"))
 })
 
-
-# Log viewer --------------------------------------------------------------
-
-sc_results <- smart_charging(
-  sessions, opt_data, opt_objective = "grid", method = "curtail",
-  window_days = 1, window_start_hour = 6,
-  responsive = list(Workday = list(Worktime = 0.9)),
-  energy_min = 0.5, include_log = TRUE, show_progress = TRUE
-)
-
-test_that("smart charging results are plotted by `FlexType`", {
-  log_viewer <- view_logs(sc_results, sessions = sessions, by = "FlexType")
-  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
-})
-

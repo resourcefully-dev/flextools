@@ -13,6 +13,14 @@ opt_data <- tibble(
   production = 0
 )
 
+# # To test log viewer
+# sc_results <- smart_charging(
+#   sessions, opt_data, opt_objective = "grid", method = "curtail",
+#   window_days = 1, window_start_hour = 6, energy_min = 0,
+#   include_log = TRUE, show_progress = TRUE
+# )
+# view_smart_charging_logs(sc_results)
+
 test_that("Get error when missing `sessions`", {
   expect_error(
     smart_charging(

@@ -28,16 +28,16 @@
 #' - `production`: local power generation (in kW).
 #' This is used when `opt_objective = "grid"`.
 #'
-#' - `price_imported`: price for imported energy (€/kWh).
+#' - `price_imported`: price for imported energy (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' - `price_exported`: price for exported energy (€/kWh).
+#' - `price_exported`: price for exported energy (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' - `price_turn_down`: price for turn-down energy use (€/kWh).
+#' - `price_turn_down`: price for turn-down energy use (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' - `price_turn_up`: price for turn-up energy use (€/kWh).
+#' - `price_turn_up`: price for turn-up energy use (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
 #' If columns of `opt_data` are user profiles names, these are used as setpoints
@@ -678,7 +678,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     if (include_log) {
       log <- c(
         log,
-        paste("──", timeslot_dttm, "──────────────────────────────────────────────────")
+        paste("\u2500\u2500", timeslot_dttm, "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500")
       )
     }
 
@@ -786,8 +786,8 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
       if (include_log) {
         log_message <- c(
-          paste("ℹ Flexibility requirement of", flex_req, "kW"),
-          paste("ℹ", nrow(sessions_timeslot), "potentially flexible sessions")
+          paste("\u2139 Flexibility requirement of", flex_req, "kW"),
+          paste("\u2139", nrow(sessions_timeslot), "potentially flexible sessions")
         )
 
         # message(log_message)
@@ -849,7 +849,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 
           if (include_log) {
             log_message <- paste0(
-              "✖ Not enough flexibility available (", shift_flex_available, " kW)"
+              "\u2716 Not enough flexibility available (", shift_flex_available, " kW)"
             )
             # message(log_message)
             log <- c(
@@ -898,7 +898,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
             sum(sessions_timeslot$Power[sessions_timeslot$Exploited]), 2)
           if (flex_provided < flex_req) {
             log_message <- paste0(
-              "✖ Not enough flexibility available (", flex_provided, " kW)"
+              "\u2716 Not enough flexibility available (", flex_provided, " kW)"
             )
             # message(log_message)
             log <- c(
@@ -988,7 +988,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           original_flexibility <- sessions_sch$FlexibilityHours[sessions$Session == exploited_sessions$Session[s]]
           pct_flexibility_available <- round(session_flexibility_hours/original_flexibility*100, 1)
           log_message <- paste0(
-            "| ✔ Session ", exploited_sessions$Session[s], " shifted (",
+            "| \u2714 Session ", exploited_sessions$Session[s], " shifted (",
             exploited_sessions$PowerTimeslot[s], " kW, ",
             pct_flexibility_available, "% of flexible time still available)"
           )
@@ -997,7 +997,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           if (power_reduction > 0) {
             pct_power_reduction <- round(power_reduction/exploited_sessions$PowerTimeslot[s]*100, 1)
             log_message <- paste0(
-              "| ✔ Session ", exploited_sessions$Session[s],
+              "| \u2714 Session ", exploited_sessions$Session[s],
               " provides ", power_reduction, " kW of flexibility (",
               pct_power_reduction, "% power reduction)"
             )
@@ -1355,7 +1355,7 @@ plot.SmartCharging <- function(x, ...) {
 #' )
 #' view_logs(sc_results$log)
 #' }
-view_logs <- function(smart_charging) {
+view_smart_charging_logs <- function(smart_charging) {
 
   log <- smart_charging$log
 

@@ -27,6 +27,7 @@ reference:
     - schedule_sessions
     - plot_smart_charging
     - summarise_smart_charging_sessions
+    - view_smart_charging_logs
   - title: Battery
   - contents:
     - add_battery_simple

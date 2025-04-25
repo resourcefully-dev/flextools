@@ -38,13 +38,13 @@ offices, etc.
 for example the contracted power with the energy company.
 \item \code{production}: local power generation (in kW).
 This is used when \code{opt_objective = "grid"}.
-\item \code{price_imported}: price for imported energy (€/kWh).
+\item \code{price_imported}: price for imported energy (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
-\item \code{price_exported}: price for exported energy (€/kWh).
+\item \code{price_exported}: price for exported energy (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
-\item \code{price_turn_down}: price for turn-down energy use (€/kWh).
+\item \code{price_turn_down}: price for turn-down energy use (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
-\item \code{price_turn_up}: price for turn-up energy use (€/kWh).
+\item \code{price_turn_up}: price for turn-up energy use (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
 }
 

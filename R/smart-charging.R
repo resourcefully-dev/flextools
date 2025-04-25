@@ -1245,19 +1245,21 @@ plot_smart_charging <- function(smart_charging, sessions = NULL, show_setpoint =
           )
         )
 
-      ribbon_names <- c("Not considered", "Not responsive", "Not flexible", "Not exploited", "Exploited")
-      ribbon_colors <- c("#660066", "#003366", "#003300", "#663300", "#ff9900")
-      flextypes_in_data <- which(ribbon_names %in% unique(opt_sessions$FlexType))
-      ribbon_names <- ribbon_names[flextypes_in_data]
-      ribbon_colors <- ribbon_colors[flextypes_in_data]
-    } else {
-      ribbon_names <- unique(opt_sessions[[by]])
-      ribbon_colors <- NULL
+      ribbon_names_all <- c("Not considered", "Not responsive", "Not flexible", "Not exploited", "Exploited")
+      ribbon_colors_all <- c("#660066", "#003366", "#003300", "#663300", "#ff9900")
     }
 
     if (by %in% colnames(select_if(opt_sessions, is.character))) {
       ev_demand_flex <- opt_sessions %>%
         get_demand(dttm_seq = plot_df$datetime, by = by)
+      if (by == "FlexType") {
+        flextypes_in_data <- which(ribbon_names_all %in% colnames(ev_demand_flex))
+        ribbon_names <- ribbon_names_all[flextypes_in_data]
+        ribbon_colors <- ribbon_colors_all[flextypes_in_data]
+      } else {
+        ribbon_names <- unique(opt_sessions[[by]])
+        ribbon_colors <- NULL
+      }
     } else {
       stop("Error: invalid `by` value")
     }

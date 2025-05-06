@@ -37,7 +37,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
     opt_data$load_capacity <- Inf
   }
 
-  if (!(opt_objective %in% c("grid", "cost")) & !is.numeric(opt_objective)) {
+  if (!(opt_objective %in% c("grid", "cost", "none")) & !is.numeric(opt_objective)) {
     stop("Error: `opt_objective` not valid")
   }
 

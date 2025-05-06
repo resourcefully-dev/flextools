@@ -185,14 +185,16 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   if (!any(sessions$ConnectionStartDateTime %in% opt_data$datetime)) {
     stop("Error: `sessions` do not charge during `datetime` period in `opt_data`")
   }
-  if (opt_objective != "none") {
-    opt_data$flexible <- 0
-    opt_data <- check_optimization_data(opt_data, opt_objective)
-  } else {
-    if (!any(c(unique(sessions$Profile), "grid_capacity") %in% names(opt_data))) {
-      stop('Error: when `opt_objective` = "none" you must set a setpoint in `opt_data` with "grid_capacity" or a user profile name.')
+
+  if (opt_objective == "none") {
+    if (!any(c(unique(sessions$Profile), "grid_capacity", "import_capacity", "export_capacity") %in% names(opt_data))) {
+      stop('Error: when `opt_objective` = "none" you must set a setpoint in `opt_data` with grid capacity or a user profile name.')
     }
   }
+
+  opt_data$flexible <- 0
+  opt_data <- check_optimization_data(opt_data, opt_objective)
+
   if (is.null(responsive)) {
     responsive <- map(
       set_names(unique(sessions$Timecycle)),
@@ -443,7 +445,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
           }
 
           setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
-      } else if ("grid_capacity" %in% colnames(opt_data)) {
+      } else if ("import_capacity" %in% colnames(opt_data)) {
 
         # Other profiles load
         # Here we consider `profiles_demand` instead of `setpoint` because we
@@ -459,7 +461,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
         # Limit power profile up to total grid capacity
         profile_power_limited <- pmin(
           pmax(
-            opt_data$grid_capacity[window_prof_idxs] - (L_fixed + L_others),
+            opt_data$import_capacity[window_prof_idxs] - (L_fixed + L_others),
             0
           ),
           profiles_demand[[profile]][window_prof_idxs]

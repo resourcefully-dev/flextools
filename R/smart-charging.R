@@ -189,8 +189,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     opt_data$flexible <- 0
     opt_data <- check_optimization_data(opt_data, opt_objective)
   } else {
-    if (!any(c(unique(sessions$Profile), "grid_capacity") %in% names(opt_data))) {
-      stop('Error: when `opt_objective` = "none" you must set a setpoint in `opt_data` with "grid_capacity" or a user profile name.')
+    if (!any(c(unique(sessions$Profile), "grid_capacity", "import_capacity", "export_capacity") %in% names(opt_data))) {
+      stop('Error: when `opt_objective` = "none" you must set a setpoint in `opt_data` with grid capacity or a user profile name.')
     }
   }
   if (is.null(responsive)) {

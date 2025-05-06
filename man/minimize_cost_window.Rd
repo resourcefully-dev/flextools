@@ -15,7 +15,8 @@ minimize_cost_window(
   direction,
   time_horizon,
   LFmax,
-  grid_capacity,
+  import_capacity,
+  export_capacity,
   lambda = 0
 )
 }
@@ -40,7 +41,9 @@ minimize_cost_window(
 
 \item{LFmax}{numeric, value of maximum power (in kW) of the flexible load \code{LF}}
 
-\item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
+\item{import_capacity}{numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand}
+
+\item{export_capacity}{numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
 }

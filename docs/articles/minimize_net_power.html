@@ -143,11 +143,11 @@ the expected behavior:</li>
 </annotation></semantics></math></p>
 <ul>
 <li>The energy balance between generation and loads must be lower than
-the grid capacity
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">GC_t</annotation></semantics></math>:</li>
+the grid import capacity
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>O</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-O_t + LS_t - G_t \le GC_t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>O</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+O_t + LS_t - G_t \le IC_t \quad t \in T
 </annotation></semantics></math></p>
 <p>At the same time, we can optimize the flexible energy demand with two
 opposite approaches:</p>
@@ -294,12 +294,14 @@ beginning of every optimization window:</li>
 \sum_{t=1}^T B_t \Delta t = 0
 </annotation></semantics></math></p>
 <ul>
-<li>The energy balance between generation and loads must be lower than
-the grid capacity
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">GC_t</annotation></semantics></math>:</li>
+<li>The energy balance of generation and loads must be between the
+import capacity
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>
+and export capacity
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>t</mi></msub><mo>+</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
--GC_t \le B_t + L_t - G_t \le GC_t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>t</mi></msub><mo>+</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+-EC_t \le B_t + L_t - G_t \le IC_t \quad t \in T
 </annotation></semantics></math></p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

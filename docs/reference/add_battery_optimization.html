@@ -80,7 +80,9 @@ The first column must be named <code>datetime</code> (mandatory) containing the
 date time sequence where the optimization algorithm is applied.
 The other columns can be (optional):</p><ul><li><p><code>static</code>: static power demand (in kW) from other sectors like buildings,
 offices, etc.</p></li>
-<li><p><code>grid_capacity</code>: maximum imported power from the grid (in kW),
+<li><p><code>import_capacity</code>: maximum imported power from the grid (in kW),
+for example the contracted power with the energy company.</p></li>
+<li><p><code>export_capacity</code>: maximum exported power from the grid (in kW),
 for example the contracted power with the energy company.</p></li>
 <li><p><code>production</code>: local power generation (in kW).
 This is used when <code>opt_objective = "grid"</code>.</p></li>

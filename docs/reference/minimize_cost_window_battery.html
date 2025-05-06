@@ -63,7 +63,8 @@
 <span>  <span class="va">SOCmin</span>,</span>
 <span>  <span class="va">SOCmax</span>,</span>
 <span>  <span class="va">SOCini</span>,</span>
-<span>  <span class="va">grid_capacity</span>,</span>
+<span>  <span class="va">import_capacity</span>,</span>
+<span>  <span class="va">export_capacity</span>,</span>
 <span>  lambda <span class="op">=</span> <span class="fl">0</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -120,8 +121,12 @@
 <dd><p>numeric, required State-of-Charge at the beginning/end of optimization window</p></dd>
 
 
-<dt id="arg-grid-capacity">grid_capacity<a class="anchor" aria-label="anchor" href="#arg-grid-capacity"></a></dt>
-<dd><p>numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand</p></dd>
+<dt id="arg-import-capacity">import_capacity<a class="anchor" aria-label="anchor" href="#arg-import-capacity"></a></dt>
+<dd><p>numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power</p></dd>
+
+
+<dt id="arg-export-capacity">export_capacity<a class="anchor" aria-label="anchor" href="#arg-export-capacity"></a></dt>
+<dd><p>numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power</p></dd>
 
 
 <dt id="arg-lambda">lambda<a class="anchor" aria-label="anchor" href="#arg-lambda"></a></dt>

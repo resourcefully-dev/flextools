@@ -308,29 +308,17 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       #   1. Charging end time inside the optimization window
       end_charge_window <- sessions_window_prof$ChargingEndDateTime <= dttm_seq[window[2]]
 
-      #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
-      #       This is done only if optimization is used to find a setpoint
-      if (opt_objective != "none") {
-        start_time_mean <- mean(as.numeric(sessions_window_prof$ConnectionStartDateTime))
-        start_time_sd <- sd(as.numeric(sessions_window_prof$ConnectionStartDateTime))
-        end_time_mean <- mean(as.numeric(sessions_window_prof$ConnectionEndDateTime))
-        end_time_sd <- sd(as.numeric(sessions_window_prof$ConnectionEndDateTime))
-        not_outliers <- between(
-          as.numeric(sessions_window_prof$ConnectionStartDateTime),
-          round_to_interval(start_time_mean - 2*start_time_sd, time_resolution*60),
-          round_to_interval(start_time_mean + 2*start_time_sd, time_resolution*60)
-        ) &
-          between(
-            as.numeric(sessions_window_prof$ConnectionEndDateTime),
-            round_to_interval(end_time_mean - 2*end_time_sd, time_resolution*60),
-            round_to_interval(end_time_mean + 2*end_time_sd, time_resolution*60)
-          )
-      } else {
-        not_outliers <- TRUE
-      }
+      # #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
+      # #       This is done only if optimization is used to find a setpoint
+      # if (opt_objective != "none") {
+      #   not_outliers <- get_window_not_outliers(sessions_window_prof, pct = 95, time_resolution)
+      # } else {
+      #   not_outliers <- TRUE
+      # }
 
       # Sessions that are "potentially responsive":
-      potentially_responsive_idx <- which(end_charge_window & not_outliers)
+      # potentially_responsive_idx <- which(end_charge_window & not_outliers)
+      potentially_responsive_idx <- which(end_charge_window)
 
       # From the potentially responsive sessions select randomly the configured
       # number of `responsive` sessions:
@@ -415,7 +403,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
               direction = 'forward',
               time_horizon = NULL,
               LFmax = Inf,
-              grid_capacity = opt_data$grid_capacity[window_prof_idxs],
+              import_capacity = opt_data$import_capacity[window_prof_idxs],
+              export_capacity = opt_data$export_capacity[window_prof_idxs],
               lambda = lambda
             )
           } else if (opt_objective == "cost") {
@@ -430,7 +419,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
               direction = 'forward',
               time_horizon = NULL,
               LFmax = Inf,
-              grid_capacity = opt_data$grid_capacity[window_prof_idxs],
+              import_capacity = opt_data$import_capacity[window_prof_idxs],
+              export_capacity = opt_data$export_capacity[window_prof_idxs],
               lambda = lambda
             )
           } else if (is.numeric(opt_objective)) {
@@ -445,7 +435,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
               direction = 'forward',
               time_horizon = NULL,
               LFmax = Inf,
-              grid_capacity = opt_data$grid_capacity[window_prof_idxs],
+              import_capacity = opt_data$import_capacity[window_prof_idxs],
+              export_capacity = opt_data$export_capacity[window_prof_idxs],
               w = opt_objective,
               lambda = lambda
             )
@@ -1048,6 +1039,32 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
 }
 
 
+# Window outliers ---------------------------------------------------------
+
+get_sd_factor <- function(pct = 95) {
+  stats::qnorm(1 - (1 - pct / 100) / 2)
+}
+
+get_window_not_outliers <- function(sessions, pct, time_resolution) {
+  sd_factor <- get_sd_factor(pct)
+  start_time_mean <- mean(as.numeric(sessions$ConnectionStartDateTime))
+  start_time_sd <- sd(as.numeric(sessions$ConnectionStartDateTime))
+  end_time_mean <- mean(as.numeric(sessions$ConnectionEndDateTime))
+  end_time_sd <- sd(as.numeric(sessions$ConnectionEndDateTime))
+  not_outliers <- dplyr::between(
+    as.numeric(sessions$ConnectionStartDateTime),
+    round_to_interval(start_time_mean - sd_factor*start_time_sd, time_resolution*60),
+    round_to_interval(start_time_mean + sd_factor*start_time_sd, time_resolution*60)
+  ) &
+    dplyr::between(
+      as.numeric(sessions$ConnectionEndDateTime),
+      round_to_interval(end_time_mean - sd_factor*end_time_sd, time_resolution*60),
+      round_to_interval(end_time_mean + sd_factor*end_time_sd, time_resolution*60)
+    )
+  not_outliers
+}
+
+
 
 # Summarise by segment ----------------------------------------------------
 
@@ -1369,26 +1386,6 @@ view_smart_charging_logs <- function(smart_charging) {
   if (!requireNamespace("shiny", quietly = TRUE)) {
     stop("The 'shiny' package is required to use this function. Please install it with:\ninstall.packages('shiny')", call. = FALSE)
   }
-  if (!requireNamespace("miniUI", quietly = TRUE)) {
-    stop("The 'miniUI' package is required to use this function. Please install it with:\ninstall.packages('miniUI')", call. = FALSE)
-  }
-
-  # ui <- miniUI::miniPage(
-  #   miniUI::gadgetTitleBar("Smart Charging Log Viewer"),
-  #   miniUI::miniContentPanel(
-  #     shiny::fluidRow(
-  #       shiny::column(
-  #         6,
-  #         shiny::selectInput("selected_window", "Select Window", choices = names(log))
-  #       ),
-  #       shiny::column(
-  #         6,
-  #         shiny::uiOutput("profile_selector")  # Dynamically generated profile list
-  #       )
-  #     ),
-  #     shiny::verbatimTextOutput("log_output")
-  #   )
-  # )
 
   ui <- shiny::fluidPage(
     shiny::sidebarLayout(

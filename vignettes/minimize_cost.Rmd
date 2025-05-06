@@ -55,22 +55,18 @@ $$
 0 \le O_t \le LFmax_t \quad t \in T
 $$
 
-* The energy balance between generation and loads must be lower than the grid capacity $GC_t$:
+
+
+* The imported energy must remain between 0 and the corresponding energy consumed with the maximum grid import capacity $IC_T$:
 
 $$
-O_t + LS_t - G_t \le GC_t \quad t \in T
+0 \le I_t \le IC_t \Delta t \quad t \in T
 $$
 
-* The imported energy must remain between 0 and the corresponding energy consumed with the maximum grid capacity:
+* The exported energy must remain between 0 and maximum grid export capacity $EC_t$:
 
 $$
-0 \le I_t \le GC_t \Delta t \quad t \in T
-$$
-
-* The exported energy must remain between 0 and power generation:
-
-$$
-0 \le E_t \le G_t \Delta t \quad t \in T
+0 \le E_t \le EC_t \Delta t \quad t \in T
 $$
 
 * Energy balance behind-the-meter:
@@ -169,16 +165,16 @@ $$
 \sum_{t=1}^T B_t \Delta t = 0
 $$
 
-* The imported energy must remain between 0 and the corresponding energy consumed with the maximum grid capacity $GC_t$:
+* The imported energy must remain between 0 and the maximum grid import capacity $IC_t$:
 
 $$
-0 \le I_t \le GC_t \Delta t \quad t \in T
+0 \le I_t \le IC_t \Delta t \quad t \in T
 $$
 
-* The exported energy must remain between 0 and power generation (this only allows the battery to discharge during importing hours):
+* The exported energy must remain between 0 and the maximum grid export capacity $EC_t$:
 
 $$
-0 \le E_t \le G_t \Delta t \quad t \in T
+0 \le E_t \le EC_t \Delta t \quad t \in T
 $$
 
 * Energy balance behind-the-meter:

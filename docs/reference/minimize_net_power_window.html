@@ -57,7 +57,8 @@
 <span>  <span class="va">direction</span>,</span>
 <span>  <span class="va">time_horizon</span>,</span>
 <span>  <span class="va">LFmax</span>,</span>
-<span>  <span class="va">grid_capacity</span>,</span>
+<span>  <span class="va">import_capacity</span>,</span>
+<span>  <span class="va">export_capacity</span>,</span>
 <span>  lambda <span class="op">=</span> <span class="fl">0</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
@@ -90,8 +91,12 @@
 <dd><p>numeric, value of maximum power (in kW) of the flexible load <code>LF</code></p></dd>
 
 
-<dt id="arg-grid-capacity">grid_capacity<a class="anchor" aria-label="anchor" href="#arg-grid-capacity"></a></dt>
-<dd><p>numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand</p></dd>
+<dt id="arg-import-capacity">import_capacity<a class="anchor" aria-label="anchor" href="#arg-import-capacity"></a></dt>
+<dd><p>numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand</p></dd>
+
+
+<dt id="arg-export-capacity">export_capacity<a class="anchor" aria-label="anchor" href="#arg-export-capacity"></a></dt>
+<dd><p>numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand</p></dd>
 
 
 <dt id="arg-lambda">lambda<a class="anchor" aria-label="anchor" href="#arg-lambda"></a></dt>

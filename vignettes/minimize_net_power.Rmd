@@ -45,10 +45,10 @@ $$
 0 \le O_t \le LFmax_t \quad t \in T
 $$
 
-* The energy balance between generation and loads must be lower than the grid capacity $GC_t$:
+* The energy balance between generation and loads must be lower than the grid import capacity $IC_t$:
 
 $$
-O_t + LS_t - G_t \le GC_t \quad t \in T
+O_t + LS_t - G_t \le IC_t \quad t \in T
 $$
 
 At the same time, we can optimize the flexible energy demand with two opposite approaches:
@@ -135,10 +135,10 @@ $$
 \sum_{t=1}^T B_t \Delta t = 0
 $$
 
-* The energy balance between generation and loads must be lower than the grid capacity $GC_t$:
+* The energy balance of generation and loads must be between the import capacity $IC_t$ and export capacity $EC_t$:
 
 $$
--GC_t \le B_t + L_t - G_t \le GC_t \quad t \in T
+-EC_t \le B_t + L_t - G_t \le IC_t \quad t \in T
 $$
 
 

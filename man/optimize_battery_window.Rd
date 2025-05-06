@@ -17,7 +17,8 @@ optimize_battery_window(
   SOCmin,
   SOCmax,
   SOCini,
-  grid_capacity,
+  import_capacity,
+  export_capacity,
   w,
   lambda
 )
@@ -47,7 +48,9 @@ optimize_battery_window(
 
 \item{SOCini}{numeric, required State-of-Charge at the beginning/end of optimization window}
 
-\item{grid_capacity}{numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand}
+\item{import_capacity}{numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power}
+
+\item{export_capacity}{numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
 
 \item{w}{numeric, optimization objective weight (\code{w=1} minimizes net power while \code{w=0} minimizes cost).}
 

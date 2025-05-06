@@ -15,9 +15,24 @@ check_optimization_data <- function(opt_data, opt_objective) {
     message("Warning: `production` variable not found in `opt_data`. No local energy production will be considered.")
     opt_data$production <- 0
   }
-  if (!("grid_capacity" %in% names(opt_data))) {
-    opt_data$grid_capacity <- Inf
+
+  if ("grid_capacity" %in% names(opt_data)) {
+    # opt_data$grid_capacity <- Inf
+    if (!("import_capacity" %in% names(opt_data))) {
+      opt_data$import_capacity <- opt_data$grid_capacity
+    }
+    if (!("export_capacity" %in% names(opt_data))) {
+      opt_data$export_capacity <- opt_data$grid_capacity
+    }
+  } else {
+    if (!("import_capacity" %in% names(opt_data))) {
+      opt_data$import_capacity <- Inf
+    }
+    if (!("export_capacity" %in% names(opt_data))) {
+      opt_data$export_capacity <- Inf
+    }
   }
+
   if (!("load_capacity" %in% names(opt_data))) {
     opt_data$load_capacity <- Inf
   }
@@ -225,7 +240,7 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' - `static`: static power demand (in kW) from other sectors like buildings,
 #' offices, etc.
 #'
-#' - `grid_capacity`: maximum imported power from the grid (in kW),
+#' - `import_capacity`: maximum imported power from the grid (in kW),
 #' for example the contracted power with the energy company.
 #'
 #' - `load_capacity`: maximum power that the `flexible` load
@@ -321,7 +336,8 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
             direction = direction,
             time_horizon = time_horizon,
             LFmax = opt_data$load_capacity[.x],
-            grid_capacity = opt_data$grid_capacity[.x],
+            import_capacity = opt_data$import_capacity[.x],
+            export_capacity = opt_data$export_capacity[.x],
             lambda = lambda
         )
       }
@@ -340,7 +356,8 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
         direction = direction,
         time_horizon = time_horizon,
         LFmax = opt_data$load_capacity[.x],
-        grid_capacity = opt_data$grid_capacity[.x],
+        import_capacity = opt_data$import_capacity[.x],
+        export_capacity = opt_data$export_capacity[.x],
         lambda = lambda
       )
     )
@@ -358,7 +375,8 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
         direction = direction,
         time_horizon = time_horizon,
         LFmax = opt_data$load_capacity[.x],
-        grid_capacity = opt_data$grid_capacity[.x],
+        import_capacity = opt_data$import_capacity[.x],
+        export_capacity = opt_data$export_capacity[.x],
         lambda = lambda,
         w = opt_objective
       )
@@ -400,13 +418,14 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param import_capacity numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand
+#' @param export_capacity numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand
 #' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax, grid_capacity, lambda=0) {
+minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, lambda=0) {
 
   # Round to 2 decimals to avoid problems with lower and upper bounds
   G <- round(G, 2)
@@ -422,9 +441,9 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   if (time_horizon > time_slots) {
     time_horizon <- time_slots
   }
-  LFmax_vct <- round(pmin(grid_capacity + G - LS, LFmax), 2)
+  LFmax_vct <- round(pmin(import_capacity + G - LS, LFmax), 2)
   if (any(LFmax_vct < 0)) {
-    message("Warning: `grid_capacity` too low. Skipping optimization.")
+    message("Warning: Grid capacity too low. Skipping optimization.")
     return(LF)
   }
   identityMat <- diag(time_slots)
@@ -436,10 +455,17 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   # Constraints
   L_bounds <- get_bounds(LF, LFmax = LFmax_vct, time_slots, time_horizon, direction)
 
+  # Lower and upper bounds
   ## General bounds
-  Amat_general <- L_bounds$Amat_general
-  lb_general <- L_bounds$lb_general
-  ub_general <- L_bounds$ub_general
+  ##  - Grid capacity: -export_capacity <= LF + LS - G <= +import_capacity
+  ##    - LB: LF >= G - LS - export_capacity
+  ##    - UB: LF <= G - LS + import_capacity
+  ##  - Battery power limits:
+  ##    - LB: LF >= 0
+  ##    - UB: LF <= LFmax
+  Amat_general <- identityMat
+  lb_general <- pmax(G - LS - export_capacity, 0)
+  ub_general <- pmin(G - LS + import_capacity, LFmax)
 
   ## Energy can only be shifted forwards or backwards with a specific time horizon
   ## This is done through cumulative sum matrices
@@ -486,13 +512,14 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param import_capacity numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand
+#' @param export_capacity numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand
 #' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, grid_capacity, lambda=0) {
+minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, import_capacity, export_capacity, lambda=0) {
 
   # Round to 2 decimals to avoid problems with lower and upper bounds
   G <- round(G, 2)
@@ -505,9 +532,9 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   if (is.null(time_horizon)) {
     time_horizon <- time_slots
   }
-  LFmax_vct <- round(pmin(grid_capacity + G - LS, LFmax), 2)
+  LFmax_vct <- round(pmin(import_capacity + G - LS, LFmax), 2)
   if (any(LFmax_vct < 0)) {
-    message("Warning: `grid_capacity` too low. Skipping optimization.")
+    message("Warning: Grid capacity too low. Skipping optimization.")
     return(LF)
   }
   identityMat <- diag(time_slots)
@@ -539,20 +566,20 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   ub_O <- L_bounds$ub_general
 
   ## Imported energy bounds
-  ## 0 <= It <= grid_capacity
+  ## 0 <= It <= import_capacity
   Amat_I <- cbind(
     identityMat*0, identityMat*1, identityMat*0
   )
   lb_I <- rep(0, time_slots)
-  ub_I <- grid_capacity
+  ub_I <- import_capacity
 
   ## Exported energy bounds
-  ## 0 <= Et <= Gt
+  ## 0 <= Et <= export_capacity
   Amat_E <- cbind(
     identityMat*0, identityMat*0, identityMat*1
   )
   lb_E <- rep(0, time_slots)
-  ub_E <- G
+  ub_E <- export_capacity
 
   ## Energy balance
   ## It - Et = OLt + LSt - Gt -> OLt - It + Et = Gt - LSt
@@ -605,14 +632,15 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from
 #' @param LFmax numeric, value of maximum power (in kW) of the flexible load `LF`
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param import_capacity numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand
+#' @param export_capacity numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost).
 #' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, grid_capacity, w, lambda) {
+optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, import_capacity, export_capacity, w, lambda) {
 
   # Round to 2 decimals to avoid problems with lower and upper bounds
   G <- round(G, 2)
@@ -625,9 +653,9 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
   if (is.null(time_horizon)) {
     time_horizon <- time_slots
   }
-  LFmax_vct <- round(pmin(grid_capacity + G - LS, LFmax), 2)
+  LFmax_vct <- round(pmin(import_capacity + G - LS, LFmax), 2)
   if (any(LFmax_vct < 0)) {
-    message("Warning: `grid_capacity` too low. Skipping optimization.")
+    message("Warning: Grid capacity too low. Skipping optimization.")
     return(LF)
   }
   identityMat <- diag(time_slots)
@@ -659,20 +687,20 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
   ub_O <- L_bounds$ub_general
 
   ## Imported energy bounds
-  ## 0 <= It <= grid_capacity
+  ## 0 <= It <= import_capacity
   Amat_I <- cbind(
     identityMat*0, identityMat*1, identityMat*0
   )
   lb_I <- rep(0, time_slots)
-  ub_I <- grid_capacity
+  ub_I <- import_capacity
 
   ## Exported energy bounds
-  ## 0 <= Et <= Gt
+  ## 0 <= Et <= export_capacity
   Amat_E <- cbind(
     identityMat*0, identityMat*0, identityMat*1
   )
   lb_E <- rep(0, time_slots)
-  ub_E <- G
+  ub_E <- export_capacity
 
   ## Energy balance
   ## It - Et = OLt + LSt - Gt -> OLt - It + Et = Gt - LSt
@@ -732,12 +760,14 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' - `static`: static power demand (in kW) from other sectors like buildings,
 #' offices, etc.
 #'
-#' - `grid_capacity`: maximum imported power from the grid (in kW),
+#' - `import_capacity`: maximum imported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
+#' - `export_capacity`: maximum exported power from the grid (in kW),
 #' for example the contracted power with the energy company.
 #'
 #' - `production`: local power generation (in kW).
 #' This is used when `opt_objective = "grid"`.
-#'
 #'
 #' - `price_imported`: price for imported energy (€/kWh).
 #' This is used when `opt_objective = "cost"`.
@@ -850,7 +880,8 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         G = opt_data$production[.x], L = opt_data$static[.x],
         Bcap = Bcap, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        grid_capacity = opt_data$grid_capacity[.x]
+        import_capacity = opt_data$import_capacity[.x],
+        export_capacity = opt_data$export_capacity[.x]
       )
     )
   } else if (opt_objective == "cost") {
@@ -862,7 +893,8 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
         Bcap = Bcap, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        grid_capacity = opt_data$grid_capacity[.x],
+        import_capacity = opt_data$import_capacity[.x],
+        export_capacity = opt_data$export_capacity[.x],
         lambda = lambda
       )
     )
@@ -875,7 +907,8 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
         Bcap = Bcap, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        grid_capacity = opt_data$grid_capacity[.x],
+        import_capacity = opt_data$import_capacity[.x],
+        export_capacity = opt_data$export_capacity[.x],
         w = opt_objective, lambda = lambda
       )
     )
@@ -920,13 +953,14 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda=0) {
+minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -940,15 +974,15 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 
   # Lower and upper bounds
   ## General bounds
-  ##  - Grid capacity: -grid_capacity <= L - G + B <= +grid_capacity
-  ##    - LB: B >= G - L - grid_capacity
-  ##    - UB: B <= G - L + grid_capacity
+  ##  - Grid capacity: -export_capacity <= B + L - G <= +import_capacity
+  ##    - LB: B >= G - L - export_capacity
+  ##    - UB: B <= G - L + import_capacity
   ##  - Battery power limits:
   ##    - LB: B >= -Bd
   ##    - UB: B <= Bc
   Amat_general <- identityMat
-  lb_general <- pmax(G - L - grid_capacity, -Bd)
-  ub_general <- pmin(G - L + grid_capacity, Bc)
+  lb_general <- pmax(G - L - export_capacity, -Bd)
+  ub_general <- pmin(G - L + import_capacity, Bc)
 
   ## SOC limits
   Amat_cumsum <- cumsumMat
@@ -994,13 +1028,14 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, lambda=0) {
+minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -1033,20 +1068,21 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   ub_B <- rep(Bc, time_slots)
 
   ## Imported energy bounds
-  ## 0 <= It <= grid_capacity
+  ## 0 <= It <= import_capacity
   Amat_I <- cbind(
     identityMat*0, identityMat*1, identityMat*0
   )
   lb_I <- rep(0, time_slots)
-  ub_I <- grid_capacity
+  ub_I <- import_capacity
 
   ## Exported energy bounds
-  ## 0 <= Et <= Gt  --> This only allows the battery to discharge during importing hours
+  ## 0 <= Et <= export_capacity --> To test
   Amat_E <- cbind(
     identityMat*0, identityMat*0, identityMat*1
   )
   lb_E <- rep(0, time_slots)
-  ub_E <- G
+  # ub_E <- G  --> This only allows the battery to discharge during importing hours
+  ub_E <- export_capacity
 
   ## Energy balance
   ## It - Et = Bt + Lt - Gt -> Bt - It + Et = Gt - Lt
@@ -1106,33 +1142,21 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param grid_capacity numeric or numeric vector, grid maximum power capacity that will limit the maximum optimized demand
+#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost).
 #' @param lambda numeric, penalty on change for the flexible load.
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, grid_capacity, w, lambda) {
+optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, w, lambda) {
 
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
   lambdaMat <- get_lambda_matrix(time_slots)
-  # nextMat <- identityMat
-  # nextMat[1, 1] <- 0
-  # nextMat[time_slots, time_slots] <- 0
-  # lambdaMat <- (lambda+w*mean(PI)^2)*identityMat + lambda*nextMat -
-  #   lambda*(
-  #     triangulate_matrix(
-  #       triangulate_matrix(matrix(1, time_slots, time_slots), "u", 1), "l", 1
-  #     ) -
-  #       triangulate_matrix(
-  #         triangulate_matrix(matrix(1, time_slots, time_slots), "l", -1), "u", -1
-  #       )
-  #   )
-
 
   # Objective function terms
   # unknown variable: X = [B, I, E]
@@ -1159,20 +1183,21 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
   ub_B <- rep(Bc, time_slots)
 
   ## Imported energy bounds
-  ## 0 <= It <= grid_capacity
+  ## 0 <= It <= import_capacity
   Amat_I <- cbind(
     identityMat*0, identityMat*1, identityMat*0
   )
   lb_I <- rep(0, time_slots)
-  ub_I <- grid_capacity
+  ub_I <- import_capacity
 
   ## Exported energy bounds
-  ## 0 <= Et <= Gt  --> This only allows the battery to discharge during importing hours
+  ## 0 <= Et <= export_capacity --> To test
   Amat_E <- cbind(
     identityMat*0, identityMat*0, identityMat*1
   )
   lb_E <- rep(0, time_slots)
-  ub_E <- G
+  # ub_E <- G   --> This only allowed the battery to discharge during importing hours
+  ub_E <- export_capacity
 
   ## Energy balance
   ## It - Et = Bt + Lt - Gt -> Bt - It + Et = Gt - Lt

@@ -28,7 +28,7 @@ The other columns can be (optional):
 \itemize{
 \item \code{static}: static power demand (in kW) from other sectors like buildings,
 offices, etc.
-\item \code{grid_capacity}: maximum imported power from the grid (in kW),
+\item \code{import_capacity}: maximum imported power from the grid (in kW),
 for example the contracted power with the energy company.
 \item \code{load_capacity}: maximum power that the \code{flexible} load
 can consume (in kW).

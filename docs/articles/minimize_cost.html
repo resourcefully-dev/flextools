@@ -165,25 +165,20 @@ the expected behavior:</li>
 0 \le O_t \le LFmax_t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
-<li>The energy balance between generation and loads must be lower than
-the grid capacity
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">GC_t</annotation></semantics></math>:</li>
-</ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>O</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-O_t + LS_t - G_t \le GC_t \quad t \in T
-</annotation></semantics></math></p>
-<ul>
 <li>The imported energy must remain between 0 and the corresponding
-energy consumed with the maximum grid capacity:</li>
+energy consumed with the maximum grid import capacity
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>T</mi></msub></mrow><annotation encoding="application/x-tex">IC_T</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le I_t \le GC_t \Delta t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le I_t \le IC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
-<li>The exported energy must remain between 0 and power generation:</li>
+<li>The exported energy must remain between 0 and maximum grid export
+capacity
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>G</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le E_t \le G_t \Delta t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le E_t \le EC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
 <li>Energy balance behind-the-meter:</li>
@@ -350,19 +345,20 @@ beginning of every optimization window:</li>
 \sum_{t=1}^T B_t \Delta t = 0
 </annotation></semantics></math></p>
 <ul>
-<li>The imported energy must remain between 0 and the corresponding
-energy consumed with the maximum grid capacity
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">GC_t</annotation></semantics></math>:</li>
+<li>The imported energy must remain between 0 and the maximum grid
+import capacity
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>G</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le I_t \le GC_t \Delta t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le I_t \le IC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
-<li>The exported energy must remain between 0 and power generation (this
-only allows the battery to discharge during importing hours):</li>
+<li>The exported energy must remain between 0 and the maximum grid
+export capacity
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>G</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le E_t \le G_t \Delta t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le E_t \le EC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
 <li>Energy balance behind-the-meter:</li>

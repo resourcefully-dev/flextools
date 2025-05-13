@@ -42,13 +42,14 @@
 #' summarise_energy_charged(sc_results, sessions)
 #'
 summarise_energy_charged <- function(smart_charging, sessions) {
-  smart_charging$sessions %>%
+
+  energy_charged <- smart_charging$sessions %>%
     group_by(.data$Session) %>%
-    summarise(EnergyCharged = round(sum(.data$Energy), 2)) %>%
-    left_join(
-      sessions %>% select("Session", EnergyRequired = "Energy"),
-      by = "Session"
-    ) %>%
+    summarise(EnergyCharged = round(sum(.data$Energy), 2))
+
+  sessions %>%
+    select("Session", EnergyRequired = "Energy") %>%
+    left_join(energy_charged, by = "Session") %>%
     mutate(
       PctEnergyCharged = round(.data$EnergyCharged/.data$EnergyRequired*100)
     )

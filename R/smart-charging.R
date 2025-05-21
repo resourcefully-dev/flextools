@@ -79,6 +79,7 @@
 #' @importFrom stats sd
 #' @importFrom purrr set_names
 #' @importFrom evsim get_demand adapt_charging_features
+#' @importFrom parallel detectCores mclapply
 #'
 #' @return a list with three elements:
 #' optimal setpoints (tibble), sessions schedule (tibble) and log messages
@@ -192,9 +193,6 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     }
   }
 
-  opt_data$flexible <- 0
-  opt_data <- check_optimization_data(opt_data, opt_objective)
-
   if (is.null(responsive)) {
     responsive <- map(
       set_names(unique(sessions$Timecycle)),
@@ -220,6 +218,26 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     }
   }
 
+    # Multi-core parameter check
+  if (mc.cores > detectCores(logical = FALSE) | mc.cores < 1) {
+    mc.cores <- 1
+  }
+  if (mc.cores > 1) {
+    my.mclapply <- switch(
+      Sys.info()[['sysname']], # check OS
+      Windows = {mclapply.windows}, # case: windows
+      Linux   = {mclapply}, # case: linux
+      Darwin  = {mclapply} # case: mac
+    )
+    options(mc.cores = mc.cores)  # mclapply functions use `getOption("mc.cores", 2L)`
+  } else {
+    my.mclapply <- map
+  }
+
+  opt_data$flexible <- 0
+  opt_data <- check_optimization_data(opt_data, opt_objective)
+
+
   if (show_progress) cli::cli_progress_step("Defining optimization windows")
 
   # Adapt the data set for the current time resolution
@@ -239,289 +257,84 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     sessions, dttm_seq, mc.cores = mc.cores
   )
 
-  # Initialize setpoints tibble with the user profiles demand
-  setpoints <- profiles_demand
-
 
   # SMART CHARGING ----------------------------------------------------------
   if (show_progress) cli::cli_h1("Smart charging")
-  log <- list()
-  sessions_considered <- tibble()
 
-  # For each optimization window
-  n_windows <- nrow(flex_windows_idx)
-  log_window_name <- NULL
-  if (show_progress)
-    cli::cli_progress_step("Simulating window: {log_window_name}", spinner = TRUE)
-  for (i in seq_len(n_windows)) {
-    if (show_progress)
-      cli::cli_progress_update()
+  # Set responsive sessions -------------------------------------------------
+  if (show_progress) cli::cli_progress_step("Setting responsiveness")
 
-    window <- c(flex_windows_idx$start[i], flex_windows_idx$end[i])
-    log_window_name <- as.character(date(dttm_seq[window[1]]))
-    log[[log_window_name]] <- list() # In the `log` object even though `include_log = FALSE`
-    # if (include_log) {
-    #   message(paste("--", log_window_name))
-    # }
+  sessions_windows <- my.mclapply(
+    flex_windows_idx$flex_idx,
+    function (.x) {
+      sessions %>%
+        filter(
+          .data$ChargingStartDateTime >= dttm_seq[.x[1]],
+          .data$ChargingStartDateTime <= dttm_seq[.x[length(.x)]]
+        ) %>%
+        set_responsive(dttm_seq[.x], responsive)
+    }
+  )
 
-    # Filter only sessions that START CHARGING within the time window
-    sessions_window <- sessions %>%
-      filter(
-        .data$ChargingStartDateTime >= dttm_seq[window[1]],
-        .data$ChargingStartDateTime < dttm_seq[window[2]+1]
+
+  # Get setpoints -----------------------------------------------------------
+  if (show_progress) cli::cli_progress_step("Defining setpoints")
+
+  setpoints_lst <- my.mclapply(
+    seq_len(nrow(flex_windows_idx)),
+    function (.x) {
+      get_setpoints(
+        sessions_window = sessions_windows[[.x]],
+        opt_data = opt_data[flex_windows_idx$flex_idx[[.x]], ],
+        profiles_demand = profiles_demand[flex_windows_idx$flex_idx[[.x]], ],
+        opt_objective = opt_objective, lambda = lambda
       )
-    if (nrow(sessions_window) == 0) next
-
-    # Window's features
-    # Find most common time-cycle in this window
-    window_timecycle <- names(sort(table(sessions_window$Timecycle), decreasing = TRUE))[1]
-    # Responsiveness of the user profiles in this time-cycle
-    # If the time cycle is not configured in `responsive` then skip smart charging
-    if (!(window_timecycle %in% names(responsive))) next
-    window_responsive <- responsive[[window_timecycle]]
-
-    if (length(window_responsive) == 0) next
-
-    # Profiles subjected to optimization:
-    #   1. appearing in the sessions set for this optimization window
-    #   2. responsive values higher than 0
-    opt_profiles <- names(window_responsive)[
-      (names(window_responsive) %in% unique(sessions_window$Profile)) &
-        (names(window_responsive) %in% names(window_responsive)[as.numeric(window_responsive) > 0])
-    ]
-
-    if (length(opt_profiles) == 0) next
-
-    # For each optimization profile
-    for (profile in opt_profiles) {
-
-      # if (include_log) message(paste("----", profile))
-
-      # Filter only sessions of this Profile
-      sessions_window_prof <- sessions_window %>%
-        filter(.data$Profile == profile)
-
-      if (nrow(sessions_window_prof) == 0) next
-
-      # RESPONSIVENESS
-      sessions_window_prof$Responsive <- NA
-
-      # Potentially responsive sessions are defined according to the following conditions:
-      #   1. Charging end time inside the optimization window
-      end_charge_window <- sessions_window_prof$ChargingEndDateTime <= dttm_seq[window[2]]
-
-      # #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
-      # #       This is done only if optimization is used to find a setpoint
-      # if (opt_objective != "none") {
-      #   not_outliers <- get_window_not_outliers(sessions_window_prof, pct = 95, time_resolution)
-      # } else {
-      #   not_outliers <- TRUE
-      # }
-
-      # Sessions that are "potentially responsive":
-      # potentially_responsive_idx <- which(end_charge_window & not_outliers)
-      potentially_responsive_idx <- which(end_charge_window)
-
-      # From the potentially responsive sessions select randomly the configured
-      # number of `responsive` sessions:
-      n_responsive <- round(length(potentially_responsive_idx)*window_responsive[[profile]])
-      set.seed(1234)
-      responsive_idx <- sample(potentially_responsive_idx, n_responsive)
-      non_responsive_idx <- potentially_responsive_idx[!(potentially_responsive_idx %in% responsive_idx)]
-      sessions_window_prof$Responsive[responsive_idx] <- TRUE
-      sessions_window_prof$Responsive[non_responsive_idx] <- FALSE
-
-      # Select only RESPONSIVE sessions
-      sessions_window_prof_flex <- sessions_window_prof %>%
-        filter(.data$Responsive)
-
-      if (nrow(sessions_window_prof_flex) == 0) next
-
-      # Select now NON-RESPONSIVE sessions
-      non_responsive_sessions <- sessions_window_prof %>%
-        filter(!.data$Responsive)
+    }
+  )
 
 
-      # OPTIMIZATION  ----------------------------------------------------------
+  # Scheduling --------------------------------------------------------------
 
-      # Limit `ConnectionEndDateTime` to window's end
-      sessions_window_prof_flex$ConnectionEndDateTime[
-        (sessions_window_prof_flex$ConnectionEndDateTime >= dttm_seq[window[2]+1])
-      ] <- dttm_seq[window[2]+1]
+  if (method != "none") {
+    if (show_progress) cli::cli_progress_step("Scheduling EV sessions")
 
-      # Setpoint datetime sequence
-      window_prof_dttm <- c(
-        min(sessions_window_prof_flex$ConnectionStartDateTime),
-        min(max(sessions_window_prof_flex$ConnectionEndDateTime), dttm_seq[window[2]])
-      )
-      window_prof_idxs <- (dttm_seq >= window_prof_dttm[1]) &
-        (dttm_seq <= window_prof_dttm[2])
-      window_prof_length <- sum(window_prof_idxs)
-
-      # Profile sessions that can't provide flexibility are not part of the setpoint
-      if (nrow(non_responsive_sessions) > 0) {
-        L_fixed_prof <- non_responsive_sessions %>%
-          get_demand(dttm_seq = dttm_seq[window_prof_idxs], by = "Profile", mc.cores = 1) %>%
-          pull(!!sym(profile))
-      } else {
-        L_fixed_prof <- rep(0, window_prof_length)
-      }
-
-      # The optimization static load consists on buildings, lightning, etc.
-      if ('static' %in% colnames(opt_data)) {
-        L_fixed <- opt_data$static[window_prof_idxs]
-      } else {
-        L_fixed <- rep(0, window_prof_length)
-      }
-
-      # If `opt_data` contains user profile's name,
-      # this is considered to be a setpoint (skip optimization)
-      if (profile %in% colnames(opt_data)) {
-
-        setpoints[[profile]][window_prof_idxs] <- opt_data[[profile]][window_prof_idxs]
-
-      } else if (opt_objective != "none") {
-
-          # if (show_progress) cli::cli_h2("Setpoint optimization")
-
-          # The optimization flexible load is the load of the responsive sessions
-          L_prof <- setpoints[[profile]][window_prof_idxs] - L_fixed_prof
-
-          # Other profiles load
-          L_others <- setpoints %>%
-            filter(window_prof_idxs) %>%
-            select(- any_of(c(profile, 'datetime'))) %>%
-            rowSums()
-          if (length(L_others) == 0) {
-            L_others <- rep(0, window_prof_length)
-          }
-
-          # Optimize the flexible profile's load according to `opt_objective`
-          if (opt_objective == "grid") {
-            O <- minimize_net_power_window(
-              G = opt_data$production[window_prof_idxs],
-              LF = L_prof,
-              LS = L_fixed + L_others + L_fixed_prof,
-              direction = 'forward',
-              time_horizon = NULL,
-              LFmax = Inf,
-              import_capacity = opt_data$import_capacity[window_prof_idxs],
-              export_capacity = opt_data$export_capacity[window_prof_idxs],
-              lambda = lambda
-            )
-          } else if (opt_objective == "cost") {
-            O <- minimize_cost_window(
-              G = opt_data$production[window_prof_idxs],
-              LF = L_prof,
-              LS = L_fixed + L_others + L_fixed_prof,
-              PI = opt_data$price_imported[window_prof_idxs],
-              PE = opt_data$price_exported[window_prof_idxs],
-              PTU = opt_data$price_turn_up[window_prof_idxs],
-              PTD = opt_data$price_turn_down[window_prof_idxs],
-              direction = 'forward',
-              time_horizon = NULL,
-              LFmax = Inf,
-              import_capacity = opt_data$import_capacity[window_prof_idxs],
-              export_capacity = opt_data$export_capacity[window_prof_idxs],
-              lambda = lambda
-            )
-          } else if (is.numeric(opt_objective)) {
-            O <- optimize_demand_window(
-              G = opt_data$production[window_prof_idxs],
-              LF = L_prof,
-              LS = L_fixed + L_others + L_fixed_prof,
-              PI = opt_data$price_imported[window_prof_idxs],
-              PE = opt_data$price_exported[window_prof_idxs],
-              PTU = opt_data$price_turn_up[window_prof_idxs],
-              PTD = opt_data$price_turn_down[window_prof_idxs],
-              direction = 'forward',
-              time_horizon = NULL,
-              LFmax = Inf,
-              import_capacity = opt_data$import_capacity[window_prof_idxs],
-              export_capacity = opt_data$export_capacity[window_prof_idxs],
-              w = opt_objective,
-              lambda = lambda
-            )
-          }
-
-          setpoints[[profile]][window_prof_idxs] <- O + L_fixed_prof
-      } else if ("import_capacity" %in% colnames(opt_data)) {
-
-        # Other profiles load
-        # Here we consider `profiles_demand` instead of `setpoint` because we
-        # update it in the scheduling (no optimization, just grid capacity)
-        L_others <- profiles_demand %>%
-          filter(window_prof_idxs) %>%
-          select(- any_of(c(profile, 'datetime'))) %>%
-          rowSums()
-        if (length(L_others) == 0) {
-          L_others <- rep(0, window_prof_length)
-        }
-
-        # Limit power profile up to total grid capacity
-        profile_power_limited <- pmin(
-          pmax(
-            opt_data$import_capacity[window_prof_idxs] - (L_fixed + L_others),
-            0
-          ),
-          profiles_demand[[profile]][window_prof_idxs]
-        )
-        setpoints[[profile]][window_prof_idxs] <- profile_power_limited
-      } else {
-        stop(paste(
-          "Error: `opt_objective` is 'none' but no setpoint configured in `opt_data` for Profile", profile
-        ))
-      }
-
-      # SCHEDULING ----------------------------------------------------------
-      if ((method != "none")) {
-        setpoint_prof <- tibble(
-          datetime = dttm_seq[window_prof_idxs],
-          setpoint = setpoints[[profile]][window_prof_idxs] - L_fixed_prof
-        )
-
-        # if (show_progress) cli::cli_h2("Scheduling")
-
-        results <- schedule_sessions(
-          sessions = sessions_window_prof_flex, setpoint = setpoint_prof,
+    scheduling_lst <- my.mclapply(
+      seq_len(nrow(flex_windows_idx)),
+      function (.x) {
+        smart_charging_window(
+          sessions_window = sessions_windows[[.x]],
+          profiles_demand = profiles_demand[flex_windows_idx$flex_idx[[.x]], ],
+          setpoints = setpoints_lst[[.x]],
           method = method, power_th = power_th,
           charging_power_min = charging_power_min, energy_min = energy_min,
-          include_log = include_log, show_progress = FALSE
+          include_log = include_log
         )
-
-        # Final profile sessions
-        sessions_window_prof_final <- bind_rows(
-          results$sessions,
-          non_responsive_sessions
-        )
-
-        # Update the time-series demand
-        sessions_window_prof_final_demand <- get_demand(
-          sessions_window_prof_final, dttm_seq = dttm_seq[window_prof_idxs]
-        )
-        profiles_demand[[profile]][window_prof_idxs] <-
-          sessions_window_prof_final_demand[[profile]]
-
-        # Join with the rest of data set
-        sessions_considered <- bind_rows(
-          sessions_considered,
-          sessions_window_prof_final
-        )
-
-        if (include_log) {
-          log[[log_window_name]][[profile]] <- results$log
-        }
       }
-    }
+    )
   }
 
   if (show_progress) cli::cli_progress_step("Cleaning data set")
 
+  setpoints <- list_rbind(setpoints_lst)
+
+  # Join with the original datetime sequence and demand
+  setpoints_opt <- profiles_demand
+  opt_dttm_idx <- setpoints_opt$datetime %in% setpoints$datetime
+  setpoints_opt[opt_dttm_idx, names(setpoints)] <- setpoints
+
   if (method == "none") {
+
     sessions_opt <- sessions
+    demand_opt <- setpoints_opt
+    log <- list()
+
   } else {
 
     # Join the sessions that have been exploited with the non-flexible ones
+    sessions_considered <- map(
+      scheduling_lst, ~ .x$sessions
+    ) %>%
+      list_rbind()
 
     if (nrow(sessions_considered) > 0) {
       sessions_not_considered <- sessions[!(sessions$Session %in% sessions_considered$Session), ]
@@ -542,25 +355,443 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
       mutate(Session = as.character(.data$Session)) %>% # Convert `Session` back to character
       distinct()
 
+    demand <- map(
+      scheduling_lst, ~ .x$demand
+    ) %>%
+      list_rbind()
+
+    # Join with the original datetime sequence and demand
+    demand_opt <- profiles_demand
+    opt_dttm_idx <- demand_opt$datetime %in% demand$datetime
+    demand_opt[opt_dttm_idx, names(demand)] <- demand
+
+    log_lst <- map(
+      scheduling_lst, ~ .x$log
+    )
+    log <- do.call(c, log_lst)
   }
 
   results <- list(
     sessions = sessions_opt,
-    setpoints = setpoints,
-    demand = profiles_demand,
+    setpoints = setpoints_opt,
+    demand = demand_opt,
     log = log
   )
-
 
   class(results) <- "SmartCharging"
 
   return(results)
 }
 
+#' Set `Responsive` column in `sessions`
+#'
+#' @param sessions_window tibble, sessions corresponding to a single windows
+#' @param dttm_seq datetime vector
+#' @param responsive named list with responsive ratios
+#'
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
+#' @importFrom lubridate hour minute date
+#' @importFrom rlang .data
+#' @importFrom stats sd
+#' @importFrom purrr set_names
+#' @importFrom evsim get_demand adapt_charging_features
+set_responsive <- function(sessions_window, dttm_seq, responsive) {
+
+  if (nrow(sessions_window) == 0) {
+    return( tibble() )
+  }
+
+  # Window's features
+  # Find most common time-cycle in this window
+  window_timecycle <- names(sort(table(sessions_window$Timecycle), decreasing = TRUE))[1]
+  # Responsiveness of the user profiles in this time-cycle
+  # If the time cycle is not configured in `responsive` then skip smart charging
+  if (!(window_timecycle %in% names(responsive))) {
+    return( tibble() )
+  }
+  window_responsive <- responsive[[window_timecycle]]
+
+  if (length(window_responsive) == 0) {
+    return( tibble() )
+  }
+
+  # Profiles subjected to optimization:
+  #   1. appearing in the sessions set for this optimization window
+  #   2. responsive values higher than 0
+  opt_profiles <- names(window_responsive)[
+    (names(window_responsive) %in% unique(sessions_window$Profile)) &
+      (names(window_responsive) %in% names(window_responsive)[as.numeric(window_responsive) > 0])
+  ]
+
+  if (length(opt_profiles) == 0) {
+    return( tibble() )
+  }
+
+  sessions_considered <- tibble()
+
+  # For each optimization profile
+  for (profile in opt_profiles) {
+
+    # Filter only sessions of this Profile
+    sessions_window_prof <- sessions_window %>%
+      filter(.data$Profile == profile)
+
+    if (nrow(sessions_window_prof) == 0) {
+      return( tibble() )
+    }
+
+    # RESPONSIVENESS
+    sessions_window_prof$Responsive <- NA
+
+    # Potentially responsive sessions are defined according to the following conditions:
+    #   1. Charging end time inside the optimization window
+    end_charge_window <- sessions_window_prof$ChargingEndDateTime <= dttm_seq[length(dttm_seq)]
+
+    # #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
+    # #       This is done only if optimization is used to find a setpoint
+    # if (opt_objective != "none") {
+    #   not_outliers <- get_window_not_outliers(sessions_window_prof, pct = 95, time_resolution)
+    # } else {
+    #   not_outliers <- TRUE
+    # }
+
+    # Sessions that are "potentially responsive":
+    # potentially_responsive_idx <- which(end_charge_window & not_outliers)
+    potentially_responsive_idx <- which(end_charge_window)
+
+    # From the potentially responsive sessions select randomly the configured
+    # number of `responsive` sessions:
+    n_responsive <- round(length(potentially_responsive_idx)*window_responsive[[profile]])
+    set.seed(1234)
+    responsive_idx <- sample(potentially_responsive_idx, n_responsive)
+    non_responsive_idx <- potentially_responsive_idx[!(potentially_responsive_idx %in% responsive_idx)]
+    sessions_window_prof$Responsive[responsive_idx] <- TRUE
+    sessions_window_prof$Responsive[non_responsive_idx] <- FALSE
+
+    sessions_considered <- bind_rows(
+      sessions_considered, sessions_window_prof
+    )
+  }
+
+  return( sessions_considered )
+}
+
+
+get_opt_profiles <- function (sessions_window) {
+  sessions_window %>%
+    dplyr::filter(.data$Responsive) %>%
+    arrange_by_flex_potential(descendent = TRUE) %>%
+    dplyr::pull("Profile") %>%
+    unique()
+}
+
+
+arrange_by_flex_potential <- function(sessions, descendent = TRUE) {
+  profiles_flexpotential <- sessions %>%
+    dplyr::mutate(
+      FlexibilityHours = .data$ConnectionHours - .data$ChargingHours
+    ) %>%
+    dplyr::group_by(.data$Profile) %>%
+    dplyr::summarise(FlexibilityHours = mean(.data$FlexibilityHours))
+
+  if (descendent) {
+    profiles_flexpotential%>%
+      dplyr::arrange(desc(.data$FlexibilityHours)) %>%
+      dplyr::select(-"FlexibilityHours")
+  } else {
+    profiles_flexpotential%>%
+      dplyr::arrange(.data$FlexibilityHours) %>%
+      dplyr::select(-"FlexibilityHours")
+  }
+}
+
+
+#' Set setpoints for smart charging
+#'
+#' @param sessions_window tibble, sessions corresponding to a single windows
+#' @param opt_data tibble, optimization data
+#' @param profiles_demand tibble, user profiles power demand
+#' @param opt_objective character, optimization objective
+#' @param lambda numeric, penalty on change for the flexible load.
+#'
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
+#' @importFrom lubridate hour minute date
+#' @importFrom rlang .data
+#' @importFrom stats sd
+#' @importFrom purrr set_names
+#' @importFrom evsim get_demand adapt_charging_features
+#'
+#' @keywords internal
+#'
+get_setpoints <- function(sessions_window, opt_data, profiles_demand, opt_objective, lambda) {
+
+  if (nrow(sessions_window) == 0) {
+    return( sessions_window )
+  }
+
+  dttm_seq <- opt_data$datetime
+  time_resolution <- get_time_resolution(dttm_seq, units = "mins")
+
+  if ('static' %in% colnames(opt_data)) {
+    L_fixed <- opt_data$static
+  } else {
+    L_fixed <- rep(0, nrow(opt_data))
+  }
+
+  opt_profiles <- get_opt_profiles(sessions_window)
+  setpoints <- profiles_demand %>%
+    select(any_of(c("datetime", opt_profiles)))
+
+  for (profile in opt_profiles) {
+
+    # If `opt_data` contains user profile's name,
+    # this is considered to be a setpoint (skip optimization)
+    if (profile %in% colnames(opt_data)) {
+
+      setpoints[[profile]] <- opt_data[[profile]]
+
+    } else if (opt_objective != "none") {
+
+
+      # Separate responsive and non-responsive sessions -----------------------------------------------------
+      sessions_window_prof_flex <- sessions_window %>%
+        filter(.data$Profile == profile & .data$Responsive)
+
+      non_responsive_sessions <- sessions_window %>%
+        filter(.data$Profile == profile & (!.data$Responsive | is.na(.data$Responsive)))
+
+      if (nrow(non_responsive_sessions) > 0) {
+        L_fixed_prof <- non_responsive_sessions %>%
+          get_demand(dttm_seq = dttm_seq, by = "Profile", mc.cores = 1) %>%
+          pull(!!sym(profile))
+      } else {
+        L_fixed_prof <- rep(0, length(dttm_seq))
+      }
+
+
+      # Optimization ------------------------------------------------------------
+
+      # Limit `ConnectionEndDateTime` to window's end
+      sessions_window_prof_flex$ConnectionEndDateTime[
+        (sessions_window_prof_flex$ConnectionEndDateTime >= dttm_seq[length(dttm_seq)]+minutes(time_resolution))
+      ] <- dttm_seq[length(dttm_seq)]+minutes(time_resolution)
+
+      # Setpoint datetime sequence
+      window_prof_dttm <- c(
+        min(sessions_window_prof_flex$ConnectionStartDateTime),
+        min(max(sessions_window_prof_flex$ConnectionEndDateTime), dttm_seq[length(dttm_seq)])
+      )
+      opt_idxs <- (dttm_seq >= window_prof_dttm[1]) &
+        (dttm_seq <= window_prof_dttm[2])
+      # window_prof_length <- sum(window_prof_idxs)
+
+      # The optimization flexible load is the load of the responsive sessions
+      LF <- setpoints[[profile]] - L_fixed_prof
+
+      # Static load
+      # Here we consider `setpoints` instead of `profiles_demand` because we
+      # update it in every iteration (optimization)
+      L_others <- setpoints %>%
+        select(- any_of(c(profile, 'datetime'))) %>%
+        rowSums()
+      if (length(L_others) == 0) {
+        L_others <- rep(0, length(dttm_seq))
+      }
+      LS <- L_fixed + L_others + L_fixed_prof
+
+      # Optimize the flexible profile's load according to `opt_objective`
+      if (opt_objective == "grid") {
+        O <- minimize_net_power_window(
+          G = opt_data$production[opt_idxs],
+          LF = LF[opt_idxs],
+          LS = LS[opt_idxs],
+          direction = 'forward',
+          time_horizon = NULL,
+          LFmax = Inf,
+          import_capacity = opt_data$import_capacity[opt_idxs],
+          export_capacity = opt_data$export_capacity[opt_idxs],
+          lambda = lambda
+        )
+      } else if (opt_objective == "cost") {
+        O <- minimize_cost_window(
+          G = opt_data$production[opt_idxs],
+          LF = LF[opt_idxs],
+          LS = LS[opt_idxs],
+          PI = opt_data$price_imported[opt_idxs],
+          PE = opt_data$price_exported[opt_idxs],
+          PTU = opt_data$price_turn_up[opt_idxs],
+          PTD = opt_data$price_turn_down[opt_idxs],
+          direction = 'forward',
+          time_horizon = NULL,
+          LFmax = Inf,
+          import_capacity = opt_data$import_capacity[opt_idxs],
+          export_capacity = opt_data$export_capacity[opt_idxs],
+          lambda = lambda
+        )
+      } else if (is.numeric(opt_objective)) {
+        O <- optimize_demand_window(
+          G = opt_data$production[opt_idxs],
+          LF = LF[opt_idxs],
+          LS = LS[opt_idxs],
+          PI = opt_data$price_imported[opt_idxs],
+          PE = opt_data$price_exported[opt_idxs],
+          PTU = opt_data$price_turn_up[opt_idxs],
+          PTD = opt_data$price_turn_down[opt_idxs],
+          direction = 'forward',
+          time_horizon = NULL,
+          LFmax = Inf,
+          import_capacity = opt_data$import_capacity[opt_idxs],
+          export_capacity = opt_data$export_capacity[opt_idxs],
+          w = opt_objective,
+          lambda = lambda
+        )
+      }
+
+      setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
+
+    } else if ("import_capacity" %in% colnames(opt_data)) {
+
+      # Other profiles load
+      # Here we consider `profiles_demand` instead of `setpoint` because we
+      # update it in the scheduling (no optimization, just grid capacity)
+      L_others <- profiles_demand %>%
+        select(- any_of(c(profile, 'datetime'))) %>%
+        rowSums()
+      if (length(L_others) == 0) {
+        L_others <- rep(0, length(dttm_seq))
+      }
+
+      # Limit power profile up to total grid capacity
+      profile_power_limited <- pmin(
+        pmax(
+          opt_data$import_capacity - (L_fixed + L_others),
+          0
+        ),
+        profiles_demand[[profile]]
+      )
+      setpoints[[profile]] <- profile_power_limited
+    } else {
+      stop(paste(
+        "Error: `opt_objective` is 'none' but no setpoint configured in `opt_data` for Profile", profile
+      ))
+    }
+  }
+
+  return(setpoints)
+}
 
 
 
+#' Set setpoints for smart charging
+#'
+#' @param sessions_window tibble, sessions corresponding to a single windows
+#' @param profiles_demand tibble, user profiles power demand
+#' @param setpoints tibble, user profiles power setpoints
+#' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
+#' If `none`, the scheduling part is skipped and the sessions returned in the
+#' results will be identical to the original parameter.
+#' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
+#' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
+#' then sessions' demand can reach a value of `110` without needing to schedule sessions.
+#' @param charging_power_min numeric. It can be configured in two ways:
+#' (1) minimum allowed ratio (between 0 and 1) of nominal power (i.e. `Power` column in `sessions`), or
+#' (2) specific value of minimum power (in kW) higher than 1 kW.
+#'
+#' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
+#' be curtailed until the 50% of the nominal charging power.
+#' And if `charging_power_min = 2`, sessions' charging power can be curtailed until 2 kW.
+#'
+#' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
+#' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
+#'
+#' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
+#' @importFrom lubridate hour minute date
+#' @importFrom rlang .data
+#' @importFrom stats sd
+#' @importFrom purrr set_names
+#' @importFrom evsim get_demand adapt_charging_features
+#'
+#' @keywords internal
+#'
+smart_charging_window <- function(sessions_window, profiles_demand, setpoints, method, power_th = 0,
+                                  charging_power_min = 0, energy_min = 1,
+                                  include_log = FALSE) {
 
+  if (nrow(sessions_window) == 0) {
+    return( sessions_window )
+  }
+
+  dttm_seq <- setpoints$datetime
+  time_resolution <- get_time_resolution(dttm_seq, units = "mins")
+
+  sessions_considered <- tibble()
+  log <- list()
+  log_window_name <- as.character(date(dttm_seq[1]))
+  log[[log_window_name]] <- list() # In the `log` object even though `include_log = FALSE`
+
+  opt_profiles <- get_opt_profiles(sessions_window)
+
+  for (profile in opt_profiles) {
+
+    # Select only RESPONSIVE sessions
+    sessions_window_prof_flex <- sessions_window %>%
+      filter(.data$Profile == profile & .data$Responsive)
+
+    # Profile sessions that can't provide flexibility are not part of the setpoint
+    # Select now NON-RESPONSIVE sessions
+    non_responsive_sessions <- sessions_window %>%
+      filter(.data$Profile == profile & (!.data$Responsive | is.na(.data$Responsive)))
+
+    if (nrow(non_responsive_sessions) > 0) {
+      L_fixed_prof <- non_responsive_sessions %>%
+        get_demand(dttm_seq = dttm_seq, by = "Profile", mc.cores = 1) %>%
+        pull(!!sym(profile))
+    } else {
+      L_fixed_prof <- rep(0, nrow(setpoints))
+    }
+
+    setpoint_prof <- tibble(
+      datetime = dttm_seq,
+      setpoint = setpoints[[profile]] - L_fixed_prof
+    )
+    results <- schedule_sessions(
+      sessions = sessions_window_prof_flex, setpoint = setpoint_prof,
+      method = method, power_th = power_th,
+      charging_power_min = charging_power_min, energy_min = energy_min,
+      include_log = include_log, show_progress = FALSE
+    )
+
+    # Final profile sessions
+    sessions_window_prof_final <- bind_rows(
+      results$sessions,
+      non_responsive_sessions
+    )
+
+    # Update the time-series demand
+    sessions_window_prof_final_demand <- get_demand(
+      sessions_window_prof_final, dttm_seq = dttm_seq
+    )
+    profiles_demand[[profile]] <-
+      sessions_window_prof_final_demand[[profile]]
+
+    # Join with the rest of data set
+    sessions_considered <- bind_rows(
+      sessions_considered,
+      sessions_window_prof_final
+    )
+
+    if (include_log) {
+      log[[log_window_name]][[profile]] <- results$log
+    }
+  }
+
+  list(
+    sessions = sessions_considered,
+    demand = profiles_demand,
+    setpoints = setpoints,
+    log = log
+  )
+}
 
 
 

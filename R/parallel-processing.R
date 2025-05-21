@@ -22,7 +22,7 @@
 #' Source: https://www.r-bloggers.com/2014/07/implementing-mclapply-on-windows-a-primer-on-embarrassingly-parallel-computation-on-multicore-systems-with-r/
 #'
 #'
-mclapply.windows <- function (X, FUN, ..., mc.cores) {
+mclapply.windows <- function (X, FUN, ..., mc.cores = getOption("mc.cores", 2L)) {
 
   # do not use more cores than items in the list
   cores <- min(length(X), as.integer(mc.cores))

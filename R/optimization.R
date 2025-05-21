@@ -309,6 +309,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
       Linux   = {mclapply}, # case: linux
       Darwin  = {mclapply} # case: mac
     )
+    options(mc.cores = mc.cores) # mclapply functions use `getOption("mc.cores", 2L)`
   } else {
     my.mclapply <- map
   }
@@ -326,7 +327,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 
   # Optimization
   if (opt_objective == "grid") {
-    O_windows <- map(
+    O_windows <- my.mclapply(
       flex_windows_idxs$flex_idx,
       function(.x) {
           minimize_net_power_window(
@@ -343,43 +344,47 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
       }
     )
   } else if (opt_objective == "cost") {
-    O_windows <- map(
+    O_windows <- my.mclapply(
       flex_windows_idxs$flex_idx,
-      ~ minimize_cost_window(
-        G = opt_data$production[.x],
-        LF = opt_data$flexible[.x],
-        LS = opt_data$static[.x],
-        PI = opt_data$price_imported[.x],
-        PE = opt_data$price_exported[.x],
-        PTU = opt_data$price_turn_up[.x],
-        PTD = opt_data$price_turn_down[.x],
-        direction = direction,
-        time_horizon = time_horizon,
-        LFmax = opt_data$load_capacity[.x],
-        import_capacity = opt_data$import_capacity[.x],
-        export_capacity = opt_data$export_capacity[.x],
-        lambda = lambda
-      )
+      function (.x) {
+        minimize_cost_window(
+          G = opt_data$production[.x],
+          LF = opt_data$flexible[.x],
+          LS = opt_data$static[.x],
+          PI = opt_data$price_imported[.x],
+          PE = opt_data$price_exported[.x],
+          PTU = opt_data$price_turn_up[.x],
+          PTD = opt_data$price_turn_down[.x],
+          direction = direction,
+          time_horizon = time_horizon,
+          LFmax = opt_data$load_capacity[.x],
+          import_capacity = opt_data$import_capacity[.x],
+          export_capacity = opt_data$export_capacity[.x],
+          lambda = lambda
+        )
+      }
     )
   } else if (is.numeric(opt_objective)) {
-    O_windows <- map(
+    O_windows <- my.mclapply(
       flex_windows_idxs$flex_idx,
-      ~ optimize_demand_window(
-        G = opt_data$production[.x],
-        LF = opt_data$flexible[.x],
-        LS = opt_data$static[.x],
-        PI = opt_data$price_imported[.x],
-        PE = opt_data$price_exported[.x],
-        PTU = opt_data$price_turn_up[.x],
-        PTD = opt_data$price_turn_down[.x],
-        direction = direction,
-        time_horizon = time_horizon,
-        LFmax = opt_data$load_capacity[.x],
-        import_capacity = opt_data$import_capacity[.x],
-        export_capacity = opt_data$export_capacity[.x],
-        lambda = lambda,
-        w = opt_objective
-      )
+      function (.x) {
+        optimize_demand_window(
+          G = opt_data$production[.x],
+          LF = opt_data$flexible[.x],
+          LS = opt_data$static[.x],
+          PI = opt_data$price_imported[.x],
+          PE = opt_data$price_exported[.x],
+          PTU = opt_data$price_turn_up[.x],
+          PTD = opt_data$price_turn_down[.x],
+          direction = direction,
+          time_horizon = time_horizon,
+          LFmax = opt_data$load_capacity[.x],
+          import_capacity = opt_data$import_capacity[.x],
+          export_capacity = opt_data$export_capacity[.x],
+          lambda = lambda,
+          w = opt_objective
+        )
+      }
     )
   } else {
     stop("Error: invalid `opt_objective`")
@@ -855,12 +860,17 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   if (mc.cores > detectCores(logical = FALSE) | mc.cores < 1) {
     mc.cores <- 1
   }
-  my.mclapply <- switch(
-    Sys.info()[['sysname']], # check OS
-    Windows = {mclapply.windows}, # case: windows
-    Linux   = {mclapply}, # case: linux
-    Darwin  = {mclapply} # case: mac
-  )
+  if (mc.cores > 1) {
+    my.mclapply <- switch(
+      Sys.info()[['sysname']], # check OS
+      Windows = {mclapply.windows}, # case: windows
+      Linux   = {mclapply}, # case: linux
+      Darwin  = {mclapply} # case: mac
+    )
+    options(mc.cores = mc.cores) # mclapply functions use `getOption("mc.cores", 2L)`
+  } else {
+    my.mclapply <- map
+  }
 
   # Optimization windows
   dttm_seq <- opt_data$datetime
@@ -874,43 +884,49 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 
   # Optimization
   if (opt_objective == "grid") {
-    B_windows <- map(
+    B_windows <- my.mclapply(
       flex_windows_idxs$flex_idx,
-      ~ minimize_net_power_window_battery(
-        G = opt_data$production[.x], L = opt_data$static[.x],
-        Bcap = Bcap, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        import_capacity = opt_data$import_capacity[.x],
-        export_capacity = opt_data$export_capacity[.x]
-      )
+      function (.x) {
+        minimize_net_power_window_battery(
+          G = opt_data$production[.x], L = opt_data$static[.x],
+          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          import_capacity = opt_data$import_capacity[.x],
+          export_capacity = opt_data$export_capacity[.x]
+        )
+      }
     )
   } else if (opt_objective == "cost") {
-    B_windows <- map(
+    B_windows <- my.mclapply(
       flex_windows_idxs$flex_idx,
-      ~ minimize_cost_window_battery(
-        G = opt_data$production[.x], L = opt_data$static[.x],
-        PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
-        PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
-        Bcap = Bcap, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        import_capacity = opt_data$import_capacity[.x],
-        export_capacity = opt_data$export_capacity[.x],
-        lambda = lambda
-      )
+      function (.x) {
+        minimize_cost_window_battery(
+          G = opt_data$production[.x], L = opt_data$static[.x],
+          PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
+          PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
+          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          import_capacity = opt_data$import_capacity[.x],
+          export_capacity = opt_data$export_capacity[.x],
+          lambda = lambda
+        )
+      }
     )
   } else if (is.numeric(opt_objective)) {
-    B_windows <- map(
+    B_windows <- my.mclapply(
       flex_windows_idxs$flex_idx,
-      ~ optimize_battery_window(
-        G = opt_data$production[.x], L = opt_data$static[.x],
-        PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
-        PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
-        Bcap = Bcap, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-        import_capacity = opt_data$import_capacity[.x],
-        export_capacity = opt_data$export_capacity[.x],
-        w = opt_objective, lambda = lambda
-      )
+      function (.x) {
+        optimize_battery_window(
+          G = opt_data$production[.x], L = opt_data$static[.x],
+          PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
+          PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
+          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          import_capacity = opt_data$import_capacity[.x],
+          export_capacity = opt_data$export_capacity[.x],
+          w = opt_objective, lambda = lambda
+        )
+      }
     )
   } else {
     stop("Error: invalid `opt_objective`")

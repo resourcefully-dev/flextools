@@ -4,7 +4,7 @@
 \alias{mclapply.windows}
 \title{Parallel processing for windows}
 \usage{
-mclapply.windows(X, FUN, ..., mc.cores)
+mclapply.windows(X, FUN, ..., mc.cores = getOption("mc.cores", 2L))
 }
 \arguments{
 \item{X}{a vector (atomic or list) or an expressions vector.

@@ -448,7 +448,7 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   }
   LFmax_vct <- round(pmin(import_capacity + G - LS, LFmax), 2)
   if (any(LFmax_vct < 0)) {
-    message("Warning: Grid capacity too low.")
+    # message("Warning: Grid capacity too low.")
     LFmax_vct <- pmax(LFmax_vct, 0)
   }
   identityMat <- diag(time_slots)
@@ -1001,7 +1001,7 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   ub_general <- pmin(G - L + import_capacity, Bc)
 
   if (any(ub_general < 0)) {
-    message("Warning: Grid import capacity too low.")
+    # message("Warning: Grid import capacity too low.")
     ub_general <- pmax(ub_general, 0)
   }
 

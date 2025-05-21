@@ -1011,6 +1011,12 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   #   lb_general <- pmin(lb_general, 0)
   # }
 
+  if (!all(lb_general <= ub_general)) {
+    print(lb_general[lb_general <= ub_general])
+    print(ub_general[lb_general <= ub_general])
+    return( rep(0, time_slots) )
+  }
+
   ## SOC limits
   Amat_cumsum <- cumsumMat
   lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)

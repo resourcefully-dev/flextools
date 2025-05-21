@@ -55,6 +55,7 @@ articles:
       - minimize_net_power
       - minimize_cost
       - combined_optimization
+      - multi-core
   - title: Demand-response
     navbar: Demand-response
     contents:

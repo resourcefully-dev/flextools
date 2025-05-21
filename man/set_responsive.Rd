@@ -16,3 +16,4 @@ set_responsive(sessions_window, dttm_seq, responsive)
 \description{
 Set \code{Responsive} column in \code{sessions}
 }
+\keyword{internal}

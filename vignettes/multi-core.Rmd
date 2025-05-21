@@ -8,6 +8,7 @@ knitr::opts_chunk$set(echo = TRUE, message = F, warning = F, error = F, fig.widt
 library(flextools)
 library(dplyr)
 library(lubridate)
+library(ggplot2)
 ```
 
 The calculations done by functions `smart_charging` or `optimize_demand` can be done by multiple time windows in parallel. At the same time, in computer science, a common practice to reduce computation times is parallel processing when the computer has multiple CPUs (i.e. multi-core processing). In parallel processing, a task is divided into multiple sub-tasks and assigned to multiple cores to make de calculations in parallel. For parallel processing in R we make use of the R base package `parallel`.
@@ -27,7 +28,7 @@ Below you can find some demonstrations of parallel processing using flextools. N
 
 Below, an example of calculating `smart_charging` of 10.000 EV charging sessions with different number of cores:
 
-```{r sessions, echo = T, eval = F}
+```{r, echo = T, eval = F}
 sessions <- evsim::california_ev_sessions_profiles %>%
   slice_head(n = 10000) %>%
   evsim::adapt_charging_features(time_resolution = 15)
@@ -55,7 +56,7 @@ for (mcc in cores_time$cores) {
 }
 ```
 
-```{r saved data, echo=F, eval = T}
+```{r, echo=F, eval = T}
 # saveRDS(cores_time, "multi-core-data/cores_time_sc.RDS")
 cores_time <- readRDS("multi-core-data/cores_time_sc.RDS")
 ```
@@ -64,7 +65,8 @@ cores_time <- readRDS("multi-core-data/cores_time_sc.RDS")
 And below there's the plot of the results, were we can see that, for this computer, the optimal number of cores to use is 6, since from this value no big improvement is achieved:
 
 ```{r}
-library(ggplot2)
+#| fig.alt: >
+#|   Computation time for smart charging using multiple cores
 cores_time %>%
   ggplot(aes(x = cores, y = time)) +
   geom_col() + 
@@ -77,7 +79,7 @@ cores_time %>%
 
 Below, an example of `optimize_demand` for the `building` profile with different number of cores:
 
-```{r sessions, echo = T, eval = F}
+```{r, echo = T, eval = F}
 opt_data <- flextools::energy_profiles %>%
   rename(
     production = "solar",
@@ -104,7 +106,7 @@ for (mcc in cores_time$cores) {
 }
 ```
 
-```{r saved data, echo=F, eval = T}
+```{r, echo=F, eval = T}
 # saveRDS(cores_time, "multi-core-data/cores_time_od.RDS")
 cores_time <- readRDS("multi-core-data/cores_time_od.RDS")
 ```
@@ -113,7 +115,8 @@ cores_time <- readRDS("multi-core-data/cores_time_od.RDS")
 And below there's the plot of the results, were we can see that, for this computer, the optimal number of cores to use is 6, since from this value no big improvement is achieved:
 
 ```{r}
-library(ggplot2)
+#| fig.alt: >
+#|   Computation time for demand optimization using multiple cores
 cores_time %>%
   ggplot(aes(x = cores, y = time)) +
   geom_col() + 
@@ -127,7 +130,7 @@ cores_time %>%
 
 Below, an example of `add_battery_optimization` with different number of cores:
 
-```{r sessions, echo = T, eval = F}
+```{r, echo = T, eval = F}
 opt_data <- flextools::energy_profiles %>%
   rename(
     production = "solar"
@@ -160,7 +163,7 @@ for (mcc in cores_time$cores) {
 }
 ```
 
-```{r saved data, echo=F, eval = T}
+```{r, echo=F, eval = T}
 # saveRDS(cores_time, "multi-core-data/cores_time_ob.RDS")
 cores_time <- readRDS("multi-core-data/cores_time_ob.RDS")
 ```
@@ -169,7 +172,8 @@ cores_time <- readRDS("multi-core-data/cores_time_ob.RDS")
 And below there's the plot of the results, were we can see that, for this computer, the optimal number of cores to use is 6, since from this value no big improvement is achieved:
 
 ```{r}
-library(ggplot2)
+#| fig.alt: >
+#|   Computation time for battery optimization using multiple cores
 cores_time %>%
   ggplot(aes(x = cores, y = time)) +
   geom_col() + 

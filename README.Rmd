@@ -17,9 +17,8 @@ knitr::opts_chunk$set(
 
 <!-- badges: start -->
 <!-- [![CRAN status](https://www.r-pkg.org/badges/version/flextools)](https://cran.r-project.org/package=flextools) -->
-[![R-CMD-check](https://github.com/mcanigueral/flextools/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/mcanigueral/flextools/actions/workflows/R-CMD-check.yaml)
-<!-- [![Codecov test coverage](https://codecov.io/gh/mcanigueral/flextools/branch/main/graph/badge.svg)](https://app.codecov.io/gh/mcanigueral/flextools?branch=main) -->
-[![Codecov test coverage](https://codecov.io/gh/mcanigueral/flextools/graph/badge.svg)](https://app.codecov.io/gh/mcanigueral/flextools)
+[![R-CMD-check](https://github.com/resourcefully-dev/flextools/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/resourcefully-dev/flextools/actions/workflows/R-CMD-check.yaml)
+[![Codecov test coverage](https://codecov.io/gh/resourcefully-dev/flextools/graph/badge.svg)](https://app.codecov.io/gh/resourcefully-dev/flextools)
 <!-- badges: end -->
 
 ## Overview
@@ -48,7 +47,7 @@ pak::pak("resourcefully-dev/flextools")
 
 ## Getting help
 
-If you encounter a clear bug, please open an issue with a minimal reproducible example on [GitHub](https://github.com/mcanigueral/flextools/issues).
+If you encounter a clear bug, please open an issue with a minimal reproducible example on [GitHub](https://github.com/resourcefully-dev/flextools/issues).
 
 For further technical details, you can read the following academic articles about the algorithms used in this package:
 

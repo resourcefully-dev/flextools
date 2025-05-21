@@ -4,12 +4,12 @@
 # flextools <a href='https://resourcefully-dev.github.io/flextools/'><img src='man/figures/logo.png' align="right" height="139" /></a>
 
 <!-- badges: start -->
+
 <!-- [![CRAN status](https://www.r-pkg.org/badges/version/flextools)](https://cran.r-project.org/package=flextools) -->
 
-[![R-CMD-check](https://github.com/mcanigueral/flextools/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/mcanigueral/flextools/actions/workflows/R-CMD-check.yaml)
-<!-- [![Codecov test coverage](https://codecov.io/gh/mcanigueral/flextools/branch/main/graph/badge.svg)](https://app.codecov.io/gh/mcanigueral/flextools?branch=main) -->
+[![R-CMD-check](https://github.com/resourcefully-dev/flextools/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/resourcefully-dev/flextools/actions/workflows/R-CMD-check.yaml)
 [![Codecov test
-coverage](https://codecov.io/gh/mcanigueral/flextools/graph/badge.svg)](https://app.codecov.io/gh/mcanigueral/flextools)
+coverage](https://codecov.io/gh/resourcefully-dev/flextools/graph/badge.svg)](https://app.codecov.io/gh/resourcefully-dev/flextools)
 <!-- badges: end -->
 
 ## Overview
@@ -44,7 +44,7 @@ pak::pak("resourcefully-dev/flextools")
 
 If you encounter a clear bug, please open an issue with a minimal
 reproducible example on
-[GitHub](https://github.com/mcanigueral/flextools/issues).
+[GitHub](https://github.com/resourcefully-dev/flextools/issues).
 
 For further technical details, you can read the following academic
 articles about the algorithms used in this package:

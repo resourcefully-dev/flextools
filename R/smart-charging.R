@@ -395,6 +395,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 #' @importFrom stats sd
 #' @importFrom purrr set_names
 #' @importFrom evsim get_demand adapt_charging_features
+#'
+#' @keywords internal
+#'
 set_responsive <- function(sessions_window, dttm_seq, responsive) {
 
   if (nrow(sessions_window) == 0) {

@@ -1006,7 +1006,7 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   }
 
   if (any(lb_general > 0)) {
-    message("Warning: Grid export capacity too low.")
+    # message("Warning: Grid export capacity too low.")
     lb_general <- pmin(lb_general, 0)
   }
 

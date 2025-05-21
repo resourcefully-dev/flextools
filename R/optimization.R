@@ -836,13 +836,14 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
                                      mc.cores = 1) {
 
   # Parameters check
-  opt_data <- opt_data %>% mutate(flexible = 0)
-  opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
   }
+  opt_data <- opt_data %>% mutate(flexible = 0)
+  opt_data <- check_optimization_data(opt_data, opt_objective)
 
   if (Bcap == 0 | Bc == 0 | Bd == 0 | SOCmin == SOCmax) {
+    message("Warning: battery parameters don't allow optimization.")
     return( rep(0, nrow(opt_data)) )
   }
 
@@ -1000,15 +1001,15 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   lb_general <- pmax(G - L - export_capacity, -Bd)
   ub_general <- pmin(G - L + import_capacity, Bc)
 
-  if (any(ub_general < 0)) {
-    # message("Warning: Grid import capacity too low.")
-    ub_general <- pmax(ub_general, 0)
-  }
-
-  if (any(lb_general > 0)) {
-    # message("Warning: Grid export capacity too low.")
-    lb_general <- pmin(lb_general, 0)
-  }
+  # if (any(ub_general < 0)) {
+  #   # message("Warning: Grid import capacity too low.")
+  #   ub_general <- pmax(ub_general, 0)
+  # }
+  #
+  # if (any(lb_general > 0)) {
+  #   # message("Warning: Grid export capacity too low.")
+  #   lb_general <- pmin(lb_general, 0)
+  # }
 
   ## SOC limits
   Amat_cumsum <- cumsumMat
@@ -1022,8 +1023,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
-  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
+  lb <- c(lb_general, lb_cumsum, lb_energy)
+  ub <- c(ub_general, ub_cumsum, ub_energy)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
@@ -1032,7 +1033,12 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
   if (B$info$status_val <= 2) {
-    return( round(B$x, 2) )
+    Bopt <- round(B$x, 2)
+    if (any(Bopt > Bc | Bopt < -Bd)) {
+      return( rep(0, time_slots) )
+    } else {
+      return( Bopt )
+    }
   } else {
     message(paste("Optimization warning:", B$info$status))
     return( rep(0, time_slots) )

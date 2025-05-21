@@ -1,6 +1,6 @@
 Package: flextools
 Title: Tools for demand-response simulations
-Version: 1.0.0
+Version: 1.1.0
 Authors@R: 
     person(given = "Marc", family = "Cañigueral", role = c("aut", "cre"),
            email = "marccanyigueral@gmail.com",
@@ -33,6 +33,5 @@ Imports:
 Suggests: 
     rmarkdown,
     testthat (>= 3.0.0),
-    shiny,
-    miniUI
+    shiny
 Config/testthat/edition: 3

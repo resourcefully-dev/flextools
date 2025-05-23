@@ -44,7 +44,10 @@ This is used when \code{opt_objective = "cost"}.
 This is used when \code{opt_objective = "cost"}.
 }}
 
-\item{opt_objective}{character, optimization objective being \code{"grid"} (default) or \code{"cost"}}
+\item{opt_objective}{character or numeric.
+Optimization objective can be \code{"grid"} (default), \code{"cost"} or \code{"curtail"}, or
+a number between \code{0} and \code{1} to perform combined optimization
+where \code{0 == "cost"} and \code{1 == "grid"}.}
 
 \item{Bcap}{numeric, capacity of the battery (in kWh)}
 

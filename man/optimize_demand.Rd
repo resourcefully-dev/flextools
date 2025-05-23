@@ -44,8 +44,10 @@ This is used when \code{opt_objective = "cost"}.
 This is used when \code{opt_objective = "cost"}.
 }}
 
-\item{opt_objective}{character, optimization objective being \code{"grid"} (default),
-\code{"cost"} or a value between 0 (cost) and 1 (grid).}
+\item{opt_objective}{character or numeric.
+Optimization objective can be \code{"grid"} (default) or \code{"cost"}, or
+a number between \code{0} and \code{1} to perform combined optimization
+where \code{0 == "cost"} and \code{1 == "grid"}.}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 

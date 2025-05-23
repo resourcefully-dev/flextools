@@ -37,7 +37,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
     opt_data$load_capacity <- Inf
   }
 
-  if (!(opt_objective %in% c("grid", "cost", "none")) & !is.numeric(opt_objective)) {
+  if (!(opt_objective %in% c("grid", "cost", "none", "curtail")) & !is.numeric(opt_objective)) {
     stop("Error: `opt_objective` not valid")
   }
 
@@ -261,8 +261,10 @@ get_bounds <- function(LF, LFmax, time_slots, time_horizon, direction) {
 #' - `price_turn_up`: price for turn-up energy use (€/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' @param opt_objective character, optimization objective being `"grid"` (default),
-#'  `"cost"` or a value between 0 (cost) and 1 (grid).
+#' @param opt_objective character or numeric.
+#' Optimization objective can be `"grid"` (default) or `"cost"`, or
+#' a number between `0` and `1` to perform combined optimization
+#' where `0 == "cost"` and `1 == "grid"`.
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of positions to shift energy from.
 #'  If `NULL`, the `time_horizon` will be the number of rows of `op_data`.
@@ -786,7 +788,10 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' - `price_turn_up`: price for turn-up energy use (€/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' @param opt_objective character, optimization objective being `"grid"` (default) or `"cost"`
+#' @param opt_objective character or numeric.
+#' Optimization objective can be `"grid"` (default), `"cost"` or `"curtail"`, or
+#' a number between `0` and `1` to perform combined optimization
+#' where `0 == "cost"` and `1 == "grid"`.
 #' @param Bcap numeric, capacity of the battery (in kWh)
 #' @param Bc numeric, maximum charging power (in kW)
 #' @param Bd numeric, maximum discharging power (in kW)
@@ -898,6 +903,19 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         )
       }
     )
+  } else if (opt_objective == "curtail") {
+    B_windows <- my.mclapply(
+      flex_windows_idxs$flex_idx,
+      function (.x) {
+        curtail_capacity_window_battery(
+          G = opt_data$production[.x], L = opt_data$static[.x],
+          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
+          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+          import_capacity = opt_data$import_capacity[.x],
+          export_capacity = opt_data$export_capacity[.x]
+        )
+      }
+    )
   } else if (opt_objective == "cost") {
     B_windows <- my.mclapply(
       flex_windows_idxs$flex_idx,
@@ -957,6 +975,49 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 }
 
 
+
+#' Battery optimal charging/discharging profile to minimize grid interaction (just a window)
+#'
+#' @param G numeric vector, being the renewable generation profile
+#' @param L numeric vector, being the load profile
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
+#' @param SOCmin numeric, minimum State-of-Charge of the battery
+#' @param SOCmax numeric, maximum State-of-Charge of the battery
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param lambda numeric, penalty on change for the flexible load.
+#'
+#' @importFrom dplyr  %>% tibble mutate summarise_all
+#'
+#' @return numeric vector
+#' @keywords internal
+#'
+curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0) {
+  balance_sum <- tibble(
+    consumption = L, production = G
+  ) %>%
+    get_energy_balance() %>%
+    mutate(
+      export_capacity = export_capacity,
+      import_capacity = import_capacity,
+      exported_over = pmax(.data$exported - .data$export_capacity, 0),
+      imported_over = pmax(.data$imported - .data$import_capacity, 0)
+    ) %>%
+    summarise_all(sum)
+
+  Bcap_curtail <- min(max(balance_sum$exported_over, balance_sum$imported_over), Bcap)
+
+  if (Bcap_curtail == 0) {
+    return(rep(0, length(G)))
+  } else {
+    minimize_net_power_window_battery(
+      G, L, Bcap_curtail, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda
+    )
+  }
+}
 
 
 

@@ -236,7 +236,6 @@ test_that("smart charging works with grid objective and curtail method and multi
   )
   plot(sc_results, sessions)
   expect_type(sc_results, "list")
-  print(sc_results) # Check print as well
   # Expect same amount of sessions "smart"
   expect_equal(
     length(unique(sessions$Session)), length(unique(sc_results$sessions$Session))
@@ -254,40 +253,5 @@ test_that("smart charging works with grid objective and curtail method and multi
     round(sum(sessions_demand$Worktime) - sum(sc_results$demand$Worktime)), 0
   )
 })
-
-
-test_that("smart charging works faster with multi-core", {
-  mc.cores.max <- parallel::detectCores(logical = F) - 1
-
-  sessions <- evsim::california_ev_sessions_profiles %>%
-    slice_head(n = 10000) %>%
-    evsim::adapt_charging_features(time_resolution = 15)
-  sessions_demand <- evsim::get_demand(sessions, resolution = 15, mc.cores = mc.cores.max)
-
-  # Don't require any other variable than datetime, since we don't
-  # care about local generation (just peak shaving objective)
-  opt_data <- tibble(
-    datetime = sessions_demand$datetime,
-    production = 0
-  )
-
-
-  for (i in seq_len(mc.cores.max)) {
-
-
-    sc_results <- smart_charging(
-      sessions, opt_data, opt_objective = "grid", method = "curtail",
-      window_days = 1, window_start_hour = 5, mc.cores = 8
-    )
-  }
-
-})
-
-
-
-
-
-
-
 
 

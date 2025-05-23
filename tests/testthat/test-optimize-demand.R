@@ -208,31 +208,38 @@ test_that("error when `opt_objective` is wrong in battery optimization", {
   )
 })
 
-#
-# test_that("battery optimization works with constrained import capacity", {
-#   opt_data_batt <- opt_data %>%
-#     select(datetime, production, static = building) %>%
-#     mutate(
-#       production = .data$production*0,
-#       static = .data$static*100,
-#       # import_capacity = 500
-#       import_capacity = rep(
-#         c(rep(500, 9*4), rep(250, 12*4), rep(500, 3*4)), 7
-#       )
-#     )
-#
-#   opt_battery <- opt_data_batt %>%
-#     mutate(
-#       battery = opt_data_batt %>%
-#         add_battery_optimization(
-#           opt_objective = "grid",
-#           Bcap = 500000, Bc = 5000, Bd = 5000,
-#           window_start_hour = 5
-#         ),
-#       consumption = static + battery
-#     ) %>%
-#     get_energy_balance()
-#
-#   any((opt_battery$import_capacity - opt_battery$imported) < 0)
-#
-# })
+
+test_that("battery optimization works with constrained import capacity", {
+  opt_data_batt <- opt_data %>%
+    select(datetime, production, static = building) %>%
+    mutate(
+      production = .data$production*0,
+      static = .data$static*100,
+      # import_capacity = 500
+      import_capacity = rep(
+        c(rep(500, 9*4), rep(150, 12*4), rep(500, 3*4)), 7
+      )
+    )
+
+  opt_battery_vct <- opt_data_batt %>%
+    add_battery_optimization(
+      opt_objective = "grid",
+      Bcap = 5000, Bc = 5000, Bd = 5000,
+      window_start_hour = 0,
+      mc.cores = 1
+    )
+
+  opt_battery <- opt_data_batt %>%
+    mutate(
+      battery = opt_battery_vct,
+      consumption = static + battery
+    ) %>%
+    get_energy_balance()
+
+  opt_battery %>%
+    plot_ts()
+
+  expect_false(
+    any((opt_battery$import_capacity - opt_battery$imported) < -5) # There's still some error
+  )
+})

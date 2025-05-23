@@ -787,9 +787,9 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' This is used when `opt_objective = "cost"`.
 #'
 #' @param opt_objective character, optimization objective being `"grid"` (default) or `"cost"`
-#' @param Bcap numeric, capacity of the battery
-#' @param Bc numeric, maximum charging power
-#' @param Bd numeric, maximum discharging power
+#' @param Bcap numeric, capacity of the battery (in kWh)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
@@ -875,6 +875,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 
   # Optimization windows
   dttm_seq <- opt_data$datetime
+  time_resolution <- get_time_resolution(dttm_seq)
   flex_windows_idxs <- get_flex_windows(
     dttm_seq = dttm_seq,
     window_days = window_days,
@@ -890,7 +891,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
       function (.x) {
         minimize_net_power_window_battery(
           G = opt_data$production[.x], L = opt_data$static[.x],
-          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
           SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
           import_capacity = opt_data$import_capacity[.x],
           export_capacity = opt_data$export_capacity[.x]
@@ -905,7 +906,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
           G = opt_data$production[.x], L = opt_data$static[.x],
           PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
           PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
-          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
           SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
           import_capacity = opt_data$import_capacity[.x],
           export_capacity = opt_data$export_capacity[.x],
@@ -921,7 +922,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
           G = opt_data$production[.x], L = opt_data$static[.x],
           PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
           PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
-          Bcap = Bcap, Bc = Bc, Bd = Bd,
+          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
           SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
           import_capacity = opt_data$import_capacity[.x],
           export_capacity = opt_data$export_capacity[.x],
@@ -964,9 +965,9 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #'
 #' @param G numeric vector, being the renewable generation profile
 #' @param L numeric vector, being the load profile
-#' @param Bcap numeric, capacity of the battery
-#' @param Bc numeric, maximum charging power
-#' @param Bd numeric, maximum discharging power
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
@@ -1001,22 +1002,6 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   lb_general <- pmax(G - L - export_capacity, -Bd)
   ub_general <- pmin(G - L + import_capacity, Bc)
 
-  # if (any(ub_general < 0)) {
-  #   # message("Warning: Grid import capacity too low.")
-  #   ub_general <- pmax(ub_general, 0)
-  # }
-  #
-  # if (any(lb_general > 0)) {
-  #   # message("Warning: Grid export capacity too low.")
-  #   lb_general <- pmin(lb_general, 0)
-  # }
-
-  if (!all(lb_general <= ub_general)) {
-    print(lb_general[lb_general <= ub_general])
-    print(ub_general[lb_general <= ub_general])
-    return( rep(0, time_slots) )
-  }
-
   ## SOC limits
   Amat_cumsum <- cumsumMat
   lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
@@ -1029,8 +1014,15 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- c(lb_general, lb_cumsum, lb_energy)
-  ub <- c(ub_general, ub_cumsum, ub_energy)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
+
+  if (!all(lb <= ub)) {
+    message("Optimization warning: lower bounds > upper bounds. Not enough import/export capacity.")
+    print(ub[lb > ub])
+    print(lb[lb > ub])
+    return( rep(0, time_slots) )
+  }
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
@@ -1038,16 +1030,29 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
-  if (B$info$status_val <= 2) {
-    Bopt <- round(B$x, 2)
-    if (any(Bopt > Bc | Bopt < -Bd)) {
-      return( rep(0, time_slots) )
-    } else {
-      return( Bopt )
-    }
+  if (B$info$status_val %in% c(1, 2)) {
+    return( round(B$x, 2) )
   } else {
-    message(paste("Optimization warning:", B$info$status))
-    return( rep(0, time_slots) )
+    # Try again with less grid constraints (increasing grid capacity by 10% steps)
+    for (capacity_factor in seq(1, 2, 0.1)) {
+      lb_general <- pmax(G - L - export_capacity*capacity_factor, -Bd)
+      ub_general <- pmin(G - L + import_capacity*capacity_factor, Bc)
+      lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+      ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
+      solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+      B <- solver$Solve()
+      if (B$info$status_val %in% c(1, 2)) {
+        # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
+        break
+      }
+    }
+
+    if (B$info$status_val %in% c(1, 2)) {
+      return( round(B$x, 2) )
+    } else {
+      message(paste("Optimization warning:", B$info$status))
+      return( rep(0, time_slots) )
+    }
   }
 }
 
@@ -1060,9 +1065,9 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param PE numeric vector, electricity prices for exported energy
 #' @param PTD numeric vector, prices for turn-down energy use
 #' @param PTU numeric vector, prices for turn-up energy use
-#' @param Bcap numeric, capacity of the battery
-#' @param Bc numeric, maximum charging power
-#' @param Bd numeric, maximum discharging power
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
@@ -1155,11 +1160,28 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
-  if (B$info$status_val <= 2) {
+  if (B$info$status_val %in% c(1, 2)) {
     return( round(B$x[seq_len(time_slots)], 2) )
   } else {
-    message(paste("Optimization warning:", B$info$status))
-    return( rep(0, time_slots) )
+    # Try again with less grid constraints (increasing grid capacity by 10% steps)
+    for (capacity_factor in seq(1, 2, 0.1)) {
+      ub_I <- import_capacity*capacity_factor
+      ub_E <- export_capacity*capacity_factor
+      ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+      solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+      B <- solver$Solve()
+      if (B$info$status_val %in% c(1, 2)) {
+        # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
+        break
+      }
+    }
+
+    if (B$info$status_val %in% c(1, 2)) {
+      return( round(B$x[seq_len(time_slots)], 2) )
+    } else {
+      message(paste("Optimization warning:", B$info$status))
+      return( rep(0, time_slots) )
+    }
   }
 }
 
@@ -1174,9 +1196,9 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @param PE numeric vector, electricity prices for exported energy
 #' @param PTD numeric vector, prices for turn-down energy use
 #' @param PTU numeric vector, prices for turn-up energy use
-#' @param Bcap numeric, capacity of the battery
-#' @param Bc numeric, maximum charging power
-#' @param Bd numeric, maximum discharging power
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
@@ -1270,11 +1292,28 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
-  if (B$info$status_val <= 2) {
+  if (B$info$status_val %in% c(1, 2)) {
     return( round(B$x[seq_len(time_slots)], 2) )
   } else {
-    message(paste("Optimization warning:", B$info$status))
-    return( rep(0, time_slots) )
+    # Try again with less grid constraints (increasing grid capacity by 10% steps)
+    for (capacity_factor in seq(1, 2, 0.1)) {
+      ub_I <- import_capacity*capacity_factor
+      ub_E <- export_capacity*capacity_factor
+      ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+      solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+      B <- solver$Solve()
+      if (B$info$status_val %in% c(1, 2)) {
+        # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
+        break
+      }
+    }
+
+    if (B$info$status_val %in% c(1, 2)) {
+      return( round(B$x[seq_len(time_slots)], 2) )
+    } else {
+      message(paste("Optimization warning:", B$info$status))
+      return( rep(0, time_slots) )
+    }
   }
 }
 

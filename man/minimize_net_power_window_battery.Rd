@@ -23,11 +23,11 @@ minimize_net_power_window_battery(
 
 \item{L}{numeric vector, being the load profile}
 
-\item{Bcap}{numeric, capacity of the battery}
+\item{Bcap}{numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)}
 
-\item{Bc}{numeric, maximum charging power}
+\item{Bc}{numeric, maximum charging power (in kW)}
 
-\item{Bd}{numeric, maximum discharging power}
+\item{Bd}{numeric, maximum discharging power (in kW)}
 
 \item{SOCmin}{numeric, minimum State-of-Charge of the battery}
 

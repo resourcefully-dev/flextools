@@ -36,11 +36,11 @@ optimize_battery_window(
 
 \item{PTU}{numeric vector, prices for turn-up energy use}
 
-\item{Bcap}{numeric, capacity of the battery}
+\item{Bcap}{numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)}
 
-\item{Bc}{numeric, maximum charging power}
+\item{Bc}{numeric, maximum charging power (in kW)}
 
-\item{Bd}{numeric, maximum discharging power}
+\item{Bd}{numeric, maximum discharging power (in kW)}
 
 \item{SOCmin}{numeric, minimum State-of-Charge of the battery}
 

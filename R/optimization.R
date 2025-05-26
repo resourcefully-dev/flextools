@@ -1060,8 +1060,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   ##    - LB: B >= -Bd
   ##    - UB: B <= Bc
   Amat_general <- identityMat
-  lb_general <- G - L - export_capacity
-  ub_general <- G - L + import_capacity
+  lb_general <- pmin(pmax(G - L - export_capacity, -Bd), Bc)
+  ub_general <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
 
   ## SOC limits
   Amat_cumsum <- cumsumMat
@@ -1075,8 +1075,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- pmin(pmax(round(c(lb_general, lb_cumsum, lb_energy), 2), -Bd), Bc)
-  ub <- pmin(pmax(round(c(ub_general, ub_cumsum, ub_energy), 2), -Bd), Bc)
+  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
@@ -1101,10 +1101,11 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
     #   }
     # }
 
+    # If it's not feasible, then remove grid constraints
     lb_general <- rep(-Bd, time_slots)
     ub_general <- rep(Bc, time_slots)
-    lb <- pmin(pmax(round(c(lb_general, lb_cumsum, lb_energy), 2), -Bd), Bc)
-    ub <- pmin(pmax(round(c(ub_general, ub_cumsum, ub_energy), 2), -Bd), Bc)
+    lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+    ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
     solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
     B <- solver$Solve()
 

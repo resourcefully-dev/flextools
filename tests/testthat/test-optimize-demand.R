@@ -282,12 +282,22 @@ test_that("battery optimization works with constrained import capacity and 'curt
   )
 })
 
-
-opt_battery_vct <- bugdata %>%
-  add_battery_optimization(
-    opt_objective = "grid",
-    Bcap = 400, Bc = 100, Bd = 100,
-    window_start_hour = 4,
-    mc.cores = 1
-  )
-
+# bugdata <- readRDS("tests/bugdata.RDS") %>%
+#   filter(week(datetime) == 27)
+# opt_battery_vct <- bugdata %>%
+#   add_battery_optimization(
+#     opt_objective = "grid",
+#     Bcap = 4000, Bc = 400, Bd = 400,
+#     SOCini = 0,
+#     window_start_hour = 0,
+#     mc.cores = 1
+#   )
+# opt_battery <- bugdata %>%
+#   mutate(
+#     battery = opt_battery_vct,
+#     consumption = static + battery
+#   ) %>%
+#   get_energy_balance()
+#
+# opt_battery %>%
+#   plot_ts()

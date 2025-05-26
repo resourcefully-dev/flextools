@@ -1060,8 +1060,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   ##    - LB: B >= -Bd
   ##    - UB: B <= Bc
   Amat_general <- identityMat
-  lb_general <- pmax(G - L - export_capacity, -Bd)
-  ub_general <- pmin(G - L + import_capacity, Bc)
+  lb_general <- pmax(pmin(G - L - export_capacity, Bc), -Bd)
+  ub_general <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
 
   ## SOC limits
   Amat_cumsum <- cumsumMat
@@ -1079,9 +1079,9 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
 
   if (!all(lb <= ub)) {
-    message("Optimization warning: lower bounds > upper bounds. Not enough import/export capacity.")
-    print(ub[lb > ub])
-    print(lb[lb > ub])
+    # message("Optimization warning: lower bounds > upper bounds. Not enough import/export capacity.")
+    # print(ub[lb > ub])
+    # print(lb[lb > ub])
     return( rep(0, time_slots) )
   }
 

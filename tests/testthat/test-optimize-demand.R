@@ -281,3 +281,13 @@ test_that("battery optimization works with constrained import capacity and 'curt
     any((opt_battery$import_capacity - opt_battery$imported) < -5) # There's still some error
   )
 })
+
+
+opt_battery_vct <- bugdata %>%
+  add_battery_optimization(
+    opt_objective = "grid",
+    Bcap = 400, Bc = 100, Bd = 100,
+    window_start_hour = 4,
+    mc.cores = 1
+  )
+

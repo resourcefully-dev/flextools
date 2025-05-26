@@ -1060,8 +1060,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   ##    - LB: B >= -Bd
   ##    - UB: B <= Bc
   Amat_general <- identityMat
-  lb_general <- pmax(pmin(G - L - export_capacity, Bc-1), -Bd)
-  ub_general <- pmin(pmax(G - L + import_capacity, -Bd+1), Bc)
+  lb_general <- G - L - export_capacity
+  ub_general <- G - L + import_capacity
 
   ## SOC limits
   Amat_cumsum <- cumsumMat
@@ -1075,15 +1075,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 
   # Join constraints
   Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
-  lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
-  ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
-
-  if (!all(lb <= ub)) {
-    # message("Optimization warning: lower bounds > upper bounds. Not enough import/export capacity.")
-    # print(ub[lb > ub])
-    # print(lb[lb > ub])
-    return( rep(0, time_slots) )
-  }
+  lb <- pmin(pmax(round(c(lb_general, lb_cumsum, lb_energy), 2), -Bd), Bc)
+  ub <- pmin(pmax(round(c(ub_general, ub_cumsum, ub_energy), 2), -Bd), Bc)
 
   # Solve
   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
@@ -1094,19 +1087,26 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   if (B$info$status_val %in% c(1, 2)) {
     return( round(B$x, 2) )
   } else {
-    # Try again with less grid constraints (increasing grid capacity by 10% steps)
-    for (capacity_factor in seq(1, 2, 0.1)) {
-      lb_general <- pmax(G - L - export_capacity*capacity_factor, -Bd)
-      ub_general <- pmin(G - L + import_capacity*capacity_factor, Bc)
-      lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
-      ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
-      solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-      B <- solver$Solve()
-      if (B$info$status_val %in% c(1, 2)) {
-        # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
-        break
-      }
-    }
+    # # Try again with less grid constraints (increasing grid capacity by 10% steps)
+    # for (capacity_factor in seq(1, 10, 1)) {
+    #   lb_general <- G - L - export_capacity*capacity_factor
+    #   ub_general <- G - L + import_capacity*capacity_factor
+    #   lb <- pmin(pmax(round(c(lb_general, lb_cumsum, lb_energy), 2), -Bd), Bc)
+    #   ub <- pmin(pmax(round(c(ub_general, ub_cumsum, ub_energy), 2), -Bd), Bc)
+    #   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+    #   B <- solver$Solve()
+    #   if (B$info$status_val %in% c(1, 2)) {
+    #     # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
+    #     break
+    #   }
+    # }
+
+    lb_general <- rep(-Bd, time_slots)
+    ub_general <- rep(Bc, time_slots)
+    lb <- pmin(pmax(round(c(lb_general, lb_cumsum, lb_energy), 2), -Bd), Bc)
+    ub <- pmin(pmax(round(c(ub_general, ub_cumsum, ub_energy), 2), -Bd), Bc)
+    solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+    B <- solver$Solve()
 
     if (B$info$status_val %in% c(1, 2)) {
       return( round(B$x, 2) )

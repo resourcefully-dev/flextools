@@ -1060,8 +1060,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   ##    - LB: B >= -Bd
   ##    - UB: B <= Bc
   Amat_general <- identityMat
-  lb_general <- pmax(pmin(G - L - export_capacity, Bc), -Bd)
-  ub_general <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
+  lb_general <- pmax(pmin(G - L - export_capacity, Bc-1), -Bd)
+  ub_general <- pmin(pmax(G - L + import_capacity, -Bd+1), Bc)
 
   ## SOC limits
   Amat_cumsum <- cumsumMat

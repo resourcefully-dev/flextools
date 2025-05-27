@@ -282,12 +282,17 @@ test_that("battery optimization works with constrained import capacity and 'curt
   )
 })
 
-# bugdata <- readRDS("tests/bugdata.RDS") %>%
-#   filter(week(datetime) == 27)
+
+
+
+# library(dplyr)
+# library(lubridate)
+# bugdata <- readRDS("tests/bugdata.RDS")
+#   # filter(week(datetime) == 6)
 # opt_battery_vct <- bugdata %>%
 #   add_battery_optimization(
 #     opt_objective = "grid",
-#     Bcap = 4000, Bc = 400, Bd = 400,
+#     Bcap = 4000, Bc = 500, Bd = 500,
 #     SOCini = 0,
 #     window_start_hour = 0,
 #     mc.cores = 1
@@ -298,6 +303,16 @@ test_that("battery optimization works with constrained import capacity and 'curt
 #     consumption = static + battery
 #   ) %>%
 #   get_energy_balance()
+#
+# opt_battery %>%
+#   select(datetime, imported, exported, import_capacity, export_capacity) %>%
+#   mutate(
+#     congestion = .data$imported > (.data$import_capacity + 10) |
+#       .data$exported > (.data$export_capacity + 10)
+#   ) %>%
+#   group_by(date = date(datetime)) %>%
+#   summarise(congestion = sum(congestion), .groups = "drop") %>%
+#   filter(congestion > 0)
 #
 # opt_battery %>%
 #   plot_ts()

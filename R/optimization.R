@@ -1019,9 +1019,6 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
   }
 }
 
-
-
-
 #' Battery optimal charging/discharging profile to minimize grid interaction (just a window)
 #'
 #' @param G numeric vector, being the renewable generation profile
@@ -1102,6 +1099,7 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
     # }
 
     # If it's not feasible, then remove grid constraints
+    message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
     lb_general <- rep(-Bd, time_slots)
     ub_general <- rep(Bc, time_slots)
     lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
@@ -1112,7 +1110,7 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
     if (B$info$status_val %in% c(1, 2)) {
       return( round(B$x, 2) )
     } else {
-      message(paste("Optimization warning:", B$info$status))
+      message_once(paste0("Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
       return( rep(0, time_slots) )
     }
   }
@@ -1225,23 +1223,18 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   if (B$info$status_val %in% c(1, 2)) {
     return( round(B$x[seq_len(time_slots)], 2) )
   } else {
-    # Try again with less grid constraints (increasing grid capacity by 10% steps)
-    for (capacity_factor in seq(1, 2, 0.1)) {
-      ub_I <- import_capacity*capacity_factor
-      ub_E <- export_capacity*capacity_factor
-      ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-      solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-      B <- solver$Solve()
-      if (B$info$status_val %in% c(1, 2)) {
-        # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
-        break
-      }
-    }
+    # If it's not feasible, then remove grid constraints
+    message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
+    ub_I <- Inf
+    ub_E <- Inf
+    ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+    solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+    B <- solver$Solve()
 
     if (B$info$status_val %in% c(1, 2)) {
       return( round(B$x[seq_len(time_slots)], 2) )
     } else {
-      message(paste("Optimization warning:", B$info$status))
+      message_once(paste0("Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
       return( rep(0, time_slots) )
     }
   }
@@ -1357,23 +1350,18 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
   if (B$info$status_val %in% c(1, 2)) {
     return( round(B$x[seq_len(time_slots)], 2) )
   } else {
-    # Try again with less grid constraints (increasing grid capacity by 10% steps)
-    for (capacity_factor in seq(1, 2, 0.1)) {
-      ub_I <- import_capacity*capacity_factor
-      ub_E <- export_capacity*capacity_factor
-      ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-      solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-      B <- solver$Solve()
-      if (B$info$status_val %in% c(1, 2)) {
-        # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
-        break
-      }
-    }
+    # If it's not feasible, then remove grid constraints
+    message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
+    ub_I <- Inf
+    ub_E <- Inf
+    ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+    solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+    B <- solver$Solve()
 
     if (B$info$status_val %in% c(1, 2)) {
       return( round(B$x[seq_len(time_slots)], 2) )
     } else {
-      message(paste("Optimization warning:", B$info$status))
+      message_once(paste0("Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
       return( rep(0, time_slots) )
     }
   }

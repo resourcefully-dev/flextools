@@ -103,7 +103,8 @@ get_energy_balance <- function(df) {
 #' @return named list
 #' @export
 #'
-#' @importFrom dplyr %>% mutate summarise
+#' @importFrom dplyr %>% mutate summarise group_by
+#' @importFrom lubridate date
 #' @importFrom rlang .data
 #'
 #' @examples
@@ -133,15 +134,19 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
   peak_to_grid_dttm <- df2$datetime[which(df2$exported == max(df2$exported, na.rm = T))][1]
   peak_from_grid_dttm <- df2$datetime[which(df2$imported == max(df2$imported, na.rm = T))][1]
 
-  df2 %>%
+  kpis_list <- df2 %>%
     summarise(
       total_consumption = sum(.data$consumption*resolution, na.rm = T),
       total_production = sum(.data$production*resolution, na.rm = T),
       total_local = sum(.data$local*resolution, na.rm = T),
       total_exported = sum(.data$exported*resolution, na.rm = T),
       total_imported = sum(.data$imported*resolution, na.rm = T),
-      selfconsumption = .data$total_local/.data$total_production,
-      selfsufficiency = .data$total_local/.data$total_consumption,
+      selfconsumption = ifelse(
+        .data$total_production == 0, 0, .data$total_local/.data$total_production
+      ),
+      selfsufficiency = ifelse(
+        .data$total_consumption == 0, 0, .data$total_local/.data$total_consumption
+      ),
       peak_to_grid = max(.data$exported, na.rm = T),
       peak_from_grid = max(.data$imported, na.rm = T),
       peak_to_grid_dttm = peak_to_grid_dttm,
@@ -149,6 +154,20 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
       kg_co2 = sum(.data$kg_co2, na.rm = T)
     ) %>%
     as.list()
+
+  if (all(c("import_capacity", "export_capacity") %in% colnames(df2))) {
+    congestion_df <- df2 %>%
+      mutate(
+        congestion = .data$imported > .data$import_capacity |
+          .data$exported > .data$export_capacity
+      ) %>%
+      group_by(date = date(.data$datetime)) %>%
+      summarise(congestion = sum(.data$congestion), .groups = "drop") %>%
+      filter(.data$congestion > 0)
+    kpis_list$congestion_days <- nrow(congestion_df)
+  }
+
+  return( kpis_list )
 }
 
 

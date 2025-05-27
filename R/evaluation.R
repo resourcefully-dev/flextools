@@ -104,7 +104,6 @@ get_energy_balance <- function(df) {
 #' @export
 #'
 #' @importFrom dplyr %>% mutate summarise group_by
-#' @importFrom lubridate date
 #' @importFrom rlang .data
 #'
 #' @examples
@@ -160,11 +159,8 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
       mutate(
         congestion = .data$imported > .data$import_capacity |
           .data$exported > .data$export_capacity
-      ) %>%
-      group_by(date = date(.data$datetime)) %>%
-      summarise(congestion = sum(.data$congestion), .groups = "drop") %>%
-      filter(.data$congestion > 0)
-    kpis_list$congestion_days <- nrow(congestion_df)
+      )
+    kpis_list$congestion_time <- sum(congestion_df$congestion)/nrow(congestion_df)
   }
 
   return( kpis_list )

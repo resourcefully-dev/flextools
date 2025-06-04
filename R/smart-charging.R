@@ -1372,10 +1372,10 @@ print.SmartCharging <- function(x, ...) {
   n_windows <- length(x$log)
   summaryS <- summarise_profile_smart_charging_sessions(x$sessions)
   n_sessions <- sum(summaryS$n_sessions[summaryS$group == "Total"])
-  n_considered <- summaryS$n_sessions[summaryS$subgroup == "Considered"]
-  n_responsive <- summaryS$n_sessions[summaryS$subgroup == "Responsive"]
-  n_flexible <- summaryS$n_sessions[summaryS$subgroup == "Flexible"]
-  n_exploited <- summaryS$n_sessions[summaryS$subgroup == "Exploited"]
+  n_considered <- sum(summaryS$n_sessions[summaryS$subgroup == "Considered"])
+  n_responsive <- sum(summaryS$n_sessions[summaryS$subgroup == "Responsive"])
+  n_flexible <- sum(summaryS$n_sessions[summaryS$subgroup == "Flexible"])
+  n_exploited <- sum(summaryS$n_sessions[summaryS$subgroup == "Exploited"])
 
   cat('Smart charging results as a list of 3 objects: charging sessions, user profiles setpoints and log messages.\n')
   cat('Simulation from', as.character(min(date(x$setpoints$datetime))),

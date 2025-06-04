@@ -471,8 +471,8 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   ##    - LB: LF >= 0
   ##    - UB: LF <= LFmax
   Amat_general <- identityMat
-  lb_general <- pmax(G - LS - export_capacity, 0)
-  ub_general <- pmin(G - LS + import_capacity, LFmax)
+  lb_general <- pmin(pmax(G - LS - export_capacity, 0), LFmax)
+  ub_general <- pmin(pmax(G - LS + import_capacity, 0), LFmax)
 
   ## Energy can only be shifted forwards or backwards with a specific time horizon
   ## This is done through cumulative sum matrices

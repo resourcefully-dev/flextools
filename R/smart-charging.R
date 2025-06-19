@@ -364,6 +364,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     demand_opt <- profiles_demand
     opt_dttm_idx <- demand_opt$datetime %in% demand$datetime
     demand_opt[opt_dttm_idx, names(demand)] <- demand
+    # demand_opt[is.na(demand_opt)] <- 0 # ReplaceNA
 
     log_lst <- map(
       scheduling_lst, ~ .x$log

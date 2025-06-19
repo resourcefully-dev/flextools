@@ -448,7 +448,7 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   if (time_horizon > time_slots) {
     time_horizon <- time_slots
   }
-  LFmax_vct <- round(pmin(import_capacity + G - LS, LFmax), 2)
+  LFmax_vct <- round(pmin(pmax(import_capacity + G - LS, 0), LFmax), 2)
   if (any(LFmax_vct < 0)) {
     # message("Warning: Grid capacity too low.")
     LFmax_vct <- pmax(LFmax_vct, 0)
@@ -470,9 +470,9 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   ##  - Battery power limits:
   ##    - LB: LF >= 0
   ##    - UB: LF <= LFmax
-  Amat_general <- identityMat
+  Amat_general <- L_bounds$Amat_general
   lb_general <- pmin(pmax(G - LS - export_capacity, 0), LFmax)
-  ub_general <- pmin(pmax(G - LS + import_capacity, 0), LFmax)
+  ub_general <- L_bounds$ub_general
 
   ## Energy can only be shifted forwards or backwards with a specific time horizon
   ## This is done through cumulative sum matrices
@@ -496,11 +496,29 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
-  if (O$info$status_val <= 2) {
-    return( pmin(abs(round(O$x, 2)), LFmax) )
+  if (O$info$status_val %in% c(1, 2)) {
+    return( round(O$x, 2) )
   } else {
-    message(paste("Optimization warning:", O$info$status))
-    return( LF )
+
+    # If it's not feasible, then remove grid constraints
+    message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
+    lb_general <- L_bounds$lb_general
+
+    # Join constraints
+    Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)
+    lb <- round(c(lb_general, lb_cumsum, lb_energy), 2)
+    ub <- round(c(ub_general, ub_cumsum, ub_energy), 2)
+
+    # Solve
+    solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+    O <- solver$Solve()
+
+    if (O$info$status_val %in% c(1, 2)) {
+      return( round(O$x, 2) )
+    } else {
+      message_once(paste0("Optimization error: ", O$info$status))
+      return( LF )
+    }
   }
 }
 

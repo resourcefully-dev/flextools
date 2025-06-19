@@ -155,10 +155,11 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
     as.list()
 
   if (all(c("import_capacity", "export_capacity") %in% colnames(df2))) {
+    cap_tolerance <- max(df2$import_capacity)*0.02
     congestion_df <- df2 %>%
       mutate(
-        congestion = .data$imported > .data$import_capacity |
-          .data$exported > .data$export_capacity
+        congestion = .data$imported > (.data$import_capacity + cap_tolerance) |
+          .data$exported > (.data$export_capacity + cap_tolerance)
       )
     kpis_list$congestion_time <- sum(congestion_df$congestion)/nrow(congestion_df)
   }

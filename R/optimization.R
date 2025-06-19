@@ -449,10 +449,6 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
     time_horizon <- time_slots
   }
   LFmax_vct <- round(pmin(pmax(import_capacity + G - LS, 0), LFmax), 2)
-  if (any(LFmax_vct < 0)) {
-    # message("Warning: Grid capacity too low.")
-    LFmax_vct <- pmax(LFmax_vct, 0)
-  }
   identityMat <- diag(time_slots)
 
   # Objective function terms
@@ -472,7 +468,7 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   ##    - UB: LF <= LFmax
   Amat_general <- L_bounds$Amat_general
   lb_general <- pmin(pmax(G - LS - export_capacity, 0), LFmax)
-  ub_general <- L_bounds$ub_general
+  ub_general <- pmin(pmax(L_bounds$ub_general, lb_general), LFmax)
 
   ## Energy can only be shifted forwards or backwards with a specific time horizon
   ## This is done through cumulative sum matrices
@@ -502,7 +498,8 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
 
     # If it's not feasible, then remove grid constraints
     message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
-    lb_general <- L_bounds$lb_general
+    lb_general <- rep(0, time_slots)
+    ub_general <- pmin(pmax(L_bounds$ub_general, lb_general), LFmax)
 
     # Join constraints
     Amat <- rbind(Amat_general, Amat_cumsum, Amat_enery)

@@ -275,7 +275,8 @@ test_that("battery optimization works with constrained import capacity and 'curt
     get_energy_balance()
 
   opt_battery %>%
-    plot_ts()
+    plot_ts() %>%
+    dygraphs::dyLegend(show="onmouseover")
 
   expect_false(
     any((opt_battery$import_capacity - opt_battery$imported) < -5) # There's still some error

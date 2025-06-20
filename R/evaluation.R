@@ -103,7 +103,7 @@ get_energy_balance <- function(df) {
 #' @return named list
 #' @export
 #'
-#' @importFrom dplyr %>% mutate summarise group_by
+#' @importFrom dplyr %>% mutate summarise group_by filter between
 #' @importFrom rlang .data
 #'
 #' @examples
@@ -158,10 +158,11 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
     # cap_tolerance <- max(df2$import_capacity)*0.02
     congestion_df <- df2 %>%
       mutate(
-        congestion = .data$imported > (.data$import_capacity) |
-          .data$exported > (.data$export_capacity)
-      )
-    kpis_list$congestion_time <- sum(congestion_df$congestion)/nrow(congestion_df)
+        net = .data$consumption - .data$production
+      ) %>%
+      filter(!between(.data$net, -.data$export_capacity, .data$import_capacity))
+
+    kpis_list$congestion_time <- nrow(congestion_df)/nrow(df2)
   }
 
   return( kpis_list )

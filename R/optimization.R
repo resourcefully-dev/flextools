@@ -584,8 +584,8 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   ## Optimal demand bounds
   ##    0 <= O <= ub (calculated according to time_horizon)
   Amat_O <- cbind(identityMat, identityMat*0, identityMat*0)
-  lb_O <- L_bounds$lb_general
-  ub_O <- L_bounds$ub_general
+  lb_O <- pmin(pmax(L_bounds$lb_general, 0), LFmax)
+  ub_O <- pmin(pmax(L_bounds$ub_general, lb_O), LFmax)
 
   ## Imported energy bounds
   ## 0 <= It <= import_capacity
@@ -705,8 +705,8 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
   ## Optimal demand bounds
   ##    0 <= O <= ub (calculated according to time_horizon)
   Amat_O <- cbind(identityMat, identityMat*0, identityMat*0)
-  lb_O <- L_bounds$lb_general
-  ub_O <- L_bounds$ub_general
+  lb_O <- pmin(pmax(L_bounds$lb_general, 0), LFmax)
+  ub_O <- pmin(pmax(L_bounds$ub_general, lb_O), LFmax)
 
   ## Imported energy bounds
   ## 0 <= It <= import_capacity
@@ -1182,8 +1182,8 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   ## Battery bounds
   ##    -Bd <= B <= Bc
   Amat_B <- cbind(identityMat, identityMat*0, identityMat*0)
-  lb_B <- rep(-Bd, time_slots)
-  ub_B <- rep(Bc, time_slots)
+  lb_B <- pmin(pmax(G - L - export_capacity, -Bd), Bc)
+  ub_B <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
 
   ## Imported energy bounds
   ## 0 <= It <= import_capacity
@@ -1309,8 +1309,8 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
   ## Battery bounds
   ##    -Bd <= B <= Bc
   Amat_B <- cbind(identityMat, identityMat*0, identityMat*0)
-  lb_B <- rep(-Bd, time_slots)
-  ub_B <- rep(Bc, time_slots)
+  lb_B <- pmin(pmax(G - L - export_capacity, -Bd), Bc)
+  ub_B <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
 
   ## Imported energy bounds
   ## 0 <= It <= import_capacity

@@ -51,8 +51,8 @@ where \code{0 == "cost"} and \code{1 == "grid"}.}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 
-\item{time_horizon}{integer, maximum number of positions to shift energy from.
-If \code{NULL}, the \code{time_horizon} will be the number of rows of \code{op_data}.}
+\item{time_horizon}{integer, maximum number of time slots to shift energy from.
+If \code{NULL}, the \code{time_horizon} will be the total optimization window length.}
 
 \item{window_days}{integer, number of days to consider as optimization window.}
 

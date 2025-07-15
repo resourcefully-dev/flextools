@@ -594,24 +594,7 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #'
 minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, lambda=0) {
 
-  # if (any(import_capacity + G - LS < 0)) {
-  #   message_once("Warning: grid is congested (import) without any flexible load. Not optimizing.")
-  #   return ( LF )
-  # }
-  #
-  # # Round to 2 decimals to avoid problems with lower and upper bounds
-  # G <- round(G, 2)
-  # LF <- round(LF, 2)
-  # LS <- round(LS, 2)
-
-  # Optimization parameters
   time_slots <- length(LF)
-  # if (is.null(time_horizon)) {
-  #   time_horizon <- time_slots
-  # }
-  # if (time_horizon > time_slots) {
-  #   time_horizon <- time_slots
-  # }
   identityMat <- diag(time_slots)
 
   # Objective function terms
@@ -623,75 +606,6 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
   )
 
   return( O )
-
-  # # Constraints
-  # L_bounds <- get_bounds(
-  #   time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
-  # )
-  #
-  # # Lower and upper bounds
-  # ## General bounds
-  # ##  - Grid capacity: -export_capacity <= LF + LS - G <= +import_capacity
-  # ##    - LB: LF >= G - LS - export_capacity
-  # ##    - UB: LF <= G - LS + import_capacity
-  # ##  - Battery power limits:
-  # ##    - LB: LF >= 0
-  # ##    - UB: LF <= LFmax
-  # Amat_O <- L_bounds$Amat_O
-  # lb_O <- L_bounds$lb_O
-  # ub_O <- L_bounds$ub_O
-  #
-  # ## Energy can only be shifted forwards or backwards with a specific time horizon
-  # ## This is done through cumulative sum matrices
-  # Amat_cumsum <- L_bounds$Amat_cumsum
-  # lb_cumsum <- L_bounds$lb_cumsum
-  # ub_cumsum <- L_bounds$ub_cumsum
-  #
-  # ## Total sum of O == E
-  # Amat_enery <- matrix(1, ncol = time_slots)
-  # lb_energy <- sum(LF)
-  # ub_energy <- sum(LF)
-  #
-  # # Join constraints
-  # Amat <- rbind(Amat_O, Amat_cumsum, Amat_enery)
-  # lb <- round(c(lb_O, lb_cumsum, lb_energy), 2)
-  # ub <- round(c(ub_O, ub_cumsum, ub_energy), 2)
-  #
-  # # Solve
-  # solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  # O <- solver$Solve()
-  #
-  # # Status values: https://osqp.org/docs/interfaces/status_values.html
-  # # Admit "solved" (1) and "solved inaccurate" (2)
-  # if (O$info$status_val %in% c(1, 2)) {
-  #   return( round(O$x, 2) )
-  # } else {
-  #
-  #   # If it's not feasible, then remove grid constraints
-  #   message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
-  #   import_capacity <- rep(Inf, time_slots)
-  #   export_capacity <- rep(Inf, time_slots)
-  #   L_bounds <- get_bounds(
-  #     time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
-  #   )
-  #   lb_O <- L_bounds$lb_O
-  #   ub_O <- L_bounds$lb_O
-  #   # Join constraints
-  #   Amat <- rbind(Amat_O, Amat_cumsum, Amat_enery)
-  #   lb <- round(c(lb_O, lb_cumsum, lb_energy), 2)
-  #   ub <- round(c(ub_O, ub_cumsum, ub_energy), 2)
-  #
-  #   # Solve
-  #   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  #   O <- solver$Solve()
-  #
-  #   if (O$info$status_val %in% c(1, 2)) {
-  #     return( round(O$x, 2) )
-  #   } else {
-  #     message_once(paste0("Optimization error: ", O$info$status))
-  #     return( LF )
-  #   }
-  # }
 }
 
 
@@ -717,22 +631,8 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @keywords internal
 #'
 minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, import_capacity, export_capacity, lambda=0) {
-#
-#   if (any(import_capacity + G - LS < 0)) {
-#     message_once("Warning: grid is congested (import) without any flexible load. Not optimizing.")
-#     return ( LF )
-#   }
-#
-#   # Round to 2 decimals to avoid problems with lower and upper bounds
-#   G <- round(G, 2)
-#   LF <- round(LF, 2)
-#   LS <- round(LS, 2)
-#
-#   # Optimization parameters
+
   time_slots <- length(LF)
-  # if (is.null(time_horizon)) {
-  #   time_horizon <- time_slots
-  # }
   identityMat <- diag(time_slots)
 
   # Objective function terms
@@ -757,91 +657,6 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   )
 
   return( O )
-
-#
-#   # Constraints
-#   L_bounds <- get_bounds(
-#     time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
-#   )
-#
-#   ## Optimal demand bounds
-#   ##    0 <= O <= ub (calculated according to time_horizon)
-#   Amat_O <- cbind(identityMat, identityMat*0, identityMat*0)
-#   lb_O <- L_bounds$lb_O
-#   ub_O <- L_bounds$ub_O
-#
-#   ## Imported energy bounds
-#   ## 0 <= It <= import_capacity
-#   Amat_I <- cbind(
-#     identityMat*0, identityMat*1, identityMat*0
-#   )
-#   lb_I <- rep(0, time_slots)
-#   ub_I <- import_capacity
-#
-#   ## Exported energy bounds
-#   ## 0 <= Et <= export_capacity
-#   Amat_E <- cbind(
-#     identityMat*0, identityMat*0, identityMat*1
-#   )
-#   lb_E <- rep(0, time_slots)
-#   ub_E <- export_capacity
-#
-#   ## Energy balance
-#   ## It - Et = OLt + LSt - Gt -> OLt - It + Et = Gt - LSt
-#   Amat_balance <- cbind(
-#     identityMat*1, identityMat*-1, identityMat*1
-#   )
-#   lb_balance <- G - LS
-#   ub_balance <- G - LS
-#
-#   ## Energy can only be shifted forwards or backwards with a specific time horizon
-#   ## This is done through cumulative sum matrices
-#   Amat_cumsum <- cbind(L_bounds$Amat_cumsum, identityMat*0, identityMat*0)
-#   lb_cumsum <- L_bounds$lb_cumsum
-#   ub_cumsum <- L_bounds$ub_cumsum
-#
-#   ## Total sum of O == E
-#   Amat_energy <- cbind(matrix(1, ncol = time_slots), matrix(0, ncol = time_slots), matrix(0, ncol = time_slots))
-#   lb_energy <- sum(LF)
-#   ub_energy <- sum(LF)
-#
-#   # Join constraints
-#   Amat <- rbind(Amat_O, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
-#   lb <- round(c(lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-#   ub <- round(c(ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-#
-#   # Solve
-#   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-#   O <- solver$Solve()
-#
-#   # Status values: https://osqp.org/docs/interfaces/status_values.html
-#   # Admit "solved" (1) and "solved inaccurate" (2)
-#   if (O$info$status_val %in% c(1, 2)) {
-#     return( round(O$x[seq_len(time_slots)], 2) )
-#   } else {
-#     # If it's not feasible, then remove grid constraints
-#     message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
-#     import_capacity <- rep(Inf, time_slots)
-#     export_capacity <- rep(Inf, time_slots)
-#     L_bounds <- get_bounds(
-#       time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
-#     )
-#     lb_O <- L_bounds$lb_O
-#     ub_O <- L_bounds$ub_O
-#     ub_I <- import_capacity
-#     ub_E <- export_capacity
-#     lb <- round(c(lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-#     ub <- round(c(ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-#     solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-#     O <- solver$Solve()
-#
-#     if (O$info$status_val %in% c(1, 2)) {
-#       return( round(O$x[seq_len(time_slots)], 2) )
-#     } else {
-#       message_once(paste0("Optimization warning: ", O$info$status, ". No optimization provided."))
-#       return( LF )
-#     }
-#   }
 }
 
 
@@ -867,21 +682,7 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
 #'
 optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, import_capacity, export_capacity, w, lambda) {
 
-  # if (any(import_capacity + G - LS < 0)) {
-  #   message_once("Warning: grid is congested (import) without any flexible load. Not optimizing.")
-  #   return ( LF )
-  # }
-  #
-  # # Round to 2 decimals to avoid problems with lower and upper bounds
-  # G <- round(G, 2)
-  # LF <- round(LF, 2)
-  # LS <- round(LS, 2)
-
-  # Optimization parameters
   time_slots <- length(LF)
-  # if (is.null(time_horizon)) {
-  #   time_horizon <- time_slots
-  # }
   identityMat <- diag(time_slots)
 
   # Objective function terms
@@ -906,91 +707,6 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
   )
 
   return( O )
-
-#
-#   # Constraints
-#   L_bounds <- get_bounds(
-#     time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
-#   )
-#
-#   ## Optimal demand bounds
-#   ##    0 <= O <= ub (calculated according to time_horizon)
-#   Amat_O <- cbind(identityMat, identityMat*0, identityMat*0)
-#   lb_O <- pmin(pmax(L_bounds$lb_O, 0), LFmax)
-#   ub_O <- pmin(pmax(L_bounds$ub_O, lb_O), LFmax)
-#
-#   ## Imported energy bounds
-#   ## 0 <= It <= import_capacity
-#   Amat_I <- cbind(
-#     identityMat*0, identityMat*1, identityMat*0
-#   )
-#   lb_I <- rep(0, time_slots)
-#   ub_I <- import_capacity
-#
-#   ## Exported energy bounds
-#   ## 0 <= Et <= export_capacity
-#   Amat_E <- cbind(
-#     identityMat*0, identityMat*0, identityMat*1
-#   )
-#   lb_E <- rep(0, time_slots)
-#   ub_E <- export_capacity
-#
-#   ## Energy balance
-#   ## It - Et = OLt + LSt - Gt -> OLt - It + Et = Gt - LSt
-#   Amat_balance <- cbind(
-#     identityMat*1, identityMat*-1, identityMat*1
-#   )
-#   lb_balance <- G - LS
-#   ub_balance <- G - LS
-#
-#   ## Energy can only be shifted forwards or backwards with a specific time horizon
-#   ## This is done through cumulative sum matrices
-#   Amat_cumsum <- cbind(L_bounds$Amat_cumsum, identityMat*0, identityMat*0)
-#   lb_cumsum <- L_bounds$lb_cumsum
-#   ub_cumsum <- L_bounds$ub_cumsum
-#
-#   ## Total sum of O == E
-#   Amat_energy <- cbind(matrix(1, ncol = time_slots), matrix(0, ncol = time_slots), matrix(0, ncol = time_slots))
-#   lb_energy <- sum(LF)
-#   ub_energy <- sum(LF)
-#
-#   # Join constraints
-#   Amat <- rbind(Amat_O, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
-#   lb <- round(c(lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-#   ub <- round(c(ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-#
-#   # Solve
-#   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-#   O <- solver$Solve()
-#
-#   # Status values: https://osqp.org/docs/interfaces/status_values.html
-#   # Admit "solved" (1) and "solved inaccurate" (2)
-#   if (O$info$status_val %in% c(1, 2)) {
-#     return( round(O$x[seq_len(time_slots)], 2) )
-#   } else {
-#     # If it's not feasible, then remove grid constraints
-#     message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
-#     import_capacity <- rep(Inf, time_slots)
-#     export_capacity <- rep(Inf, time_slots)
-#     L_bounds <- get_bounds(
-#       time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
-#     )
-#     lb_O <- L_bounds$lb_O
-#     ub_O <- L_bounds$ub_O
-#     ub_I <- import_capacity
-#     ub_E <- export_capacity
-#     lb <- round(c(lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-#     ub <- round(c(ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-#     solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-#     O <- solver$Solve()
-#
-#     if (O$info$status_val %in% c(1, 2)) {
-#       return( round(O$x[seq_len(time_slots)], 2) )
-#     } else {
-#       message_once(paste0("Optimization warning: ", O$info$status, ". No optimization provided."))
-#       return( LF )
-#     }
-#   }
 }
 
 

@@ -1159,7 +1159,6 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
-  # cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
@@ -1171,73 +1170,6 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   )
 
   return( B )
-
-  # # Lower and upper bounds
-  # ## General bounds
-  # ##  - Grid capacity: -export_capacity <= B + L - G <= +import_capacity
-  # ##    - LB: B >= G - L - export_capacity
-  # ##    - UB: B <= G - L + import_capacity
-  # ##  - Battery power limits:
-  # ##    - LB: B >= -Bd
-  # ##    - UB: B <= Bc
-  # Amat_O <- identityMat
-  # lb_O <- pmin(pmax(G - L - export_capacity, -Bd), Bc)
-  # ub_O <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
-  #
-  # ## SOC limits
-  # Amat_cumsum <- cumsumMat
-  # lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
-  # ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
-  #
-  # ## Total sum of B == 0 (neutral balance)
-  # Amat_enery <- matrix(1, ncol = time_slots)
-  # lb_energy <- 0
-  # ub_energy <- 0
-  #
-  # # Join constraints
-  # Amat <- rbind(Amat_O, Amat_cumsum, Amat_enery)
-  # lb <- round(c(lb_O, lb_cumsum, lb_energy), 2)
-  # ub <- round(c(ub_O, ub_cumsum, ub_energy), 2)
-  #
-  # # Solve
-  # solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  # B <- solver$Solve()
-  #
-  # # Status values: https://osqp.org/docs/interfaces/status_values.html
-  # # Admit "solved" (1) and "solved inaccurate" (2)
-  # if (B$info$status_val %in% c(1, 2)) {
-  #   return( round(B$x, 2) )
-  # } else {
-  #   # # Try again with less grid constraints (increasing grid capacity by 10% steps)
-  #   # for (capacity_factor in seq(1, 10, 1)) {
-  #   #   lb_O <- G - L - export_capacity*capacity_factor
-  #   #   ub_O <- G - L + import_capacity*capacity_factor
-  #   #   lb <- pmin(pmax(round(c(lb_O, lb_cumsum, lb_energy), 2), -Bd), Bc)
-  #   #   ub <- pmin(pmax(round(c(ub_O, ub_cumsum, ub_energy), 2), -Bd), Bc)
-  #   #   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  #   #   B <- solver$Solve()
-  #   #   if (B$info$status_val %in% c(1, 2)) {
-  #   #     # message(paste0("Optimization warning: solved increasing capacity a ", round((capacity_factor-1)*100), "%"))
-  #   #     break
-  #   #   }
-  #   # }
-  #
-  #   # If it's not feasible, then remove grid constraints
-  #   message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
-  #   lb_O <- rep(-Bd, time_slots)
-  #   ub_O <- rep(Bc, time_slots)
-  #   lb <- round(c(lb_O, lb_cumsum, lb_energy), 2)
-  #   ub <- round(c(ub_O, ub_cumsum, ub_energy), 2)
-  #   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  #   B <- solver$Solve()
-  #
-  #   if (B$info$status_val %in% c(1, 2)) {
-  #     return( round(B$x, 2) )
-  #   } else {
-  #     message_once(paste0("Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
-  #     return( rep(0, time_slots) )
-  #   }
-  # }
 }
 
 
@@ -1267,7 +1199,6 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
-  # cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
@@ -1292,82 +1223,6 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   )
 
   return( B )
-
-  # # Constraints
-  # ## Battery bounds
-  # ##    -Bd <= B <= Bc
-  # Amat_B <- cbind(identityMat, identityMat*0, identityMat*0)
-  # lb_B <- rep(-Bd, time_slots)
-  # ub_B <- rep(Bc, time_slots)
-  #
-  # ## Imported energy bounds
-  # ## 0 <= It <= import_capacity
-  # Amat_I <- cbind(
-  #   identityMat*0, identityMat*1, identityMat*0
-  # )
-  # lb_I <- rep(0, time_slots)
-  # ub_I <- import_capacity
-  #
-  # ## Exported energy bounds
-  # ## 0 <= Et <= export_capacity --> To test
-  # Amat_E <- cbind(
-  #   identityMat*0, identityMat*0, identityMat*1
-  # )
-  # lb_E <- rep(0, time_slots)
-  # # ub_E <- G  --> This only allows the battery to discharge during importing hours
-  # ub_E <- export_capacity
-  #
-  # ## Energy balance
-  # ## It - Et = Bt + Lt - Gt -> Bt - It + Et = Gt - Lt
-  # Amat_balance <- cbind(
-  #   identityMat*1, identityMat*-1, identityMat*1
-  # )
-  # lb_balance <- G - L
-  # ub_balance <- G - L
-  #
-  # ## SOC limits
-  # Amat_cumsum <- cbind(
-  #   cumsumMat, identityMat*0, identityMat*0
-  # )
-  # lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
-  # ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
-  #
-  # ## Total sum of B == 0 (neutral balance)
-  # Amat_energy <- cbind(
-  #   matrix(1, ncol = time_slots), matrix(0, ncol = time_slots), matrix(0, ncol = time_slots)
-  # )
-  # lb_energy <- 0
-  # ub_energy <- 0
-  #
-  # # Join constraints
-  # Amat <- rbind(Amat_B, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
-  # lb <- round(c(lb_B, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-  # ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-  #
-  # # Solve
-  # solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  # B <- solver$Solve()
-  #
-  # # Status values: https://osqp.org/docs/interfaces/status_values.html
-  # # Admit "solved" (1) and "solved inaccurate" (2)
-  # if (B$info$status_val %in% c(1, 2)) {
-  #   return( round(B$x[seq_len(time_slots)], 2) )
-  # } else {
-  #   # If it's not feasible, then remove grid constraints
-  #   message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
-  #   ub_I <- rep(Inf, time_slots)
-  #   ub_E <- rep(Inf, time_slots)
-  #   ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-  #   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  #   B <- solver$Solve()
-  #
-  #   if (B$info$status_val %in% c(1, 2)) {
-  #     return( round(B$x[seq_len(time_slots)], 2) )
-  #   } else {
-  #     message_once(paste0("Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
-  #     return( rep(0, time_slots) )
-  #   }
-  # }
 }
 
 
@@ -1400,7 +1255,6 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
-  # cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
@@ -1425,82 +1279,6 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
   )
 
   return( B )
-
-  # # Constraints
-  # ## Battery bounds
-  # ##    -Bd <= B <= Bc
-  # Amat_B <- cbind(identityMat, identityMat*0, identityMat*0)
-  # lb_B <- rep(-Bd, time_slots)
-  # ub_B <- rep(Bc, time_slots)
-  #
-  # ## Imported energy bounds
-  # ## 0 <= It <= import_capacity
-  # Amat_I <- cbind(
-  #   identityMat*0, identityMat*1, identityMat*0
-  # )
-  # lb_I <- rep(0, time_slots)
-  # ub_I <- import_capacity
-  #
-  # ## Exported energy bounds
-  # ## 0 <= Et <= export_capacity --> To test
-  # Amat_E <- cbind(
-  #   identityMat*0, identityMat*0, identityMat*1
-  # )
-  # lb_E <- rep(0, time_slots)
-  # # ub_E <- G   --> This only allowed the battery to discharge during importing hours
-  # ub_E <- export_capacity
-  #
-  # ## Energy balance
-  # ## It - Et = Bt + Lt - Gt -> Bt - It + Et = Gt - Lt
-  # Amat_balance <- cbind(
-  #   identityMat*1, identityMat*-1, identityMat*1
-  # )
-  # lb_balance <- G - L
-  # ub_balance <- G - L
-  #
-  # ## SOC limits
-  # Amat_cumsum <- cbind(
-  #   cumsumMat, identityMat*0, identityMat*0
-  # )
-  # lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
-  # ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
-  #
-  # ## Total sum of B == 0 (neutral balance)
-  # Amat_energy <- cbind(
-  #   matrix(1, ncol = time_slots), matrix(0, ncol = time_slots), matrix(0, ncol = time_slots)
-  # )
-  # lb_energy <- 0
-  # ub_energy <- 0
-  #
-  # # Join constraints
-  # Amat <- rbind(Amat_B, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
-  # lb <- round(c(lb_B, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-  # ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-  #
-  # # Solve
-  # solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  # B <- solver$Solve()
-  #
-  # # Status values: https://osqp.org/docs/interfaces/status_values.html
-  # # Admit "solved" (1) and "solved inaccurate" (2)
-  # if (B$info$status_val %in% c(1, 2)) {
-  #   return( round(B$x[seq_len(time_slots)], 2) )
-  # } else {
-  #   # If it's not feasible, then remove grid constraints
-  #   message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
-  #   ub_I <- rep(Inf, time_slots)
-  #   ub_E <- rep(Inf, time_slots)
-  #   ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-  #   solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
-  #   B <- solver$Solve()
-  #
-  #   if (B$info$status_val %in% c(1, 2)) {
-  #     return( round(B$x[seq_len(time_slots)], 2) )
-  #   } else {
-  #     message_once(paste0("Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
-  #     return( rep(0, time_slots) )
-  #   }
-  # }
 }
 
 

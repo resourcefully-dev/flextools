@@ -2,7 +2,7 @@
 % Please edit documentation in R/optimization.R
 \name{solve_optimization_window}
 \alias{solve_optimization_window}
-\title{Perform optimization (just a window)}
+\title{Perform demand optimization (just a window)}
 \usage{
 solve_optimization_window(
   G,
@@ -33,11 +33,15 @@ solve_optimization_window(
 \item{import_capacity}{numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand}
 
 \item{export_capacity}{numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand}
+
+\item{P}{numeric matrix, optimization objective parameter}
+
+\item{q}{numeric vector, optimization objective parameter}
 }
 \value{
 numeric vector
 }
 \description{
-Perform optimization (just a window)
+Perform demand optimization (just a window)
 }
 \keyword{internal}

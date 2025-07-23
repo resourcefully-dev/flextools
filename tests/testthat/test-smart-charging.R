@@ -227,31 +227,3 @@ test_that("smart charging results are plotted by `FlexType`", {
 })
 
 
-# Multi-core processing ---------------------------------------------------
-
-test_that("smart charging works with grid objective and curtail method and multi-core", {
-  sc_results <- smart_charging(
-    sessions, opt_data, opt_objective = "grid", method = "curtail",
-    window_days = 1, window_start_hour = 5, mc.cores = 8
-  )
-  plot(sc_results, sessions)
-  expect_type(sc_results, "list")
-  # Expect same amount of sessions "smart"
-  expect_equal(
-    length(unique(sessions$Session)), length(unique(sc_results$sessions$Session))
-  )
-  # Expect all sessions charge 100% of their energy
-  expect_equal(
-    round(sum(sessions$Energy) - sum(sc_results$sessions$Energy)), 0
-  )
-  # Same demand in setpoints
-  expect_equal(
-    round(sum(sessions_demand$Worktime) - sum(sc_results$setpoints$Worktime)), 0
-  )
-  # Same demand in optimal demand
-  expect_equal(
-    round(sum(sessions_demand$Worktime) - sum(sc_results$demand$Worktime)), 0
-  )
-})
-
-

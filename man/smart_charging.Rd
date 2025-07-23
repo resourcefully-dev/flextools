@@ -17,8 +17,7 @@ smart_charging(
   energy_min = 1,
   include_log = FALSE,
   show_progress = FALSE,
-  lambda = 0,
-  mc.cores = 1
+  lambda = 0
 )
 }
 \arguments{
@@ -87,9 +86,6 @@ And if \code{charging_power_min = 2}, sessions' charging power can be curtailed 
 \item{show_progress}{logical, whether to output the progress bar in the console}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
-
-\item{mc.cores}{integer, number of cores to use.
-Must be at least one, and parallelization requires at least two cores.}
 }
 \value{
 a list with three elements:

@@ -16,7 +16,7 @@ LazyData: true
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.2
 Depends: 
-    R (>= 2.10)
+    R (>= 4.1.0)
 Imports: 
     dplyr,
     tidyr,
@@ -24,7 +24,6 @@ Imports:
     rlang,
     purrr,
     cli,
-    parallel,
     osqp,
     Matrix,
     evsim,
@@ -33,5 +32,7 @@ Imports:
 Suggests: 
     rmarkdown,
     testthat (>= 3.0.0),
-    shiny
+    shiny,
+    mirai,
+    carrier
 Config/testthat/edition: 3

@@ -70,16 +70,13 @@
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
 #' @param lambda numeric, penalty on change for the flexible load.
-#' @param mc.cores integer, number of cores to use.
-#' Must be at least one, and parallelization requires at least two cores.
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
 #' @importFrom lubridate hour minute date
 #' @importFrom rlang .data
 #' @importFrom stats sd
-#' @importFrom purrr set_names
+#' @importFrom purrr set_names map map2 in_parallel
 #' @importFrom evsim get_demand adapt_charging_features
-#' @importFrom parallel detectCores mclapply
 #'
 #' @return a list with three elements:
 #' optimal setpoints (tibble), sessions schedule (tibble) and log messages
@@ -160,7 +157,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
                            responsive = NULL, power_th = 0,
                            charging_power_min = 0, energy_min = 1,
                            include_log = FALSE, show_progress = FALSE,
-                           lambda = 0, mc.cores = 1) {
+                           lambda = 0) {
 
   if (show_progress) cli::cli_h1("Set up")
 
@@ -218,25 +215,8 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
     }
   }
 
-    # Multi-core parameter check
-  if (mc.cores > detectCores(logical = FALSE) | mc.cores < 1) {
-    mc.cores <- 1
-  }
-  if (mc.cores > 1) {
-    my.mclapply <- switch(
-      Sys.info()[['sysname']], # check OS
-      Windows = {mclapply.windows}, # case: windows
-      Linux   = {mclapply}, # case: linux
-      Darwin  = {mclapply} # case: mac
-    )
-    options(mc.cores = mc.cores)  # mclapply functions use `getOption("mc.cores", 2L)`
-  } else {
-    my.mclapply <- map
-  }
-
   opt_data$flexible <- 0
   opt_data <- check_optimization_data(opt_data, opt_objective)
-
 
   if (show_progress) cli::cli_progress_step("Defining optimization windows")
 
@@ -253,9 +233,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
   # Get user profiles demand
   if (show_progress) cli::cli_progress_step("Calculating EV demand")
-  profiles_demand <- get_demand(
-    sessions, dttm_seq, mc.cores = mc.cores
-  )
+  profiles_demand <- get_demand(sessions, dttm_seq)
 
 
   # SMART CHARGING ----------------------------------------------------------
@@ -264,53 +242,78 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   # Set responsive sessions -------------------------------------------------
   if (show_progress) cli::cli_progress_step("Setting responsiveness")
 
-  sessions_windows <- my.mclapply(
+  windows_data <- map(
     flex_windows_idx$flex_idx,
-    function (.x) {
-      sessions %>%
-        filter(
-          .data$ChargingStartDateTime >= dttm_seq[.x[1]],
-          .data$ChargingStartDateTime <= dttm_seq[.x[length(.x)]]
-        ) %>%
-        set_responsive(dttm_seq[.x], responsive)
-    }
-  )
-
-
-  # Get setpoints -----------------------------------------------------------
-  if (show_progress) cli::cli_progress_step("Defining setpoints")
-
-  setpoints_lst <- my.mclapply(
-    seq_len(nrow(flex_windows_idx)),
-    function (.x) {
-      get_setpoints(
-        sessions_window = sessions_windows[[.x]],
-        opt_data = opt_data[flex_windows_idx$flex_idx[[.x]], ],
-        profiles_demand = profiles_demand[flex_windows_idx$flex_idx[[.x]], ],
-        opt_objective = opt_objective, lambda = lambda
+    function(flex_idx) {
+      list(
+        sessions_window = sessions %>%
+          filter(
+            .data$ChargingStartDateTime >= dttm_seq[flex_idx[1]],
+            .data$ChargingStartDateTime <= dttm_seq[flex_idx[length(flex_idx)]]
+          ) %>%
+          set_responsive(dttm_seq[flex_idx], responsive),
+        profiles_demand = profiles_demand[flex_idx, ],
+        opt_data = opt_data[flex_idx, ]
       )
     }
   )
 
+  # Get setpoints -----------------------------------------------------------
+  if (show_progress) cli::cli_progress_step("Defining setpoints")
+
+  setpoints_lst <- get_setpoints_parallel(
+    windows_data, opt_objective, lambda
+  )
+
+  # setpoints_lst <- map(
+  #   windows_data,
+  #   in_parallel(
+  #     \(x)
+  #     get_setpoints(
+  #       sessions_window = x$sessions_window,
+  #       profiles_demand = x$profiles_demand,
+  #       opt_data = x$opt_data,
+  #       opt_objective = opt_objective,
+  #       lambda = lambda
+  #     ),
+  #     get_setpoints = get_setpoints,
+  #     opt_objective = opt_objective,
+  #     lambda = lambda
+  #   )
+  # )
 
   # Scheduling --------------------------------------------------------------
 
   if (method != "none") {
     if (show_progress) cli::cli_progress_step("Scheduling EV sessions")
 
-    scheduling_lst <- my.mclapply(
-      seq_len(nrow(flex_windows_idx)),
-      function (.x) {
-        smart_charging_window(
-          sessions_window = sessions_windows[[.x]],
-          profiles_demand = profiles_demand[flex_windows_idx$flex_idx[[.x]], ],
-          setpoints = setpoints_lst[[.x]],
-          method = method, power_th = power_th,
-          charging_power_min = charging_power_min, energy_min = energy_min,
-          include_log = include_log
-        )
-      }
+    scheduling_lst <- smart_charging_window_parallel(
+      windows_data, setpoints_lst, method, power_th,
+      charging_power_min, energy_min, include_log
     )
+
+    # scheduling_lst <- map2(
+    #   windows_data, setpoints_lst,
+    #   in_parallel(
+    #     \(x, y)
+    #     smart_charging_window(
+    #       sessions_window = x$sessions_window,
+    #       profiles_demand = x$profiles_demand,
+    #       setpoints = y,
+    #       method = method,
+    #       power_th = power_th,
+    #       charging_power_min = charging_power_min,
+    #       energy_min = energy_min,
+    #       include_log = include_log
+    #     ),
+    #     smart_charging_window = smart_charging_window,
+    #     method = method,
+    #     power_th = power_th,
+    #     charging_power_min = charging_power_min,
+    #     energy_min = energy_min,
+    #     include_log = include_log
+    #   )
+    # )
   }
 
   if (show_progress) cli::cli_progress_step("Cleaning data set")
@@ -566,7 +569,7 @@ get_setpoints <- function(sessions_window, opt_data, profiles_demand, opt_object
 
       if (nrow(non_responsive_sessions) > 0) {
         L_fixed_prof <- non_responsive_sessions %>%
-          get_demand(dttm_seq = dttm_seq, by = "Profile", mc.cores = 1) %>%
+          get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
           pull(!!sym(profile))
       } else {
         L_fixed_prof <- rep(0, length(dttm_seq))
@@ -685,6 +688,46 @@ get_setpoints <- function(sessions_window, opt_data, profiles_demand, opt_object
 }
 
 
+get_setpoints_parallel <- function(windows_data, opt_objective, lambda) {
+
+  if (!requireNamespace("mirai", quietly = TRUE) ||
+      !requireNamespace("carrier", quietly = TRUE)) {
+
+    setpoints_lst <- purrr::map(
+      windows_data,
+      \(x)
+      get_setpoints(
+        sessions_window = x$sessions_window,
+        profiles_demand = x$profiles_demand,
+        opt_data = x$opt_data,
+        opt_objective = opt_objective,
+        lambda = lambda
+      )
+    )
+
+  } else {
+
+    setpoints_lst <- purrr::map(
+      windows_data,
+      purrr::in_parallel(
+        \(x)
+        get_setpoints(
+          sessions_window = x$sessions_window,
+          profiles_demand = x$profiles_demand,
+          opt_data = x$opt_data,
+          opt_objective = opt_objective,
+          lambda = lambda
+        ),
+        get_setpoints = get_setpoints,
+        opt_objective = opt_objective,
+        lambda = lambda
+      )
+    )
+  }
+  return( setpoints_lst )
+}
+
+
 
 #' Set setpoints for smart charging
 #'
@@ -748,7 +791,7 @@ smart_charging_window <- function(sessions_window, profiles_demand, setpoints, m
 
     if (nrow(non_responsive_sessions) > 0) {
       L_fixed_prof <- non_responsive_sessions %>%
-        get_demand(dttm_seq = dttm_seq, by = "Profile", mc.cores = 1) %>%
+        get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
         pull(!!sym(profile))
     } else {
       L_fixed_prof <- rep(0, nrow(setpoints))
@@ -797,6 +840,58 @@ smart_charging_window <- function(sessions_window, profiles_demand, setpoints, m
   )
 }
 
+
+smart_charging_window_parallel <- function(
+    windows_data, setpoints_lst, method, power_th, charging_power_min,
+    energy_min, include_log
+  ) {
+
+  if (!requireNamespace("mirai", quietly = TRUE) ||
+      !requireNamespace("carrier", quietly = TRUE)) {
+
+    scheduling_lst <- purrr::map2(
+      windows_data, setpoints_lst,
+      \(x, y)
+      smart_charging_window(
+        sessions_window = x$sessions_window,
+        profiles_demand = x$profiles_demand,
+        setpoints = y,
+        method = method,
+        power_th = power_th,
+        charging_power_min = charging_power_min,
+        energy_min = energy_min,
+        include_log = include_log
+      )
+    )
+
+  } else {
+
+    scheduling_lst <- map2(
+      windows_data, setpoints_lst,
+      in_parallel(
+        \(x, y)
+        smart_charging_window(
+          sessions_window = x$sessions_window,
+          profiles_demand = x$profiles_demand,
+          setpoints = y,
+          method = method,
+          power_th = power_th,
+          charging_power_min = charging_power_min,
+          energy_min = energy_min,
+          include_log = include_log
+        ),
+        smart_charging_window = smart_charging_window,
+        method = method,
+        power_th = power_th,
+        charging_power_min = charging_power_min,
+        energy_min = energy_min,
+        include_log = include_log
+      )
+    )
+
+  }
+  return( scheduling_lst )
+}
 
 
 

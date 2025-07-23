@@ -12,8 +12,7 @@ optimize_demand(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = NULL,
-  lambda = 0,
-  mc.cores = 1
+  lambda = 0
 )
 }
 \arguments{
@@ -63,9 +62,6 @@ This optional feature lets you apply flexibility only during few hours from the 
 It must be lower than \code{window_days*24} hours.}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
-
-\item{mc.cores}{integer, number of cores to use.
-Must be at least one, and parallelization requires at least two cores.}
 }
 \value{
 numeric vector

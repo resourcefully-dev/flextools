@@ -158,7 +158,7 @@ get_flex_windows <- function(dttm_seq, window_days, window_start_hour, flex_wind
     start = start_windows_idx,
     end = start_windows_idx + windows_length - 1,
     flex_end = start_windows_idx + flex_windows_length - 1,
-    flex_idx = map2(.data$start, .data$flex_end, ~ seq(.x, .y))
+    flex_idx = purrr::map2(.data$start, .data$flex_end, ~ seq(.x, .y))
   ) %>%
     dplyr::filter(.data$end <= length(dttm_seq))
 
@@ -219,7 +219,6 @@ get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, im
 }
 
 
-
 # Optimization of load ------------------------------------------------------------
 
 
@@ -274,22 +273,18 @@ get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, im
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
 #' @param lambda numeric, penalty on change for the flexible load.
-#' @param mc.cores integer, number of cores to use.
-#' Must be at least one, and parallelization requires at least two cores.
 #'
 #' @return numeric vector
 #' @export
 #'
 #' @importFrom dplyr tibble %>% left_join arrange
-#' @importFrom purrr map2
+#' @importFrom purrr map
 #' @importFrom rlang .data
-#' @importFrom parallel mclapply detectCores
 #'
 optimize_demand <- function(opt_data, opt_objective = "grid",
                             direction = 'forward', time_horizon = NULL,
                             window_days = 1, window_start_hour = 0,
-                            flex_window_hours = NULL, lambda = 0,
-                            mc.cores = 1) {
+                            flex_window_hours = NULL, lambda = 0) {
   # Parameters check
   opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
@@ -299,23 +294,6 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
   if (((direction != 'forward') & (direction != 'backward'))) {
     stop("Error: `direction` must be 'forward' or 'backward'")
   }
-
-  # Multi-core parameter check
-  if (mc.cores > detectCores(logical = FALSE) | mc.cores < 1) {
-    mc.cores <- 1
-  }
-  if (mc.cores > 1) {
-    my.mclapply <- switch(
-      Sys.info()[['sysname']], # check OS
-      Windows = {mclapply.windows}, # case: windows
-      Linux   = {mclapply}, # case: linux
-      Darwin  = {mclapply} # case: mac
-    )
-    options(mc.cores = mc.cores) # mclapply functions use `getOption("mc.cores", 2L)`
-  } else {
-    my.mclapply <- map
-  }
-
 
   # Optimization windows
   dttm_seq <- opt_data$datetime
@@ -327,66 +305,70 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
   )
   flex_windows_idxs_seq <- as.numeric(unlist(flex_windows_idxs$flex_idx))
 
+  windows_data <- map(
+    flex_windows_idxs$flex_idx,
+    ~ opt_data[.x, ]
+  )
+
+
   # Optimization
   if (opt_objective == "grid") {
-    O_windows <- my.mclapply(
-      flex_windows_idxs$flex_idx,
-      function(.x) {
-          minimize_net_power_window(
-            G = opt_data$production[.x],
-            LF = opt_data$flexible[.x],
-            LS = opt_data$static[.x],
-            direction = direction,
-            time_horizon = time_horizon,
-            LFmax = opt_data$load_capacity[.x],
-            import_capacity = opt_data$import_capacity[.x],
-            export_capacity = opt_data$export_capacity[.x],
-            lambda = lambda
-        )
-      }
+    O_windows <- map(
+      windows_data,
+      ~ minimize_net_power_window(
+        G = .x$production,
+        LF = .x$flexible,
+        LS = .x$static,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = .x$load_capacity,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        lambda = lambda
+      )
     )
+
   } else if (opt_objective == "cost") {
-    O_windows <- my.mclapply(
-      flex_windows_idxs$flex_idx,
-      function (.x) {
-        minimize_cost_window(
-          G = opt_data$production[.x],
-          LF = opt_data$flexible[.x],
-          LS = opt_data$static[.x],
-          PI = opt_data$price_imported[.x],
-          PE = opt_data$price_exported[.x],
-          PTU = opt_data$price_turn_up[.x],
-          PTD = opt_data$price_turn_down[.x],
+
+    O_windows <- map(
+      windows_data,
+      ~ minimize_cost_window(
+          G = .x$production,
+          LF = .x$flexible,
+          LS = .x$static,
+          PI = .x$price_imported,
+          PE = .x$price_exported,
+          PTU = .x$price_turn_up,
+          PTD = .x$price_turn_down,
           direction = direction,
           time_horizon = time_horizon,
-          LFmax = opt_data$load_capacity[.x],
-          import_capacity = opt_data$import_capacity[.x],
-          export_capacity = opt_data$export_capacity[.x],
+          LFmax = .x$load_capacity,
+          import_capacity = .x$import_capacity,
+          export_capacity = .x$export_capacity,
           lambda = lambda
         )
-      }
     )
+
   } else if (is.numeric(opt_objective)) {
-    O_windows <- my.mclapply(
-      flex_windows_idxs$flex_idx,
-      function (.x) {
-        optimize_demand_window(
-          G = opt_data$production[.x],
-          LF = opt_data$flexible[.x],
-          LS = opt_data$static[.x],
-          PI = opt_data$price_imported[.x],
-          PE = opt_data$price_exported[.x],
-          PTU = opt_data$price_turn_up[.x],
-          PTD = opt_data$price_turn_down[.x],
+
+    O_windows <- map(
+      windows_data,
+      ~ optimize_demand_window(
+          G = .x$production,
+          LF = .x$flexible,
+          LS = .x$static,
+          PI = .x$price_imported,
+          PE = .x$price_exported,
+          PTU = .x$price_turn_up,
+          PTD = .x$price_turn_down,
           direction = direction,
           time_horizon = time_horizon,
-          LFmax = opt_data$load_capacity[.x],
-          import_capacity = opt_data$import_capacity[.x],
-          export_capacity = opt_data$export_capacity[.x],
+          LFmax = .x$load_capacity,
+          import_capacity = .x$import_capacity,
+          export_capacity = .x$export_capacity,
           lambda = lambda,
           w = opt_objective
-        )
-      }
+      )
     )
   } else {
     stop("Error: invalid `opt_objective`")
@@ -767,15 +749,12 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
 #' @param lambda numeric, penalty on change for the flexible load.
-#' @param mc.cores integer, number of cores to use.
-#' Must be at least one, and parallelization requires at least two cores.
 #'
 #' @return numeric vector
 #' @export
 #'
 #' @importFrom dplyr tibble %>%
 #' @importFrom purrr map
-#' @importFrom parallel detectCores mclapply
 #'
 #' @examples
 #' library(dplyr)
@@ -800,8 +779,7 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc, Bd,
                                      SOCmin = 0, SOCmax = 100, SOCini = NULL,
                                      window_days = 1, window_start_hour = 0,
-                                     flex_window_hours = 24, lambda = 0,
-                                     mc.cores = 1) {
+                                     flex_window_hours = 24, lambda = 0) {
 
   # Parameters check
   if (is.null(opt_data)) {
@@ -825,22 +803,6 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
     SOCini <- SOCmax
   }
 
-  # Multi-core parameter check
-  if (mc.cores > detectCores(logical = FALSE) | mc.cores < 1) {
-    mc.cores <- 1
-  }
-  if (mc.cores > 1) {
-    my.mclapply <- switch(
-      Sys.info()[['sysname']], # check OS
-      Windows = {mclapply.windows}, # case: windows
-      Linux   = {mclapply}, # case: linux
-      Darwin  = {mclapply} # case: mac
-    )
-    options(mc.cores = mc.cores) # mclapply functions use `getOption("mc.cores", 2L)`
-  } else {
-    my.mclapply <- map
-  }
-
   # Optimization windows
   dttm_seq <- opt_data$datetime
   time_resolution <- get_time_resolution(dttm_seq)
@@ -852,65 +814,71 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   )
   flex_windows_idxs_seq <- as.numeric(unlist(flex_windows_idxs$flex_idx))
 
+  windows_data <- map(
+    flex_windows_idxs$flex_idx,
+    ~ opt_data[.x, ]
+  )
+
   # Optimization
   if (opt_objective == "grid") {
-    B_windows <- my.mclapply(
-      flex_windows_idxs$flex_idx,
-      function (.x) {
-        minimize_net_power_window_battery(
-          G = opt_data$production[.x], L = opt_data$static[.x],
-          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-          import_capacity = opt_data$import_capacity[.x],
-          export_capacity = opt_data$export_capacity[.x]
-        )
-      }
+
+    B_windows <- map(
+      windows_data,
+      ~ minimize_net_power_window_battery(
+        G = .x$production, L = .x$static,
+        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
+        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity
+      )
     )
+
   } else if (opt_objective == "curtail") {
-    B_windows <- my.mclapply(
-      flex_windows_idxs$flex_idx,
-      function (.x) {
-        curtail_capacity_window_battery(
-          G = opt_data$production[.x], L = opt_data$static[.x],
-          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-          import_capacity = opt_data$import_capacity[.x],
-          export_capacity = opt_data$export_capacity[.x]
-        )
-      }
+
+    B_windows <- map(
+      windows_data,
+      ~ curtail_capacity_window_battery(
+        G = .x$production, L = .x$static,
+        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
+        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity
+      )
     )
+
   } else if (opt_objective == "cost") {
-    B_windows <- my.mclapply(
-      flex_windows_idxs$flex_idx,
-      function (.x) {
-        minimize_cost_window_battery(
-          G = opt_data$production[.x], L = opt_data$static[.x],
-          PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
-          PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
-          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-          import_capacity = opt_data$import_capacity[.x],
-          export_capacity = opt_data$export_capacity[.x],
-          lambda = lambda
-        )
-      }
+
+    B_windows <- map(
+      windows_data,
+      ~ minimize_cost_window_battery(
+        G = .x$production, L = .x$static,
+        PI = .x$price_imported, PE = .x$price_exported,
+        PTU = .x$price_turn_up, PTD = .x$price_turn_down,
+        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
+        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        lambda = lambda
+      )
     )
+
   } else if (is.numeric(opt_objective)) {
-    B_windows <- my.mclapply(
-      flex_windows_idxs$flex_idx,
-      function (.x) {
-        optimize_battery_window(
-          G = opt_data$production[.x], L = opt_data$static[.x],
-          PI = opt_data$price_imported[.x], PE = opt_data$price_exported[.x],
-          PTU = opt_data$price_turn_up[.x], PTD = opt_data$price_turn_down[.x],
-          Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-          SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
-          import_capacity = opt_data$import_capacity[.x],
-          export_capacity = opt_data$export_capacity[.x],
-          w = opt_objective, lambda = lambda
-        )
-      }
+
+    B_windows <- map(
+      windows_data,
+      ~ optimize_battery_window(
+        G = .x$production, L = .x$static,
+        PI = .x$price_imported, PE = .x$price_exported,
+        PTU = .x$price_turn_up, PTD = .x$price_turn_down,
+        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
+        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        w = opt_objective,
+        lambda = lambda
+      )
     )
+
   } else {
     stop("Error: invalid `opt_objective`")
   }

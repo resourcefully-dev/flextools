@@ -7,6 +7,7 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/articles/multi-core.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/articles/parallel-processing.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/articles/smart-charging-advanced.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/articles/smart-charging.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/articles/user-profiles.html</loc></url>
@@ -20,6 +21,7 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/change_timeseries_resolution.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/change_timeseries_year.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/convert_time_num_to_period.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/curtail_capacity_window_battery.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/decrease_numeric_resolution.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/decrease_timeseries_resolution.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/energy_profiles.html</loc></url>
@@ -61,6 +63,8 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/set_responsive.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_charging.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_charging_window.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/solve_optimization_battery_window.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/solve_optimization_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/summarise_by_segment.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/summarise_energy_charged.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/summarise_profile_smart_charging_sessions.html</loc></url>

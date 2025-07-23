@@ -16,9 +16,9 @@ reference:
     - change_timeseries_resolution
     - change_timeseries_year
     - aggregate_timeseries
+    - add_extra_days
   - title: Optimization
   - contents:
-    - add_extra_days
     - optimize_demand
     - add_battery_optimization
   - title: Smart charging
@@ -55,7 +55,7 @@ articles:
       - minimize_net_power
       - minimize_cost
       - combined_optimization
-      - multi-core
+      - parallel-processing
   - title: Demand-response
     navbar: Demand-response
     contents:

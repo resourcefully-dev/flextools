@@ -12,9 +12,9 @@ library(lubridate)
 library(ggplot2)
 ```
 
-The function `smart_charging()` has complex calculations (described in the [Smart charging article](https://resourcefully-dev.github.io/flextools/articles/smart-charging.html)) that are repeated on a daily basis. A 24 hours period is considered an independent optimization window, thus the corresponding calculations can be done in parallel. 
+The function `smart_charging()` has complex calculations (described in the [Smart charging article](https://resourcefully-dev.github.io/flextools/articles/smart-charging.html)) that are repeated on a daily basis. A 24 hours period is considered an independent optimization window, thus the corresponding calculations can be done in parallel.
 
-At the same time, in computer science, a common practice to reduce computation times is **parallel processing** when the CPU of the computer has multiple cores that can work independently. We can discover the number of cores in our computer CPU using function `parallel::detectCores()`:
+In computer science, a common practice to reduce computation times is **parallel processing** when the CPU of the computer has multiple cores that can work independently. We can discover the number of cores in our computer CPU using function `parallel::detectCores()`:
 
 ```{r}
 n_cores <- parallel::detectCores()
@@ -22,6 +22,10 @@ print(n_cores)
 ```
 
 In this case, the CPU used is the Apple M4 Pro, which features 10 performance CPU cores (P-core) running at up to 4.5 GHz along with 4 efficient cores (E-core) running at up to 2.6 GHz. So, when `parallel::detectCores()` returns 14, macOS is exposing 14 logical cores — but not all of them are equal in speed.
+
+
+In **flextools**, parallel processing is used inside the `smart_charging()` function, using the **mirai** package and its `mirai::daemons()` function to set the number of cores that we want to work in parallel. Below you will find an example about how to use this functionality. 
+
 
 
 ## Smart charging
@@ -33,7 +37,7 @@ sessions_2019 <- evsim::california_ev_sessions_profiles %>%
   filter(year(ConnectionStartDateTime) == 2019)
 ```
 
-Let's use these real charging sessions to simulate `smart_charging()` using multiple cores but also different values of number of days (optimization windows):
+Let's use these real charging sessions to simulate `smart_charging()` using multiple cores (with `mirai::daemons()`) but also different values of number of days (optimization windows):
 
 ```{r, echo = T, eval = F}
 n_days_seq <- c(3, 7, 15, 30, 180, 365) # Days in a year
@@ -46,7 +50,6 @@ cores_time <- tibble(
 
 for (nd in n_days_seq) {
   message(nd, " days ---------------- ")
-  dutils::tic()
   sessions <- sessions_2019 %>%
     filter(date(ConnectionStartDateTime) <= dmy(01012019)+days(nd)) %>% 
     evsim::adapt_charging_features(time_resolution = 15)
@@ -59,7 +62,7 @@ for (nd in n_days_seq) {
   )
   
   for (mcc in cores_time$cores[cores_time$days == nd]) {
-    message(mcc, " cores - ", Sys.time())
+    message(mcc, " cores")
     if (mcc > 1) {
       mirai::daemons(mcc)
     }
@@ -76,7 +79,6 @@ for (nd in n_days_seq) {
       cores_time$cores == mcc & cores_time$days == nd
     ] <- as.numeric(results[3])
   }
-  dutils::toc()
 }
 
 # Adapt variables for a better plot

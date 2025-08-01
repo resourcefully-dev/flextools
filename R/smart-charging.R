@@ -866,7 +866,7 @@ smart_charging_window_parallel <- function(
 
   } else {
 
-    scheduling_lst <- map2(
+    scheduling_lst <- purrr::map2(
       windows_data, setpoints_lst,
       in_parallel(
         \(x, y)

@@ -68,7 +68,7 @@ where \code{0 == "cost"} and \code{1 == "grid"}.}
 This optional feature lets you apply flexibility only during few hours from the \code{window_start_hour}.
 It must be lower than \code{window_days*24} hours.}
 
-\item{lambda}{numeric, penalty on change for the flexible load.}
+\item{lambda}{numeric, penalty on change for the battery compared to the previous time slot.}
 }
 \value{
 numeric vector

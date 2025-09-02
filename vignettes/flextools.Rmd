@@ -19,7 +19,7 @@ Functions `optimize_demand()`, `smart_charging()` and `add_battery_optimization(
 * **Direction to shift energy** (forwards or backwards)
 * **Time horizon** of the energy shift, being the maximum number of time-slots to shift demand from
 * **Optimization window** characteristics, such as the length (in days), the starting hour or the hours where energy shifting is allowed.
-* **Penalty on change** for the flexible load (parameter `lambda`). The higher lambda, the lower flexibility potential.
+* **Penalty on change** for the flexible load or battery (parameter `lambda`). The higher lambda, the lower flexibility potential.
 
 
 Moreover, package `flextools` provides an example data set of time-series energy and prices profiles to test its functions, called  `energy_profiles`. We will filter the whole data set for just a single week, and rename the variables with custom names to fit the column names required in the `flextools` functions:

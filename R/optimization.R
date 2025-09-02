@@ -748,7 +748,7 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' @param flex_window_hours integer, flexibility window length, in hours.
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
-#' @param lambda numeric, penalty on change for the flexible load.
+#' @param lambda numeric, penalty on change for the battery compared to the previous time slot.
 #'
 #' @return numeric vector
 #' @export

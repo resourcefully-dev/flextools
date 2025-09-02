@@ -3,7 +3,7 @@ title: "Net power optimization"
 output: html_document
 ---
 
-Functions `optimize_demand`, `add_battery_optimization` or `smart_charging` make use of Quadratic programming in order to obtain the optimal power load given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, `flextools` package allows to optimize a time-series power load considering multiple objectives:
+Functions `optimize_demand()`, `add_battery_optimization()` or `smart_charging()` make use of Quadratic programming in order to obtain the optimal power load given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, `flextools` package allows to optimize a time-series power load considering multiple objectives:
 
 * Minimize the power exchanged with the grid (net power)
 * Minimize the energy cost

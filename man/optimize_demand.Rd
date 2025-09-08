@@ -29,6 +29,8 @@ The other columns can be (optional):
 offices, etc.
 \item \code{import_capacity}: maximum imported power from the grid (in kW),
 for example the contracted power with the energy company.
+\item \code{export_capacity}: maximum exported power from the grid (in kW),
+for example the contracted power with the energy company.
 \item \code{load_capacity}: maximum power that the \code{flexible} load
 can consume (in kW).
 \item \code{production}: local power generation (in kW).

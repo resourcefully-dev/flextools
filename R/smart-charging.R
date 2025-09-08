@@ -22,7 +22,10 @@
 #' - `static`: static power demand (in kW) from other sectors like buildings,
 #' offices, etc.
 #'
-#' - `grid_capacity`: maximum imported power from the grid (in kW),
+#' - `import_capacity`: maximum imported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
+#' - `export_capacity`: maximum exported power from the grid (in kW),
 #' for example the contracted power with the energy company.
 #'
 #' - `production`: local power generation (in kW).

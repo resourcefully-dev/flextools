@@ -242,6 +242,9 @@ get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, im
 #' - `import_capacity`: maximum imported power from the grid (in kW),
 #' for example the contracted power with the energy company.
 #'
+#' - `export_capacity`: maximum exported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
 #' - `load_capacity`: maximum power that the `flexible` load
 #' can consume (in kW).
 #'
@@ -416,11 +419,6 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 #' @keywords internal
 #'
 solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, P, q) {
-
-  if (any(import_capacity + G - LS < 0)) {
-    message_once("Warning: grid is congested (import) without any flexible load. Not optimizing.")
-    return ( LF )
-  }
 
   # Round to 2 decimals to avoid problems with lower and upper bounds
   G <- round(G, 2)
@@ -984,6 +982,7 @@ solve_optimization_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
 
+  # nrow(P) > time_slots: If cost optimization
   if (nrow(P) > time_slots) {
 
     # Constraints

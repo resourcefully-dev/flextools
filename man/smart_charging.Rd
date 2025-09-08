@@ -33,7 +33,9 @@ The other columns can be:
 \itemize{
 \item \code{static}: static power demand (in kW) from other sectors like buildings,
 offices, etc.
-\item \code{grid_capacity}: maximum imported power from the grid (in kW),
+\item \code{import_capacity}: maximum imported power from the grid (in kW),
+for example the contracted power with the energy company.
+\item \code{export_capacity}: maximum exported power from the grid (in kW),
 for example the contracted power with the energy company.
 \item \code{production}: local power generation (in kW).
 This is used when \code{opt_objective = "grid"}.

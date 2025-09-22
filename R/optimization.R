@@ -527,7 +527,7 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
     return( round(O$x[seq_len(time_slots)], 2) )
   } else {
     # If it's not feasible, then remove grid constraints
-    message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
+    message_once("\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
     import_capacity <- rep(Inf, time_slots)
     export_capacity <- rep(Inf, time_slots)
     L_bounds <- get_bounds(
@@ -550,7 +550,7 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
     if (O$info$status_val %in% c(1, 2)) {
       return( round(O$x[seq_len(time_slots)], 2) )
     } else {
-      message_once(paste0("Optimization warning: ", O$info$status, ". No optimization provided."))
+      message_once(paste0("\u26A0\uFE0F Optimization warning: ", O$info$status, ". No optimization provided."))
       return( LF )
     }
   }
@@ -787,7 +787,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   opt_data <- check_optimization_data(opt_data, opt_objective)
 
   if (Bcap == 0 | Bc == 0 | Bd == 0 | SOCmin == SOCmax) {
-    message("Warning: battery parameters don't allow optimization.")
+    message("\u26A0\uFE0F Warning: battery parameters don't allow optimization.")
     return( rep(0, nrow(opt_data)) )
   }
 
@@ -1076,7 +1076,7 @@ solve_optimization_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
     return( round(B$x[seq_len(time_slots)], 2) )
   } else {
     # If it's not feasible, then remove grid constraints
-    message_once("Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
+    message_once("\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
     import_capacity <- rep(Inf, time_slots)
     export_capacity <- rep(Inf, time_slots)
 
@@ -1097,7 +1097,7 @@ solve_optimization_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
     if (B$info$status_val %in% c(1, 2)) {
       return( round(B$x[seq_len(time_slots)], 2) )
     } else {
-      message_once(paste0("Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
+      message_once(paste0("\u26A0\uFE0F Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
       return( rep(0, time_slots) )
     }
   }

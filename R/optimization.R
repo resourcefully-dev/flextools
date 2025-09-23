@@ -520,7 +520,15 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
   }
 
   # Solve
-  solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+  solver <- osqp::osqp(
+    P, q, Amat, lb, ub,
+    osqp::osqpSettings(
+      verbose = FALSE,
+      eps_abs = 1e-6,
+      eps_rel = 1e-6,
+      polish = TRUE
+    )
+  )
   O <- solver$Solve()
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
@@ -546,7 +554,15 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
       ub <- round(c(L_bounds$ub_O, ub_cumsum, ub_energy), 2)
     }
 
-    solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+    solver <- osqp::osqp(
+      P, q, Amat, lb, ub,
+      osqp::osqpSettings(
+        verbose = FALSE,
+        eps_abs = 1e-6,
+        eps_rel = 1e-6,
+        polish = TRUE
+      )
+    )
     O <- solver$Solve()
 
     if (O$info$status_val %in% c(1, 2)) {
@@ -1140,7 +1156,15 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
   }
 
   # Solve
-  solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+  solver <- osqp::osqp(
+    P, q, Amat, lb, ub,
+    osqp::osqpSettings(
+      verbose = FALSE,
+      eps_abs = 1e-6,
+      eps_rel = 1e-6,
+      polish = TRUE
+    )
+  )
   B <- solver$Solve()
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
@@ -1166,7 +1190,15 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       ub <- bounds$ub
     }
 
-    solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
+    solver <- osqp::osqp(
+      P, q, Amat, lb, ub,
+      osqp::osqpSettings(
+        verbose = FALSE,
+        eps_abs = 1e-6,
+        eps_rel = 1e-6,
+        polish = TRUE
+      )
+    )
     B <- solver$Solve()
 
     if (B$info$status_val %in% c(1, 2)) {

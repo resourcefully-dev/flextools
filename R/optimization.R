@@ -989,10 +989,6 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
 #'
 solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff) {
 
-  # Round to 2 decimals to avoid problems with lower and upper bounds
-  G <- round(G, 2)
-  L <- round(L, 2)
-
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
@@ -1072,8 +1068,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       )
 
       list(
-        lb = round(lb, 2),
-        ub = round(ub, 2)
+        lb = lb,
+        ub = ub
       )
     }
 
@@ -1132,8 +1128,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       )
 
       list(
-        lb = round(lb, 2),
-        ub = round(ub, 2)
+        lb = lb,
+        ub = ub
       )
     }
 
@@ -1152,7 +1148,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
   if (B$info$status_val %in% c(1, 2)) {
     charge_solution <- B$x[seq_len(time_slots)]
     discharge_solution <- B$x[seq_len(time_slots) + time_slots]
-    return( round(charge_solution - discharge_solution, 2) )
+    battery_profile <- charge_solution - discharge_solution
+    return( round(battery_profile, 2) )
   } else {
     # If it's not feasible, then remove grid constraints
     message_once("\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
@@ -1175,7 +1172,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
     if (B$info$status_val %in% c(1, 2)) {
       charge_solution <- B$x[seq_len(time_slots)]
       discharge_solution <- B$x[seq_len(time_slots) + time_slots]
-      return( round(charge_solution - discharge_solution, 2) )
+      battery_profile <- charge_solution - discharge_solution
+      return( round(battery_profile, 2) )
     } else {
       message_once(paste0("\u26A0\uFE0F Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
       return( rep(0, time_slots) )

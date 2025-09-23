@@ -263,7 +263,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 
   # Get setpoints -----------------------------------------------------------
   if (show_progress) cli::cli_progress_step("Defining setpoints")
-
+  
   setpoints_lst <- get_setpoints_parallel(
     windows_data, opt_objective, lambda
   )
@@ -692,6 +692,8 @@ get_setpoints <- function(sessions_window, opt_data, profiles_demand, opt_object
 
 
 get_setpoints_parallel <- function(windows_data, opt_objective, lambda) {
+
+  reset_message_once()
 
   if (!requireNamespace("mirai", quietly = TRUE) ||
       !requireNamespace("carrier", quietly = TRUE)) {

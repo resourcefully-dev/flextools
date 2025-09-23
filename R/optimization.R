@@ -315,6 +315,8 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 
 
   # Optimization
+  reset_message_once()
+  
   if (opt_objective == "grid") {
     O_windows <- map(
       windows_data,
@@ -821,6 +823,8 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   )
 
   # Optimization
+  reset_message_once()
+
   if (opt_objective == "grid") {
 
     B_windows <- map(

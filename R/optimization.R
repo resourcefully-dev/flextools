@@ -37,11 +37,11 @@ check_optimization_data <- function(opt_data, opt_objective) {
     opt_data$load_capacity <- Inf
   }
 
-  if (!(opt_objective %in% c("grid", "cost", "none", "curtail")) & !is.numeric(opt_objective)) {
+  if (!(opt_objective %in% c("grid", "cost", "none", "curtail")) && !is.numeric(opt_objective)) {
     stop("Error: `opt_objective` not valid")
   }
 
-  if (opt_objective == "cost" | is.numeric(opt_objective)) {
+  if (opt_objective == "cost" || is.numeric(opt_objective)) {
     if (!("price_imported" %in% names(opt_data))) {
       message("Warning: `price_imported` variable not found in `opt_data`.")
       opt_data$price_imported <- 1
@@ -138,16 +138,16 @@ get_flex_windows <- function(dttm_seq, window_days, window_start_hour, flex_wind
   }
 
   # Flexibility windows according to `flex_window_hours`
-  resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units="mins")
+  resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = "mins")
 
   if (is.null(flex_window_hours)) {
     flex_windows_length <- windows_length
   } else {
-    if (flex_window_hours > 24*window_days) {
+    if (flex_window_hours > 24 * window_days) {
       message("Warning: `flex_window_hours` must be lower than `window_days` hours.")
-      flex_window_hours <- 24*window_days
+      flex_window_hours <- 24 * window_days
     }
-    flex_window_length <- flex_window_hours*60/resolution
+    flex_window_length <- flex_window_hours * 60 / resolution
     flex_windows_length <- purrr::map_dbl(
       windows_length,
       ~ ifelse(.x < flex_window_length, .x, flex_window_length)
@@ -294,7 +294,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
     stop("Error: `opt_data` parameter is empty.")
   }
 
-  if (((direction != 'forward') & (direction != 'backward'))) {
+  if (((direction != 'forward') && (direction != 'backward'))) {
     stop("Error: `direction` must be 'forward' or 'backward'")
   }
 
@@ -781,7 +781,7 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc, Bd,
                                      SOCmin = 0, SOCmax = 100, SOCini = NULL,
                                      window_days = 1, window_start_hour = 0,
-                                     flex_window_hours = 24, lambda = 0, 
+                                     flex_window_hours = 24, lambda = 0,
                                      charge_eff = 1, discharge_eff = 1) {
 
   # Parameters check
@@ -791,7 +791,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   opt_data <- opt_data %>% mutate(flexible = 0)
   opt_data <- check_optimization_data(opt_data, opt_objective)
 
-  if (Bcap == 0 | Bc == 0 | Bd == 0 | SOCmin == SOCmax) {
+  if (Bcap == 0 || Bc == 0 || Bd == 0 || SOCmin == SOCmax) {
     message("\u26A0\uFE0F Warning: battery parameters don't allow optimization.")
     return( rep(0, nrow(opt_data)) )
   }
@@ -994,7 +994,7 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
 
-  if (charge_eff <= 0 | discharge_eff <= 0) {
+  if (charge_eff <= 0 || discharge_eff <= 0) {
     stop("Error: charge and discharge efficiencies must be positive")
   }
 
@@ -1253,7 +1253,6 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 
   # Optimization parameters
   time_slots <- length(G)
-  identityMat <- diag(time_slots)
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
@@ -1332,7 +1331,7 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
 
   # Objective function terms
   # unknown variable: X = [C, D, I, E]
-  penaltyMat <- 2 * (lambda*lambdaMat + w*mean(PI)^2*identityMat)
+  penaltyMat <- 2 * (lambda * lambdaMat + w * mean(PI)^2 * identityMat)
   zero_block <- matrix(0, nrow = 2 * time_slots, ncol = time_slots)
   zero_square <- matrix(0, nrow = time_slots, ncol = time_slots)
   P <- rbind(

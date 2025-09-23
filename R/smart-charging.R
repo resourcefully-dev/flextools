@@ -774,8 +774,6 @@ smart_charging_window <- function(sessions_window, profiles_demand, setpoints, m
   }
 
   dttm_seq <- setpoints$datetime
-  time_resolution <- get_time_resolution(dttm_seq, units = "mins")
-
   sessions_considered <- tibble()
   log <- list()
   log_window_name <- as.character(date(dttm_seq[1]))

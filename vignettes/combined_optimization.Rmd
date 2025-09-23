@@ -50,7 +50,7 @@ Moreover, this optimization problem has the constraints described in [Energy cos
 To minimize the energy cost using the **flexibility from a battery**, the objective function of the optimization problem has been raised in the following way:
 
 $$
-min \sum_{t=1}^{T} w·((L_t + B_t - G_t)· \frac{\sum_{t=1}^{T}PI_t}{T})^2 + (1-w)·(I_t·PI_t - E_t·PE_t - PTU_t·B_t  - PTD_t·(-B_t)) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^{2}
+\min_{C_t, D_t, I_t, E_t} \sum_{t=1}^{T} \left[ w\left((L_t + C_t - D_t - G_t) \cdot \frac{\sum_{k=1}^{T}PI_k}{T}\right)^2 + (1-w)\left(I_t \cdot PI_t - E_t \cdot PE_t + (PTD_t - PTU_t)(C_t - D_t)\right) \right] + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
 $$
 
 
@@ -59,7 +59,9 @@ Where:
 - $T$ : Number of time intervals within the optimization window
 - $G_t$ : Local power generation time-series vector
 - $L_t$ : Power load time-series vector
-- $B_t$ : Optimal battery power time-series vector. Positive charging, negative discharging.
+- $C_t$ : Battery charging power (decision variable, non-negative)
+- $D_t$ : Battery discharging power (decision variable, non-negative)
+- $B_t = C_t - D_t$ : Net battery exchange with the grid (positive = charging)
 - $I_t$ : imported energy
 - $E_t$ : exported energy
 - $PI_t$ : imported energy price
@@ -68,6 +70,5 @@ Where:
 - $PTD_t$ : balancing price for turn-down power
 - $\lambda$ : penalty on change for the flexible load
 
-Moreover, this optimization problem has the constraints described in [Energy cost optimization article (battery section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization).
-
+Moreover, this optimization problem has the constraints described in [Energy cost optimization article (battery section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization), including the charging and discharging efficiencies ($\eta_c$, $\eta_d$).
 

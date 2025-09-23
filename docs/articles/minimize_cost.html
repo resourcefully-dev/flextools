@@ -106,7 +106,7 @@ considering:</p>
 <p>To minimize the energy cost using the <strong>flexibility from a
 power demand profile</strong>, the objective function of the
 optimization problem has been raised in the following way:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mi>i</mi><mi>n</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>I</mi><mi>t</mi></msub><mo>·</mo><mi>P</mi><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>·</mo><mi>P</mi><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><mi>P</mi><mi>T</mi><msub><mi>U</mi><mi>t</mi></msub><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>O</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>−</mo><mi>P</mi><mi>T</mi><msub><mi>D</mi><mi>t</mi></msub><mrow><mo stretchy="true" form="prefix">(</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo>−</mo><msub><mi>O</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>+</mo><mi>λ</mi><msup><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>O</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mi>i</mi><mi>n</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>I</mi><mi>t</mi></msub><mo>·</mo><mi>P</mi><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>·</mo><mi>P</mi><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><mi>P</mi><mi>T</mi><msub><mi>U</mi><mi>t</mi></msub><mo stretchy="false" form="prefix">(</mo><msub><mi>O</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>P</mi><mi>T</mi><msub><mi>D</mi><mi>t</mi></msub><mo stretchy="false" form="prefix">(</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo>−</mo><msub><mi>O</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>+</mo><mi>λ</mi><mo stretchy="false" form="prefix">(</mo><msub><mi>O</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><msup><mo stretchy="false" form="postfix">)</mo><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
 min \sum_{t=1}^{T} I_t·PI_t - E_t·PE_t - PTU_t(O_t-LF_t)  - PTD_t(LF_t-O_t) + \lambda (O_t-LF_t)^{2}
 </annotation></semantics></math></p>
 <p>The objective function and constraints of this optimization problem
@@ -155,7 +155,7 @@ constraints:</p>
 <li>The energy consumed by the flexible load must remain the same than
 the expected behavior:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>O</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mo>=</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>O</mi><mi>t</mi></msub><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>=</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mi mathvariant="normal">Δ</mi><mi>t</mi></mrow><annotation encoding="application/x-tex">
 \sum_{t=1}^T O_t \Delta t = \sum_{t=1}^T LF_t \Delta t
 </annotation></semantics></math></p>
 <ul>
@@ -170,7 +170,7 @@ the expected behavior:</li>
 energy consumed with the maximum grid import capacity
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>T</mi></msub></mrow><annotation encoding="application/x-tex">IC_T</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mi mathvariant="normal">Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
 0 \le I_t \le IC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
@@ -178,7 +178,7 @@ energy consumed with the maximum grid import capacity
 capacity
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mi mathvariant="normal">Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
 0 \le E_t \le EC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
@@ -261,8 +261,8 @@ O_u \le \sum_{t = u}^{u+h} LF_t \quad u = 1 \dots T
 <p>To minimize the energy cost using the <strong>flexibility from a
 battery</strong>, the objective function of the optimization problem has
 been raised in the following way:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mi>i</mi><mi>n</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>I</mi><mi>t</mi></msub><mo>·</mo><mi>P</mi><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>·</mo><mi>P</mi><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><mi>P</mi><mi>T</mi><msub><mi>U</mi><mi>t</mi></msub><mo>·</mo><msub><mi>B</mi><mi>t</mi></msub><mo>−</mo><mi>P</mi><mi>T</mi><msub><mi>D</mi><mi>t</mi></msub><mo>·</mo><mrow><mo stretchy="true" form="prefix">(</mo><mi>−</mi><msub><mi>B</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>+</mo><mi>λ</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mrow><mi>T</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>B</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>B</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
-min \sum_{t=1}^{T} I_t·PI_t - E_t·PE_t - PTU_t·B_t  - PTD_t·(-B_t) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^{2}
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munder><mi mathvariant="normal">min</mi><mrow><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><msub><mi>D</mi><mi>t</mi></msub><mo>,</mo><msub><mi>I</mi><mi>t</mi></msub><mo>,</mo><msub><mi>E</mi><mi>t</mi></msub></mrow></munder><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>I</mi><mi>t</mi></msub><mo>⋅</mo><mi>P</mi><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>⋅</mo><mi>P</mi><msub><mi>E</mi><mi>t</mi></msub><mo>+</mo><mo stretchy="false" form="prefix">(</mo><mi>P</mi><mi>T</mi><msub><mi>D</mi><mi>t</mi></msub><mo>−</mo><mi>P</mi><mi>T</mi><msub><mi>U</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo stretchy="false" form="prefix">(</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo stretchy="true" form="postfix">)</mo></mrow><mo>+</mo><mi>λ</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mrow><mi>T</mi><mo>−</mo><mn>1</mn></mrow></munderover><mo minsize="180%" maxsize="180%" stretchy="true" form="prefix">(</mo><mo stretchy="false" form="prefix">(</mo><msub><mi>C</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>D</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mo stretchy="false" form="prefix">(</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><msup><mo minsize="180%" maxsize="180%" stretchy="true" form="postfix">)</mo><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
+\min_{C_t, D_t, I_t, E_t} \sum_{t=1}^{T} \left( I_t \cdot PI_t - E_t \cdot PE_t + (PTD_t - PTU_t)(C_t - D_t) \right) + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
 </annotation></semantics></math></p>
 <p>Where:</p>
 <ul>
@@ -276,9 +276,14 @@ min \sum_{t=1}^{T} I_t·PI_t - E_t·PE_t - PTU_t·B_t  - PTD_t·(-B_t) + \lambda
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>L</mi><mi>t</mi></msub><annotation encoding="application/x-tex">L_t</annotation></semantics></math>
 : Power load time-series vector</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>B</mi><mi>t</mi></msub><annotation encoding="application/x-tex">B_t</annotation></semantics></math>
-: Optimal battery power time-series vector. Positive charging, negative
-discharging.</li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>C</mi><mi>t</mi></msub><annotation encoding="application/x-tex">C_t</annotation></semantics></math>
+: Battery charging power (decision variable, non-negative)</li>
+<li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>D</mi><mi>t</mi></msub><annotation encoding="application/x-tex">D_t</annotation></semantics></math>
+: Battery discharging power (decision variable, non-negative)</li>
+<li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>B</mi><mi>t</mi></msub><mo>=</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">B_t = C_t - D_t</annotation></semantics></math>
+: Net battery exchange with the grid (positive = charging)</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>I</mi><mi>t</mi></msub><annotation encoding="application/x-tex">I_t</annotation></semantics></math>
 : imported energy</li>
@@ -322,35 +327,41 @@ following parameters used in the constraints below:</p>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub></mrow><annotation encoding="application/x-tex">SOC_{ini}</annotation></semantics></math>
 : state of charge at the beginning/end of the optimization window</li>
+<li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>η</mi><mi>c</mi></msub><annotation encoding="application/x-tex">\eta_c</annotation></semantics></math>
+: Battery charging efficiency</li>
+<li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>η</mi><mi>d</mi></msub><annotation encoding="application/x-tex">\eta_d</annotation></semantics></math>
+: Battery discharging efficiency</li>
 </ul>
 <p>Optimization constraints:</p>
 <ul>
-<li>Battery power (positive = charging, negative = discharging)
-limits:</li>
+<li>Battery charging and discharging limits:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><msub><mi>B</mi><mi>d</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>c</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
--B_d \le B_t \le B_c \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>C</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>c</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msub><mi>D</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>d</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le C_t \le B_c \quad t \in T \qquad 0 \le D_t \le B_d \quad t \in T
 </annotation></semantics></math></p>
 <ul>
-<li>State of charge limits:</li>
+<li>State of charge limits, considering charging and discharging
+efficiencies:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>i</mi><mi>n</mi></mrow></msub><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub><mo>+</mo><mfrac><mrow><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>B</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi></mrow><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub></mfrac><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-SOC_{min} \le SOC_{ini} + \frac{\sum_{t=1}^T B_t \Delta t}{B_{cap}} \le SOC_{max} \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>i</mi><mi>n</mi></mrow></msub><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub><mo>+</mo><mfrac><mn>1</mn><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub></mfrac><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>t</mi></munderover><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>η</mi><mi>c</mi></msub><msub><mi>C</mi><mi>k</mi></msub><mo>−</mo><mfrac><msub><mi>D</mi><mi>k</mi></msub><msub><mi>η</mi><mi>d</mi></msub></mfrac><mo stretchy="true" form="postfix">)</mo></mrow><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>=</mo><mn>1</mn><mo>,</mo><mi>…</mi><mo>,</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+SOC_{min} \le SOC_{ini} + \frac{1}{B_{cap}} \sum_{k=1}^t \left(\eta_c C_k - \frac{D_k}{\eta_d}\right) \Delta t \le SOC_{max} \quad t = 1, \dots, T
 </annotation></semantics></math></p>
 <ul>
-<li>The balance of charged/discharge energy must be 0 at the end of the
+<li>The balance of stored energy must be 0 at the end of the
 optimization window to have the same initial state of charge at the
 beginning of every optimization window:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>B</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">
-\sum_{t=1}^T B_t \Delta t = 0
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>η</mi><mi>c</mi></msub><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><mfrac><msub><mi>D</mi><mi>t</mi></msub><msub><mi>η</mi><mi>d</mi></msub></mfrac><mo stretchy="true" form="postfix">)</mo></mrow><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">
+\sum_{t=1}^T \left(\eta_c C_t - \frac{D_t}{\eta_d}\right) \Delta t = 0
 </annotation></semantics></math></p>
 <ul>
 <li>The imported energy must remain between 0 and the maximum grid
 import capacity
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mi mathvariant="normal">Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
 0 \le I_t \le IC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
@@ -358,14 +369,14 @@ import capacity
 export capacity
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mi>Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mi mathvariant="normal">Δ</mi><mi>t</mi><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
 0 \le E_t \le EC_t \Delta t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
 <li>Energy balance behind-the-meter:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>=</mo><msub><mi>B</mi><mi>t</mi></msub><mo>+</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">
-I_t - E_t = B_t + L_t - G_t
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>=</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub><mo>+</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">
+I_t - E_t = C_t - D_t + L_t - G_t
 </annotation></semantics></math></p>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

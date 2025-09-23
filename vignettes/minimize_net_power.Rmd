@@ -92,7 +92,7 @@ $$
 To minimize the energy exchanged with the distribution grid while maximizing the use of local generation, using the **flexibility from a battery**, the objective function of the optimization problem has been raised in the following way:
 
 $$
-min \sum_{t=1}^{T} (L_t + B_t - G_t)^2 + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^{2}
+\min_{C_t, D_t} \sum_{t=1}^{T} (L_t + C_t - D_t - G_t)^2 + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
 $$
 
 
@@ -101,7 +101,9 @@ Where:
 - $T$ : Number of time intervals within the optimization window
 - $G_t$ : Local power generation time-series vector
 - $L_t$ : Power load time-series vector
-- $B_t$ : Optimal battery power time-series vector. Positive charging, negative discharging.
+- $C_t$ : Battery charging power (decision variable, non-negative)
+- $D_t$ : Battery discharging power (decision variable, non-negative)
+- $B_t = C_t - D_t$ : Net battery exchange with the grid (positive = charging)
 - $\lambda$ : penalty on change for the flexible load
 
 
@@ -112,35 +114,36 @@ Additionally, this optimization problem also counts with the following parameter
 - $B_d$ : Maximum discharging power
 - $SOC_{min}$ : Minimum state of charge of the battery
 - $SOC_{max}$ : Maximum state of charge of the battery
-- $SOC_{ini}$ : state of charge at the beginning/end of the optimization window
+- $SOC_{ini}$ : State of charge at the beginning/end of the optimization window
+- $\eta_c$ : Battery charging efficiency
+- $\eta_d$ : Battery discharging efficiency
   
 
 Optimization constraints:
   
-* Battery power (positive = charging, $B_c$, negative = discharging, $B_d$) limits:
+* Battery charging and discharging limits:
 
 $$
--B_d \le B_t \le B_c \quad t \in T
+0 \le C_t \le B_c \quad t \in T \qquad 0 \le D_t \le B_d \quad t \in T
 $$
 
-* State of charge limits:
+* State of charge limits, accounting for non-ideal charging and discharging:
 
 $$
-SOC_{min} \le SOC_{ini} + \frac{\sum_{t=1}^T B_t \Delta t}{B_{cap}} \le SOC_{max} \quad t \in T
+SOC_{min} \le SOC_{ini} + \frac{1}{B_{cap}} \sum_{k=1}^t \left(\eta_c C_k - \frac{D_k}{\eta_d}\right) \Delta t \le SOC_{max} \quad t = 1, \dots, T
 $$
 
-* The balance of charged/discharge energy must be 0 at the end of the optimization window to have the same initial state of charge at the beginning of every optimization window:
+* The balance of stored energy must be 0 at the end of the optimization window to keep the same initial state of charge:
 
 $$
-\sum_{t=1}^T B_t \Delta t = 0
+\sum_{t=1}^T \left(\eta_c C_t - \frac{D_t}{\eta_d}\right) \Delta t = 0
 $$
 
 * The energy balance of generation and loads must be between the import capacity $IC_t$ and export capacity $EC_t$:
 
 $$
--EC_t \le B_t + L_t - G_t \le IC_t \quad t \in T
+-EC_t \le C_t - D_t + L_t - G_t \le IC_t \quad t \in T
 $$
-
 
 
 

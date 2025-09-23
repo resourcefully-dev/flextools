@@ -42,13 +42,13 @@ solve_optimization_battery_window(
 
 \item{SOCini}{numeric, required State-of-Charge at the beginning/end of optimization window}
 
-\item{import_capacity}{numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power}
+\item{import_capacity}{numeric vector, grid maximum import power capacity that will limit the maximum charging power}
 
-\item{export_capacity}{numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
+\item{export_capacity}{numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
 
-\item{charge_eff}{numeric, battery charging efficiency (default 1).}
+\item{charge_eff}{numeric, battery charging efficiency}
 
-\item{discharge_eff}{numeric, battery discharging efficiency (default 1).}
+\item{discharge_eff}{numeric, battery discharging efficiency}
 }
 \value{
 numeric vector

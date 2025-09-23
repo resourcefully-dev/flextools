@@ -979,8 +979,8 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
-#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param charge_eff numeric, battery charging efficiency
 #' @param discharge_eff numeric, battery discharging efficiency
 #'
@@ -1001,9 +1001,6 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
   if (charge_eff <= 0 | discharge_eff <= 0) {
     stop("Error: charge and discharge efficiencies must be positive")
   }
-
-  # import_capacity <- rep(import_capacity, length.out = time_slots)
-  # export_capacity <- rep(export_capacity, length.out = time_slots)
 
   # Determine variable layout
   n_variables <- length(q)
@@ -1197,8 +1194,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
-#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load.
 #' @param charge_eff numeric, battery charging efficiency
 #' @param discharge_eff numeric, battery discharging efficiency
@@ -1245,8 +1242,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
-#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load
 #' @param charge_eff numeric, battery charging efficiency
 #' @param discharge_eff numeric, battery discharging efficiency
@@ -1318,8 +1315,8 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @param SOCmin numeric, minimum State-of-Charge of the battery
 #' @param SOCmax numeric, maximum State-of-Charge of the battery
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
-#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
-#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost)
 #' @param lambda numeric, penalty on change for the flexible load
 #' @param charge_eff numeric, battery charging efficiency

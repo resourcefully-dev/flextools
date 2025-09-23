@@ -66,7 +66,9 @@ documentation website."><meta property="og:image" content="https://resourcefully
 <span>  window_days <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  window_start_hour <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  flex_window_hours <span class="op">=</span> <span class="fl">24</span>,</span>
-<span>  lambda <span class="op">=</span> <span class="fl">0</span></span>
+<span>  lambda <span class="op">=</span> <span class="fl">0</span>,</span>
+<span>  charge_eff <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  discharge_eff <span class="op">=</span> <span class="fl">1</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -144,6 +146,14 @@ It must be lower than <code>window_days*24</code> hours.</p></dd>
 
 <dt id="arg-lambda">lambda<a class="anchor" aria-label="anchor" href="#arg-lambda"></a></dt>
 <dd><p>numeric, penalty on change for the battery compared to the previous time slot.</p></dd>
+
+
+<dt id="arg-charge-eff">charge_eff<a class="anchor" aria-label="anchor" href="#arg-charge-eff"></a></dt>
+<dd><p>numeric, battery charging efficiency (default 1).</p></dd>
+
+
+<dt id="arg-discharge-eff">discharge_eff<a class="anchor" aria-label="anchor" href="#arg-discharge-eff"></a></dt>
+<dd><p>numeric, battery discharging efficiency (default 1).</p></dd>
 
 </dl></div>
     <div class="section level2">

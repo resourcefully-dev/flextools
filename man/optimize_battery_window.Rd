@@ -50,17 +50,17 @@ optimize_battery_window(
 
 \item{SOCini}{numeric, required State-of-Charge at the beginning/end of optimization window}
 
-\item{import_capacity}{numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power}
+\item{import_capacity}{numeric vector, grid maximum import power capacity that will limit the maximum charging power}
 
-\item{export_capacity}{numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
+\item{export_capacity}{numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
 
-\item{w}{numeric, optimization objective weight (\code{w=1} minimizes net power while \code{w=0} minimizes cost).}
+\item{w}{numeric, optimization objective weight (\code{w=1} minimizes net power while \code{w=0} minimizes cost)}
 
-\item{lambda}{numeric, penalty on change for the flexible load.}
+\item{lambda}{numeric, penalty on change for the flexible load}
 
-\item{charge_eff}{numeric, battery charging efficiency (default 1).}
+\item{charge_eff}{numeric, battery charging efficiency}
 
-\item{discharge_eff}{numeric, battery discharging efficiency (default 1).}
+\item{discharge_eff}{numeric, battery discharging efficiency}
 }
 \value{
 numeric vector

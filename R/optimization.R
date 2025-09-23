@@ -316,7 +316,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 
   # Optimization
   reset_message_once()
-  
+
   if (opt_objective == "grid") {
     O_windows <- map(
       windows_data,
@@ -929,14 +929,16 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param lambda numeric, penalty on change for the flexible load.
+#' @param lambda numeric, penalty on change for the flexible load
+#' @param charge_eff numeric, battery charging efficiency
+#' @param discharge_eff numeric, battery discharging efficiency
 #'
 #' @importFrom dplyr  %>% tibble mutate summarise_all
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0) {
+curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff) {
   balance_sum <- tibble(
     consumption = L, production = G
   ) %>%
@@ -955,7 +957,7 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
     return(rep(0, length(G)))
   } else {
     minimize_net_power_window_battery(
-      G, L, Bcap_curtail, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda
+      G, L, Bcap_curtail, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff
     )
   }
 }
@@ -979,8 +981,8 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param charge_eff numeric, battery charging efficiency (default 1).
-#' @param discharge_eff numeric, battery discharging efficiency (default 1).
+#' @param charge_eff numeric, battery charging efficiency
+#' @param discharge_eff numeric, battery discharging efficiency
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1198,8 +1200,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load.
-#' @param charge_eff numeric, battery charging efficiency (default 1).
-#' @param discharge_eff numeric, battery discharging efficiency (default 1).
+#' @param charge_eff numeric, battery charging efficiency
+#' @param discharge_eff numeric, battery discharging efficiency
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1245,14 +1247,14 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param lambda numeric, penalty on change for the flexible load.
-#' @param charge_eff numeric, battery charging efficiency (default 1).
-#' @param discharge_eff numeric, battery discharging efficiency (default 1).
+#' @param lambda numeric, penalty on change for the flexible load
+#' @param charge_eff numeric, battery charging efficiency
+#' @param discharge_eff numeric, battery discharging efficiency
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0, charge_eff = 1, discharge_eff = 1) {
+minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -1318,10 +1320,10 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost).
-#' @param lambda numeric, penalty on change for the flexible load.
-#' @param charge_eff numeric, battery charging efficiency (default 1).
-#' @param discharge_eff numeric, battery discharging efficiency (default 1).
+#' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost)
+#' @param lambda numeric, penalty on change for the flexible load
+#' @param charge_eff numeric, battery charging efficiency
+#' @param discharge_eff numeric, battery discharging efficiency
 #'
 #' @return numeric vector
 #' @keywords internal

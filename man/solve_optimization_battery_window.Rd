@@ -5,6 +5,8 @@
 \title{Perform battery optimization (just a window)}
 \usage{
 solve_optimization_battery_window(
+  P,
+  q,
   G,
   L,
   Bcap,
@@ -15,11 +17,15 @@ solve_optimization_battery_window(
   SOCini,
   import_capacity,
   export_capacity,
-  P,
-  q
+  charge_eff,
+  discharge_eff
 )
 }
 \arguments{
+\item{P}{numeric matrix, optimization objective parameter}
+
+\item{q}{numeric vector, optimization objective parameter}
+
 \item{G}{numeric vector, being the renewable generation profile}
 
 \item{L}{numeric vector, being the load profile}
@@ -40,9 +46,9 @@ solve_optimization_battery_window(
 
 \item{export_capacity}{numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
 
-\item{P}{numeric matrix, optimization objective parameter}
+\item{charge_eff}{numeric, battery charging efficiency (default 1).}
 
-\item{q}{numeric vector, optimization objective parameter}
+\item{discharge_eff}{numeric, battery discharging efficiency (default 1).}
 }
 \value{
 numeric vector

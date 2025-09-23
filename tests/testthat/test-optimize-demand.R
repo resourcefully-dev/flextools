@@ -150,7 +150,8 @@ test_that("battery optimization works for grid objective", {
     add_battery_optimization(
       opt_objective = "grid",
       Bcap = 50, Bc = 4, Bd = 4,
-      window_start_hour = 5
+      window_start_hour = 5,
+      charge_eff = 0.9, discharge_eff = 0.9
     )
 
   expect_type(opt_battery, "double")
@@ -167,7 +168,8 @@ test_that("battery optimization works for cost objective", {
     add_battery_optimization(
       opt_objective = "cost",
       Bcap = 50, Bc = 4, Bd = 4,
-      window_start_hour = 5
+      window_start_hour = 5,
+      charge_eff = 0.9, discharge_eff = 0.9
     )
 
   expect_type(opt_battery, "double")
@@ -185,7 +187,8 @@ test_that("battery optimization works for combined objective", {
     add_battery_optimization(
       opt_objective = 0.5,
       Bcap = 50, Bc = 4, Bd = 4,
-      window_start_hour = 5
+      window_start_hour = 5,
+      charge_eff = 0.9, discharge_eff = 0.9
     )
 
   expect_type(opt_battery, "double")

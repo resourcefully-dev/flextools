@@ -16,7 +16,9 @@ add_battery_optimization(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = 24,
-  lambda = 0
+  lambda = 0,
+  charge_eff = 1,
+  discharge_eff = 1
 )
 }
 \arguments{
@@ -69,6 +71,10 @@ This optional feature lets you apply flexibility only during few hours from the 
 It must be lower than \code{window_days*24} hours.}
 
 \item{lambda}{numeric, penalty on change for the battery compared to the previous time slot.}
+
+\item{charge_eff}{numeric, battery charging efficiency (default 1).}
+
+\item{discharge_eff}{numeric, battery discharging efficiency (default 1).}
 }
 \value{
 numeric vector

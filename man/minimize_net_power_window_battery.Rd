@@ -15,7 +15,9 @@ minimize_net_power_window_battery(
   SOCini,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda,
+  charge_eff,
+  discharge_eff
 )
 }
 \arguments{
@@ -40,6 +42,10 @@ minimize_net_power_window_battery(
 \item{export_capacity}{numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
+
+\item{charge_eff}{numeric, battery charging efficiency (default 1).}
+
+\item{discharge_eff}{numeric, battery discharging efficiency (default 1).}
 }
 \value{
 numeric vector

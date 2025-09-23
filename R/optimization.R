@@ -747,6 +747,8 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
 #' @param lambda numeric, penalty on change for the battery compared to the previous time slot.
+#' @param charge_eff numeric, battery charging efficiency (default 1).
+#' @param discharge_eff numeric, battery discharging efficiency (default 1).
 #'
 #' @return numeric vector
 #' @export
@@ -777,7 +779,8 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc, Bd,
                                      SOCmin = 0, SOCmax = 100, SOCini = NULL,
                                      window_days = 1, window_start_hour = 0,
-                                     flex_window_hours = 24, lambda = 0) {
+                                     flex_window_hours = 24, lambda = 0, 
+                                     charge_eff = 1, discharge_eff = 1) {
 
   # Parameters check
   if (is.null(opt_data)) {
@@ -827,7 +830,9 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
         import_capacity = .x$import_capacity,
-        export_capacity = .x$export_capacity
+        export_capacity = .x$export_capacity,
+        lambda = lambda, charge_eff = charge_eff,
+        discharge_eff = discharge_eff
       )
     )
 
@@ -840,7 +845,9 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
         import_capacity = .x$import_capacity,
-        export_capacity = .x$export_capacity
+        export_capacity = .x$export_capacity,
+        lambda = lambda, charge_eff = charge_eff,
+        discharge_eff = discharge_eff
       )
     )
 
@@ -856,7 +863,8 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        lambda = lambda
+        lambda = lambda, charge_eff = charge_eff,
+        discharge_eff = discharge_eff
       )
     )
 
@@ -872,8 +880,8 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        w = opt_objective,
-        lambda = lambda
+        w = opt_objective, lambda = lambda,
+        charge_eff = charge_eff, discharge_eff = discharge_eff
       )
     )
 
@@ -955,6 +963,8 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
 
 #' Perform battery optimization (just a window)
 #'
+#' @param P numeric matrix, optimization objective parameter
+#' @param q numeric vector, optimization objective parameter
 #' @param G numeric vector, being the renewable generation profile
 #' @param L numeric vector, being the load profile
 #' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
@@ -965,13 +975,13 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param P numeric matrix, optimization objective parameter
-#' @param q numeric vector, optimization objective parameter
+#' @param charge_eff numeric, battery charging efficiency (default 1).
+#' @param discharge_eff numeric, battery discharging efficiency (default 1).
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-solve_optimization_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, P, q) {
+solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff) {
 
   # Round to 2 decimals to avoid problems with lower and upper bounds
   G <- round(G, 2)
@@ -982,88 +992,152 @@ solve_optimization_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
 
-  # nrow(P) > time_slots: If cost optimization
-  if (nrow(P) > time_slots) {
+  if (charge_eff <= 0 | discharge_eff <= 0) {
+    stop("Error: charge and discharge efficiencies must be positive")
+  }
+
+  # import_capacity <- rep(import_capacity, length.out = time_slots)
+  # export_capacity <- rep(export_capacity, length.out = time_slots)
+
+  # Determine variable layout
+  n_variables <- length(q)
+  has_grid_flows <- n_variables > 2 * time_slots
+
+  # If has grid flows is cost or combined optimization
+  if (has_grid_flows) {
+
+    zeroMat <- identityMat * 0
 
     # Constraints
-    ## Battery bounds
-    ##    -Bd <= B <= Bc
-    Amat_B <- cbind(identityMat, identityMat*0, identityMat*0)
-    lb_B <- rep(-Bd, time_slots)
-    ub_B <- rep(Bc, time_slots)
+    ## Charging power bounds: 0 <= C <= Bc
+    Amat_C <- cbind(identityMat, zeroMat, zeroMat, zeroMat)
+    ub_C <- rep(Bc, time_slots)
 
-    ## Imported energy bounds
-    ## 0 <= It <= import_capacity
-    Amat_I <- cbind(
-      identityMat*0, identityMat*1, identityMat*0
-    )
-    lb_I <- rep(0, time_slots)
-    ub_I <- import_capacity
+    ## Discharging power bounds: 0 <= D <= Bd
+    Amat_D <- cbind(zeroMat, identityMat, zeroMat, zeroMat)
+    ub_D <- rep(Bd, time_slots)
 
-    ## Exported energy bounds
-    ## 0 <= Et <= export_capacity --> To test
-    Amat_E <- cbind(
-      identityMat*0, identityMat*0, identityMat*1
-    )
-    lb_E <- rep(0, time_slots)
-    # ub_E <- G   --> This only allowed the battery to discharge during importing hours
-    ub_E <- export_capacity
+    ## Imported energy bounds: 0 <= It <= import_capacity
+    Amat_I <- cbind(zeroMat, zeroMat, identityMat, zeroMat)
 
-    ## Energy balance
-    ## It - Et = Bt + Lt - Gt -> Bt - It + Et = Gt - Lt
-    Amat_balance <- cbind(
-      identityMat*1, identityMat*-1, identityMat*1
-    )
-    lb_balance <- G - L
-    ub_balance <- G - L
+    ## Exported energy bounds: 0 <= Et <= export_capacity
+    Amat_E <- cbind(zeroMat, zeroMat, zeroMat, identityMat)
 
-    ## SOC limits
-    Amat_cumsum <- cbind(
-      cumsumMat, identityMat*0, identityMat*0
-    )
+    ## Energy balance: Ct - Dt - It + Et = Gt - Lt
+    Amat_balance <- cbind(identityMat, -identityMat, -identityMat, identityMat)
+    eq_balance <- G - L
+
+    ## SOC limits including efficiencies
+    Amat_cumsum <- cbind(charge_eff * cumsumMat, -(1 / discharge_eff) * cumsumMat, zeroMat, zeroMat)
     lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
     ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
 
-    ## Total sum of B == 0 (neutral balance)
+    ## Total sum of SOC variation == 0
     Amat_energy <- cbind(
-      matrix(1, ncol = time_slots), matrix(0, ncol = time_slots), matrix(0, ncol = time_slots)
+      matrix(charge_eff, nrow = 1, ncol = time_slots),
+      matrix(-1 / discharge_eff, nrow = 1, ncol = time_slots),
+      matrix(0, nrow = 1, ncol = time_slots),
+      matrix(0, nrow = 1, ncol = time_slots)
     )
-    lb_energy <- 0
-    ub_energy <- 0
 
-    # Join constraints
-    Amat <- rbind(Amat_B, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
-    lb <- round(c(lb_B, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-    ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+    bounds_with_capacities <- function(import_cap, export_cap) {
+      lb_I <- rep(0, time_slots)
+      ub_I <- import_cap
+      lb_E <- rep(0, time_slots)
+      ub_E <- export_cap
+      lb_energy <- 0
+      ub_energy <- 0
+
+      lb <- c(
+        rep(0, time_slots),           # charge lower
+        rep(0, time_slots),           # discharge lower
+        lb_I,
+        lb_E,
+        eq_balance,
+        lb_cumsum,
+        lb_energy
+      )
+
+      ub <- c(
+        ub_C,
+        ub_D,
+        ub_I,
+        ub_E,
+        eq_balance,
+        ub_cumsum,
+        ub_energy
+      )
+
+      list(
+        lb = round(lb, 2),
+        ub = round(ub, 2)
+      )
+    }
+
+    Amat <- rbind(Amat_C, Amat_D, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
+    bounds <- bounds_with_capacities(import_capacity, export_capacity)
+    lb <- bounds$lb
+    ub <- bounds$ub
 
   } else {
 
-    # Lower and upper bounds
-    ## General bounds
-    ##  - Grid capacity: -export_capacity <= B + L - G <= +import_capacity
-    ##    - LB: B >= G - L - export_capacity
-    ##    - UB: B <= G - L + import_capacity
-    ##  - Battery power limits:
-    ##    - LB: B >= -Bd
-    ##    - UB: B <= Bc
-    Amat_O <- identityMat
-    lb_B <- pmin(pmax(G - L - export_capacity, -Bd), Bc)
-    ub_B <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
+    zeroMat <- identityMat * 0
 
-    ## SOC limits
-    Amat_cumsum <- cumsumMat
+    # Constraints for variables [C, D]
+    Amat_C <- cbind(identityMat, zeroMat)
+    ub_C <- rep(Bc, time_slots)
+
+    Amat_D <- cbind(zeroMat, identityMat)
+    ub_D <- rep(Bd, time_slots)
+
+    # Grid capacity limits applied to net battery exchange
+    Amat_grid <- cbind(identityMat, -identityMat)
+
+    # SOC limits with efficiencies
+    Amat_cumsum <- cbind(charge_eff * cumsumMat, -(1 / discharge_eff) * cumsumMat)
     lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
     ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
 
-    ## Total sum of B == 0 (neutral balance)
-    Amat_enery <- matrix(1, ncol = time_slots)
-    lb_energy <- 0
-    ub_energy <- 0
+    # Neutral SOC at the end of the window
+    Amat_energy <- cbind(
+      matrix(charge_eff, nrow = 1, ncol = time_slots),
+      matrix(-1 / discharge_eff, nrow = 1, ncol = time_slots)
+    )
 
-    # Join constraints
-    Amat <- rbind(Amat_O, Amat_cumsum, Amat_enery)
-    lb <- round(c(lb_B, lb_cumsum, lb_energy), 2)
-    ub <- round(c(ub_B, ub_cumsum, ub_energy), 2)
+    bounds_with_capacities <- function(import_cap, export_cap) {
+      ##  Grid capacity: -export_capacity <= B + L - G <= +import_capacity
+      ##    - LB: B >= G - L - export_capacity
+      ##    - UB: B <= G - L + import_capacity
+      lb_grid <- G - L - export_cap
+      ub_grid <- G - L + import_cap
+      eq_energy <- 0
+
+      lb <- c(
+        rep(0, time_slots),           # charge
+        rep(0, time_slots),           # discharge
+        lb_grid,
+        lb_cumsum,
+        eq_energy
+      )
+
+      ub <- c(
+        ub_C,
+        ub_D,
+        ub_grid,
+        ub_cumsum,
+        eq_energy
+      )
+
+      list(
+        lb = round(lb, 2),
+        ub = round(ub, 2)
+      )
+    }
+
+    Amat <- rbind(Amat_C, Amat_D, Amat_grid, Amat_cumsum, Amat_energy)
+    bounds <- bounds_with_capacities(import_capacity, export_capacity)
+    lb <- bounds$lb
+    ub <- bounds$ub
   }
 
   # Solve
@@ -1073,29 +1147,32 @@ solve_optimization_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
   if (B$info$status_val %in% c(1, 2)) {
-    return( round(B$x[seq_len(time_slots)], 2) )
+    charge_solution <- B$x[seq_len(time_slots)]
+    discharge_solution <- B$x[seq_len(time_slots) + time_slots]
+    return( round(charge_solution - discharge_solution, 2) )
   } else {
     # If it's not feasible, then remove grid constraints
     message_once("\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
     import_capacity <- rep(Inf, time_slots)
     export_capacity <- rep(Inf, time_slots)
 
-    if (nrow(P) > time_slots) {
-      ub_I <- rep(Inf, time_slots)
-      ub_E <- rep(Inf, time_slots)
-      ub <- round(c(ub_B, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+    if (has_grid_flows) {
+      bounds <- bounds_with_capacities(rep(Inf, time_slots), rep(Inf, time_slots))
+      lb <- bounds$lb
+      ub <- bounds$ub
     } else {
-      lb_B <- pmin(pmax(G - L - export_capacity, -Bd), Bc)
-      ub_B <- pmin(pmax(G - L + import_capacity, -Bd), Bc)
-      lb <- round(c(lb_B, lb_cumsum, lb_energy), 2)
-      ub <- round(c(ub_B, ub_cumsum, ub_energy), 2)
+      bounds <- bounds_with_capacities(rep(Inf, time_slots), rep(Inf, time_slots))
+      lb <- bounds$lb
+      ub <- bounds$ub
     }
 
     solver <- osqp::osqp(P, q, Amat, lb, ub, osqp::osqpSettings(verbose = FALSE))
     B <- solver$Solve()
 
     if (B$info$status_val %in% c(1, 2)) {
-      return( round(B$x[seq_len(time_slots)], 2) )
+      charge_solution <- B$x[seq_len(time_slots)]
+      discharge_solution <- B$x[seq_len(time_slots) + time_slots]
+      return( round(charge_solution - discharge_solution, 2) )
     } else {
       message_once(paste0("\u26A0\uFE0F Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
       return( rep(0, time_slots) )
@@ -1117,11 +1194,13 @@ solve_optimization_battery_window <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load.
+#' @param charge_eff numeric, battery charging efficiency (default 1).
+#' @param discharge_eff numeric, battery discharging efficiency (default 1).
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0) {
+minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -1129,11 +1208,17 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
-  P <- 2*(identityMat + lambda*lambdaMat)
-  q <- 2*(L - G)
+  penaltyMat <- identityMat + lambda*lambdaMat
+  P_block <- 2 * penaltyMat
+  P <- rbind(
+    cbind(P_block, -P_block),
+    cbind(-P_block, P_block)
+  )
+  q_block <- 2 * (L - G)
+  q <- c(q_block, -q_block)
 
   B <- solve_optimization_battery_window(
-    G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, P, q
+    P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff
   )
 
   return( B )
@@ -1157,11 +1242,13 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load.
+#' @param charge_eff numeric, battery charging efficiency (default 1).
+#' @param discharge_eff numeric, battery discharging efficiency (default 1).
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0) {
+minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda=0, charge_eff = 1, discharge_eff = 1) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -1169,24 +1256,40 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
-  # unknown variable: X = [B, I, E]
+  # unknown variable: X = [C, D, I, E]
+  smoothing <- 2 * lambda * lambdaMat
+  zero_block <- matrix(0, nrow = 2 * time_slots, ncol = time_slots)
+  zero_square <- matrix(0, nrow = time_slots, ncol = time_slots)
   P <- rbind(
     cbind(
-      2*lambda*lambdaMat, identityMat*0, identityMat*0
+      rbind(
+        cbind(smoothing, -smoothing),
+        cbind(-smoothing, smoothing)
+      ),
+      zero_block,
+      zero_block
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
+      zero_square,
+      zero_square
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
+      zero_square,
+      zero_square
     )
   )
+  q_block <- PTD - PTU
   q <- c(
-    PTD - PTU, PI, -PE
+    q_block,
+    -q_block,
+    PI,
+    -PE
   )
 
   B <- solve_optimization_battery_window(
-    G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, P, q
+    P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff
   )
 
   return( B )
@@ -1213,11 +1316,13 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost).
 #' @param lambda numeric, penalty on change for the flexible load.
+#' @param charge_eff numeric, battery charging efficiency (default 1).
+#' @param discharge_eff numeric, battery discharging efficiency (default 1).
 #'
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, w, lambda) {
+optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, w, lambda, charge_eff, discharge_eff) {
 
   # Optimization parameters
   time_slots <- length(G)
@@ -1225,29 +1330,41 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
-  # unknown variable: X = [B, I, E]
+  # unknown variable: X = [C, D, I, E]
+  penaltyMat <- 2 * (lambda*lambdaMat + w*mean(PI)^2*identityMat)
+  zero_block <- matrix(0, nrow = 2 * time_slots, ncol = time_slots)
+  zero_square <- matrix(0, nrow = time_slots, ncol = time_slots)
   P <- rbind(
     cbind(
-      2*(lambda*lambdaMat + w*mean(PI)^2*identityMat), identityMat*0, identityMat*0
+      rbind(
+        cbind(penaltyMat, -penaltyMat),
+        cbind(-penaltyMat, penaltyMat)
+      ),
+      zero_block,
+      zero_block
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
+      zero_square,
+      zero_square
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
+      zero_square,
+      zero_square
     )
   )
+  q_block <- (1-w)*(PTD - PTU) - 2*w*mean(PI)^2*(G-L)
   q <- c(
-    (1-w)*(PTD - PTU) - 2*w*mean(PI)^2*(G-L), (1-w)*PI, -(1-w)*PE
+    q_block,
+    -q_block,
+    (1-w)*PI,
+    -(1-w)*PE
   )
 
   B <- solve_optimization_battery_window(
-    G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, P, q
+    P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff
   )
 
   return( B )
 }
-
-
-
-

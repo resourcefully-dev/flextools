@@ -23,7 +23,7 @@ test_that("Get error when missing `opt_data`", {
   )
 })
 
-test_that("Get error when missing `flexbile` column in `opt_data`", {
+test_that("Get error when missing `flexible` column in `opt_data`", {
   expect_error(
     optimize_demand(
       opt_data = opt_data,
@@ -242,7 +242,7 @@ test_that("battery optimization works with constrained import capacity", {
     plot_ts()
 
   expect_false(
-    any((opt_battery$import_capacity - opt_battery$imported) < -5) # There's still some error
+    any(round(opt_battery$import_capacity - opt_battery$imported) < 0) # There's still some error
   )
 })
 
@@ -280,6 +280,6 @@ test_that("battery optimization works with constrained import capacity and 'curt
     dygraphs::dyLegend(show="onmouseover")
 
   expect_false(
-    any((opt_battery$import_capacity - opt_battery$imported) < -5) # There's still some error
+    any(round(opt_battery$import_capacity - opt_battery$imported) < 0) # There's still some error
   )
 })

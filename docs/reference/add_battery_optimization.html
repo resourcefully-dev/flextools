@@ -149,11 +149,11 @@ It must be lower than <code>window_days*24</code> hours.</p></dd>
 
 
 <dt id="arg-charge-eff">charge_eff<a class="anchor" aria-label="anchor" href="#arg-charge-eff"></a></dt>
-<dd><p>numeric, battery charging efficiency (default 1).</p></dd>
+<dd><p>numeric, battery charging efficiency (from 0 to 1, default 1).</p></dd>
 
 
 <dt id="arg-discharge-eff">discharge_eff<a class="anchor" aria-label="anchor" href="#arg-discharge-eff"></a></dt>
-<dd><p>numeric, battery discharging efficiency (default 1).</p></dd>
+<dd><p>numeric, battery discharging efficiency (from 0 to 1, default 1).</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -189,6 +189,8 @@ It must be lower than <code>window_days*24</code> hours.</p></dd>
 <span class="r-in"><span>      Bcap <span class="op">=</span> <span class="fl">50</span>, Bc <span class="op">=</span> <span class="fl">4</span>, Bd <span class="op">=</span> <span class="fl">4</span>,</span></span>
 <span class="r-in"><span>      window_start_hour <span class="op">=</span> <span class="fl">5</span></span></span>
 <span class="r-in"><span>    <span class="op">)</span></span></span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.</span>
+<span class="r-msg co"><span class="r-pr">#&gt;</span> ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.</span>
 <span class="r-in"><span></span></span>
 </code></pre></div>
     </div>

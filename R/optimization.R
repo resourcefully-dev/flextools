@@ -765,8 +765,8 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
 #' @param lambda numeric, penalty on change for the battery compared to the previous time slot.
-#' @param charge_eff numeric, battery charging efficiency (default 1).
-#' @param discharge_eff numeric, battery discharging efficiency (default 1).
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1, default 1).
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1, default 1).
 #'
 #' @return numeric vector
 #' @export
@@ -806,6 +806,13 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   }
   opt_data <- opt_data %>% mutate(flexible = 0)
   opt_data <- check_optimization_data(opt_data, opt_objective)
+
+  if (charge_eff <= 0 || discharge_eff <= 0) {
+    stop("Error: efficiencies must be greater than 0")
+  }
+  if (charge_eff > 1 || discharge_eff > 1) {
+    stop("Error: efficiencies must be lower or equal to 1")
+  }
 
   if (Bcap == 0 || Bc == 0 || Bd == 0 || SOCmin == SOCmax) {
     message("\u26A0\uFE0F Warning: battery parameters don't allow optimization.")
@@ -946,8 +953,8 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load
-#' @param charge_eff numeric, battery charging efficiency
-#' @param discharge_eff numeric, battery discharging efficiency
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
 #' @importFrom dplyr  %>% tibble mutate summarise_all
 #'
@@ -997,8 +1004,8 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param charge_eff numeric, battery charging efficiency
-#' @param discharge_eff numeric, battery discharging efficiency
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1227,8 +1234,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
 #' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load.
-#' @param charge_eff numeric, battery charging efficiency
-#' @param discharge_eff numeric, battery discharging efficiency
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1275,8 +1282,8 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param lambda numeric, penalty on change for the flexible load
-#' @param charge_eff numeric, battery charging efficiency
-#' @param discharge_eff numeric, battery discharging efficiency
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1348,8 +1355,8 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost)
 #' @param lambda numeric, penalty on change for the flexible load
-#' @param charge_eff numeric, battery charging efficiency
-#' @param discharge_eff numeric, battery discharging efficiency
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
 #' @return numeric vector
 #' @keywords internal

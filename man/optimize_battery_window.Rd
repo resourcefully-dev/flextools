@@ -58,9 +58,9 @@ optimize_battery_window(
 
 \item{lambda}{numeric, penalty on change for the flexible load}
 
-\item{charge_eff}{numeric, battery charging efficiency}
+\item{charge_eff}{numeric, battery charging efficiency (from 0 to 1)}
 
-\item{discharge_eff}{numeric, battery discharging efficiency}
+\item{discharge_eff}{numeric, battery discharging efficiency (from 0 to 1)}
 }
 \value{
 numeric vector

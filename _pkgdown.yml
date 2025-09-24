@@ -31,7 +31,9 @@ reference:
   - title: Battery
   - contents:
     - add_battery_simple
-    - get_storage_level
+    - get_soc_level
+  - title: Thermal storage
+  - contents:
     - get_storage_losses
     - get_conversion_losses
   - title: Evaluation of results

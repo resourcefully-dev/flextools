@@ -72,9 +72,9 @@ It must be lower than \code{window_days*24} hours.}
 
 \item{lambda}{numeric, penalty on change for the battery compared to the previous time slot.}
 
-\item{charge_eff}{numeric, battery charging efficiency (default 1).}
+\item{charge_eff}{numeric, battery charging efficiency (from 0 to 1, default 1).}
 
-\item{discharge_eff}{numeric, battery discharging efficiency (default 1).}
+\item{discharge_eff}{numeric, battery discharging efficiency (from 0 to 1, default 1).}
 }
 \value{
 numeric vector

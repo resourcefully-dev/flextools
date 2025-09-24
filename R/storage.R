@@ -16,26 +16,6 @@ get_storage_losses <- function(power, loss, time_resolution = 60) {
 }
 
 
-#' Accumulated storage level
-#'
-#' @param power numeric vector, being positive when charging and negative when discharging
-#' @param init numeric, initial storage level (in energy units, not %)
-#' @param loss numeric, the hourly storage loss in percentage (%/hour), passed to `get_storage_losses` function
-#' @param time_resolution numeric, time resolution of the time-series (in minutes)
-#'
-#' @return numeric vector
-#' @export
-#'
-#' @importFrom dplyr lag
-#'
-get_storage_level <- function(power, init = 0, loss = 0, time_resolution = 60) {
-  storage_losses <- get_storage_losses(power, loss, time_resolution = time_resolution)
-  storage_vct <- pmax(c(init, init + cumsum(power*time_resolution/60 + storage_losses) - cumsum(lag(storage_losses, default = 0))), 0)
-  return( storage_vct[seq_len(length(power))] ) # The `storage_vct` would be T+1 length for the cumsum starting at `init`
-}
-
-
-
 #' Losses due to charging/discharging process
 #'
 #' @param power numeric vector, being positive when charging and negative when discharging
@@ -50,6 +30,37 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
   losses[power>0] <- power[power>0]/(1-loss_charge/100) - power[power>0]
   losses[power<0] <- abs(power[power<0])/(1-loss_discharge/100) - abs(power[power<0])
   return( losses )
+}
+
+
+#' Accumulated storage level
+#'
+#' @param power numeric vector, being positive when charging and negative when discharging
+#' @param init numeric, initial storage level (in energy units, not %)
+#' @param charge_eff numeric, charging efficiency (from 0 to 1, default to 1)
+#' @param discharge_eff numeric, discharging efficiency (from 0 to 1, default to 1)
+#' @param time_resolution numeric, time resolution of the time-series (in minutes)
+#'
+#' @return numeric vector
+#' @export
+#'
+#' @importFrom dplyr lag
+#'
+get_soc_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1, time_resolution = 60) {
+  if (charge_eff <= 0 || discharge_eff <= 0) {
+    stop("Error: efficiencies must be greater than 0")
+  }
+  if (charge_eff > 1 || discharge_eff > 1) {
+    stop("Error: efficiencies must be lower or equal to 1")
+  }
+
+  energy_delta <- power * time_resolution/60
+  energy_delta[energy_delta >= 0] <- energy_delta[energy_delta >= 0] * charge_eff
+  energy_delta[energy_delta < 0] <- energy_delta[energy_delta < 0] / discharge_eff
+
+  storage <- c(init, init + cumsum(energy_delta))
+  storage <- pmax(storage, 0)
+  return(storage[-1]) # The `storage` would be T+1 length for the cumsum starting at `init`
 }
 
 
@@ -106,6 +117,3 @@ add_battery_simple <- function(df, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCin
 
   return( battery )
 }
-
-
-

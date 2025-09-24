@@ -46,9 +46,9 @@ solve_optimization_battery_window(
 
 \item{export_capacity}{numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
 
-\item{charge_eff}{numeric, battery charging efficiency}
+\item{charge_eff}{numeric, battery charging efficiency (from 0 to 1)}
 
-\item{discharge_eff}{numeric, battery discharging efficiency}
+\item{discharge_eff}{numeric, battery discharging efficiency (from 0 to 1)}
 }
 \value{
 numeric vector

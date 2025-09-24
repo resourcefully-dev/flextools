@@ -28,14 +28,14 @@ test_that("net power is plotted with original df", {
 
 test_that("load duration curve is plotted", {
   plot <- plot_load_duration_curve(df)
-  expect_equal(class(plot), c("gg", "ggplot"))
+  expect_true("ggplot" %in% class(plot))
 })
 
 test_that("load duration curve is plotted with original df", {
   building_variation <- rnorm(nrow(df), mean = 0, sd = 1)
   df2 <- dplyr::mutate(df, consumption = consumption + building_variation)
   plot <- plot_load_duration_curve(df2, original_df = df)
-  expect_equal(class(plot), c("gg", "ggplot"))
+  expect_true("ggplot" %in% class(plot))
 })
 
 # Smart charging evaluation -----------------------------------------------

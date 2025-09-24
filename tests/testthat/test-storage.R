@@ -31,7 +31,7 @@ test_that("storage losses are added", {
 })
 
 test_that("storage level is inside bounds", {
-  batt_level <- get_soc_level(df_batt$battery, time_resolution = 15)
+  batt_level <- get_storage_level(df_batt$battery, time_resolution = 15)
   expect_true(min(batt_level) >= 0 & max(batt_level) <= 100)
 })
 
@@ -44,7 +44,7 @@ test_that("storage level is inside bounds with SOCmin and SOCmax", {
         SOCmin = 20, SOCmax = 80, SOCini = 50
       )
     )
-  batt_level <- get_soc_level(
+  batt_level <- get_storage_level(
     df_batt_limited$battery,
     time_resolution = 15,
     init = 150 * 50/100
@@ -62,7 +62,7 @@ test_that("conversion losses are calculated", {
 
 test_that("storage level accounts for efficiencies", {
   profile <- c(rep(5, 4), rep(-5, 4))
-  lvl_ideal <- get_soc_level(profile, time_resolution = 60)
-  lvl_lossy <- get_soc_level(profile, time_resolution = 60, charge_eff = 0.9, discharge_eff = 0.9)
+  lvl_ideal <- get_storage_level(profile, time_resolution = 60)
+  lvl_lossy <- get_storage_level(profile, time_resolution = 60, charge_eff = 0.9, discharge_eff = 0.9)
   expect_lt(max(lvl_lossy), max(lvl_ideal))
 })

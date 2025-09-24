@@ -33,7 +33,7 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 }
 
 
-#' Accumulated storage level
+#' Accumulated storage level (energy)
 #'
 #' @param power numeric vector, being positive when charging and negative when discharging
 #' @param init numeric, initial storage level (in energy units, not %)
@@ -41,12 +41,12 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 #' @param discharge_eff numeric, discharging efficiency (from 0 to 1, default to 1)
 #' @param time_resolution numeric, time resolution of the time-series (in minutes)
 #'
-#' @return numeric vector
+#' @return numeric vector of energy stored
 #' @export
 #'
 #' @importFrom dplyr lag
 #'
-get_soc_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1, time_resolution = 60) {
+get_storage_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1, time_resolution = 60) {
   if (charge_eff <= 0 || discharge_eff <= 0) {
     stop("Error: efficiencies must be greater than 0")
   }

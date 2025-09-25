@@ -313,7 +313,6 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
     ~ opt_data[.x, ]
   )
 
-
   # Optimization
   reset_message_once()
 
@@ -845,6 +844,23 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
     ~ opt_data[.x, ]
   )
 
+  flatten_profiles <- function(results) {
+    charge_list <- purrr::map(results, function(x) {
+      val <- attr(x, "charge")
+      if (is.null(val)) rep(0, length(x)) else val
+    })
+    discharge_list <- purrr::map(results, function(x) {
+      val <- attr(x, "discharge")
+      if (is.null(val)) rep(0, length(x)) else val
+    })
+
+    list(
+      battery = as.numeric(unlist(results)),
+      charge = as.numeric(unlist(charge_list)),
+      discharge = as.numeric(unlist(discharge_list))
+    )
+  }
+
   # Optimization
   reset_message_once()
 
@@ -916,10 +932,15 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
     stop("Error: invalid `opt_objective`")
   }
 
-  B <- as.numeric(unlist(B_windows))
+  profiles <- flatten_profiles(B_windows)
+  battery <- profiles$battery
+  charge <- profiles$charge
+  discharge <- profiles$discharge
 
   if (length(flex_windows_idxs_seq) == length(dttm_seq)) {
-    return( B )
+    attr(battery, "charge") <- charge
+    attr(battery, "discharge") <- discharge
+    return(battery)
   } else {
     # Create the complete battery vector with the time slots outside the
     # optimization windows
@@ -927,14 +948,19 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
       tibble(idx = seq_len(length(dttm_seq))),
       tibble(
         idx = flex_windows_idxs_seq,
-        B = B
+        battery = battery,
+        charge = charge,
+        discharge = discharge
       ),
       by = 'idx'
     ) %>%
       arrange(.data$idx)
 
-    B_flex$B[is.na(B_flex$B)] <- 0
-    return( B_flex$B )
+    B_flex[is.na(B_flex)] <- 0
+    battery_full <- B_flex$battery
+    attr(battery_full, "charge") <- B_flex$charge
+    attr(battery_full, "discharge") <- B_flex$discharge
+    return(battery_full)
   }
 }
 
@@ -1019,6 +1045,12 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
 
   if (charge_eff <= 0 || discharge_eff <= 0) {
     stop("Error: charge and discharge efficiencies must be positive")
+  }
+
+  attach_profile <- function(battery, charge, discharge) {
+    attr(battery, "charge") <- as.numeric(charge)
+    attr(battery, "discharge") <- as.numeric(discharge)
+    battery
   }
 
   # Determine variable layout
@@ -1180,7 +1212,7 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
     charge_solution <- B$x[seq_len(time_slots)]
     discharge_solution <- B$x[seq_len(time_slots) + time_slots]
     battery_profile <- charge_solution - discharge_solution
-    return( round(battery_profile, 2) )
+    return(attach_profile(battery_profile, charge_solution, discharge_solution))
   } else {
     # If it's not feasible, then remove grid constraints
     message_once("\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
@@ -1212,10 +1244,11 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       charge_solution <- B$x[seq_len(time_slots)]
       discharge_solution <- B$x[seq_len(time_slots) + time_slots]
       battery_profile <- charge_solution - discharge_solution
-      return( round(battery_profile, 2) )
+      return(attach_profile(battery_profile, charge_solution, discharge_solution))
     } else {
       message_once(paste0("\u26A0\uFE0F Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
-      return( rep(0, time_slots) )
+      zero_profile <- rep(0, time_slots)
+      return(attach_profile(zero_profile, zero_profile, zero_profile))
     }
   }
 }

@@ -35,6 +35,12 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 
 #' Accumulated storage level (energy)
 #'
+#' Each value represents the energy level at the beginning of the time slot,
+#' starting from the provided initial State-of-Charge. When the `power`
+#' vector carries `charge` and `discharge` attributes (as provided by
+#' `add_battery_optimization()`), those are used internally to compute the
+#' storage evolution when efficiencies are below 1.
+#'
 #' @param power numeric vector, being positive when charging and negative when discharging
 #' @param init numeric, initial storage level (in energy units, not %)
 #' @param charge_eff numeric, charging efficiency (from 0 to 1, default to 1)
@@ -54,13 +60,24 @@ get_storage_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1
     stop("Error: efficiencies must be lower or equal to 1")
   }
 
-  energy_delta <- power * time_resolution/60
-  energy_delta[energy_delta >= 0] <- energy_delta[energy_delta >= 0] * charge_eff
-  energy_delta[energy_delta < 0] <- energy_delta[energy_delta < 0] / discharge_eff
+  # ΔE = charge * η_charge − discharge / η_discharge
+  # we need both terms because a battery can charge and discharge in a time slot (optimization solver issue)
+  charge_power <- attr(power, "charge")
+  discharge_power <- attr(power, "discharge")
+
+  if (!is.null(charge_power) && !is.null(discharge_power) &&
+      length(charge_power) == length(power) &&
+      length(discharge_power) == length(power)) {
+    energy_delta <- (charge_power * charge_eff - discharge_power / discharge_eff) * time_resolution/60
+  } else {
+    energy_delta <- power * time_resolution/60
+    energy_delta[energy_delta >= 0] <- energy_delta[energy_delta >= 0] * charge_eff
+    energy_delta[energy_delta < 0] <- energy_delta[energy_delta < 0] / discharge_eff
+  }
 
   storage <- c(init, init + cumsum(energy_delta))
-  storage <- pmax(storage, 0)
-  return(storage[-1]) # The `storage` would be T+1 length for the cumsum starting at `init`
+  storage <- round(storage[seq_len(length(power))], 2)
+  return( storage )
 }
 
 

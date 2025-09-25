@@ -247,8 +247,6 @@ test_that("battery optimization works with constrained import capacity", {
 })
 
 
-
-
 test_that("battery optimization works with constrained import capacity and 'curtail' objective", {
   opt_data_batt <- opt_data %>%
     select(datetime, production, static = building) %>%
@@ -282,4 +280,41 @@ test_that("battery optimization works with constrained import capacity and 'curt
   expect_false(
     any(round(opt_battery$import_capacity - opt_battery$imported) < 0) # There's still some error
   )
+})
+
+
+test_that("battery optimization works with grid optimization and efficiencies", {
+  opt_data_batt <- opt_data %>%
+    select(datetime, production, static = building) %>%
+    mutate(
+      production = .data$production*100,
+      static = .data$static*100
+    ) |>
+    decrease_timeseries_resolution(60, "average")
+
+  Bcap <- 500
+  opt_battery_vct <- opt_data_batt %>%
+    add_battery_optimization(
+      opt_objective = "grid",
+      Bcap = Bcap, Bc = 500, Bd = 500,
+      window_start_hour = 0, SOCini = 50,
+      charge_eff = 0.9, discharge_eff = 0.9
+    )
+
+  opt_battery <- opt_data_batt %>%
+    mutate(
+      battery = opt_battery_vct,
+      storage = get_storage_level(
+        battery, 
+        charge_eff = 0.9, discharge_eff = 0.9,
+        time_resolution = 60, init = 50/100*Bcap
+      ),
+      soc = round(storage/Bcap*100, 2)
+    )
+
+  # opt_battery %>%
+  #   plot_ts()
+
+  expect_lte(max(opt_battery$storage), Bcap)
+  expect_gte(min(opt_battery$storage), 0)
 })

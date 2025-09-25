@@ -27,5 +27,9 @@ get_storage_level(
 numeric vector of energy stored
 }
 \description{
-Accumulated storage level (energy)
+Each value represents the energy level at the beginning of the time slot,
+starting from the provided initial State-of-Charge. When the \code{power}
+vector carries \code{charge} and \code{discharge} attributes (as provided by
+\code{add_battery_optimization()}), those are used internally to compute the
+storage evolution when efficiencies are below 1.
 }

@@ -38,6 +38,6 @@ sc_results <- smart_charging(
   window_days = 1, window_start_hour = 6,
   include_log = TRUE
 )
-view_logs(sc_results$log)
+view_smart_charging_logs(sc_results)
 }
 }

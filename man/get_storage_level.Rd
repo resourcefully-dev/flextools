@@ -15,7 +15,7 @@ get_storage_level(
 \arguments{
 \item{power}{numeric vector, being positive when charging and negative when discharging}
 
-\item{init}{numeric, initial storage level (in energy units, not \%)}
+\item{init}{numeric, initial storage level (in kWh, not \%)}
 
 \item{charge_eff}{numeric, charging efficiency (from 0 to 1, default to 1)}
 

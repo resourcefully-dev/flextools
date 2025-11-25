@@ -38,7 +38,8 @@ opt_data <- tibble(
   production = 0
 )
 sc_results <- smart_charging(
-  sessions, opt_data, opt_objective = "grid", method = "curtail",
+  sessions, opt_data,
+  opt_objective = "grid", method = "curtail",
   window_days = 1, window_start_hour = 6,
   responsive = list(Workday = list(Worktime = 0.9)),
   energy_min = 0.5

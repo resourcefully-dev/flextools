@@ -42,7 +42,7 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 #' storage evolution when efficiencies are below 1.
 #'
 #' @param power numeric vector, being positive when charging and negative when discharging
-#' @param init numeric, initial storage level (in energy units, not %)
+#' @param init numeric, initial storage level (in kWh, not %)
 #' @param charge_eff numeric, charging efficiency (from 0 to 1, default to 1)
 #' @param discharge_eff numeric, discharging efficiency (from 0 to 1, default to 1)
 #' @param time_resolution numeric, time resolution of the time-series (in minutes)

@@ -517,6 +517,30 @@ get_percentage_hours <- function(vct, threshold) {
 }
 
 
+#' Duration curve table for a given vector
+#'
+#' The Duration Curve (DC) represents the percentage of time that a specific
+#' value of a vector has been used in a specific time period.
+#'
+#' @param vct numeric vector
+#'
+#' @return tibble
+#' @keywords internal
+#'
+#' @importFrom dplyr %>% tibble group_by summarise
+#' @importFrom purrr map_dbl
+#' @importFrom rlang .data
+#'
+get_duration_curve <- function(vct) {
+  duration_tbl <- tibble(
+    var = seq(min(vct), max(vct), by = 1),
+    pct = round(map_dbl(.data$var, ~ get_percentage_hours(vct, .x)), 2)
+  ) %>%
+    group_by(.data$pct) %>%
+    summarise(var = min(.data$var)) # Just one value of power per percentage
+  return( duration_tbl )
+}
+
 #' Load duration curve table
 #'
 #' The Load Duration Curve (LDC) represents the percentage of time that a specific
@@ -525,12 +549,10 @@ get_percentage_hours <- function(vct, threshold) {
 #'
 #' @param df tibble, with columns `datetime`, `consumption`, `production`
 #'
-#' @return dygraphs plot
+#' @return tibble
 #' @export
 #'
-#' @importFrom dplyr %>% tibble group_by summarise
-#' @importFrom purrr map_dbl
-#' @importFrom rlang .data
+#' @importFrom dplyr %>% rename
 #'
 #' @examples
 #' df <- dplyr::select(
@@ -551,12 +573,8 @@ get_load_duration_curve <- function(df) {
     df$production <- 0
   }
   net <- df$consumption - df$production
-  load_data <- tibble(
-    power = seq(min(net), max(net), by = 1),
-    pct = round(map_dbl(.data$power, ~ get_percentage_hours(net, .x)), 2)
-  ) %>%
-    group_by(.data$pct) %>%
-    summarise(power = min(.data$power)) # Just one value of power per percentage
+  load_data <- get_duration_curve(net) %>%
+    rename(power = "var")
   return( load_data )
 }
 

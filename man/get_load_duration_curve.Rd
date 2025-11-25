@@ -10,7 +10,7 @@ get_load_duration_curve(df)
 \item{df}{tibble, with columns \code{datetime}, \code{consumption}, \code{production}}
 }
 \value{
-dygraphs plot
+tibble
 }
 \description{
 The Load Duration Curve (LDC) represents the percentage of time that a specific

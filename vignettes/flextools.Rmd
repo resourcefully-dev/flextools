@@ -294,6 +294,10 @@ To find the optimal lambda, we can apply an iteration over multiple values and c
 The following plot shows the normalized values (between 0 and 1) from these two indicators according to the `lambda` value:
 
 ```{r, echo=FALSE}
+normalize <- function(x) {
+  (x-min(x))/(max(x)-min(x))
+}
+
 lambdas_tbl <- tibble(
   lambda = seq(0, 1, 0.05),
   energy_cost = NA,
@@ -324,8 +328,8 @@ for (i in seq_len(nrow(lambdas_tbl))) {
     get_energy_total_cost()
   lambdas_tbl$crossover_times[i] <- sum(diff(sign(opt_data_batt$battery)) != 0)
 }
-lambdas_tbl$energy_cost <- flextools:::normalize(lambdas_tbl$energy_cost)
-lambdas_tbl$crossover_times <- flextools:::normalize(lambdas_tbl$crossover_times)
+lambdas_tbl$energy_cost <- normalize(lambdas_tbl$energy_cost)
+lambdas_tbl$crossover_times <- normalize(lambdas_tbl$crossover_times)
 ```
 
 ```{r, echo=FALSE}

@@ -1,6 +1,7 @@
-# flextools 1.0.0
+# flextools 1.2.0
 
-* First release with documentation.
+* Added V2G functions
+* Introduced `timefully` package
 
 
 # flextools 1.1.0
@@ -11,3 +12,7 @@
 * Improvements in `plot_smart_charging()` function (e.g. `by = "FlexType"`)
 * Added `view_smart_charging_logs()` function
 
+
+# flextools 1.0.0
+
+* First release with documentation.

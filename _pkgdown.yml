@@ -10,13 +10,6 @@ navbar:
     right: [github]
 
 reference:
-  - title: Time-series utils
-  - contents:
-    - get_time_resolution
-    - change_timeseries_resolution
-    - change_timeseries_year
-    - aggregate_timeseries
-    - add_extra_days
   - title: Optimization
   - contents:
     - optimize_demand

@@ -6,11 +6,6 @@ opt_data <- flextools::energy_profiles %>%
     production = "solar"
   )
 
-test_that("Extra days are aded", {
-  df2 <- opt_data %>% add_extra_days()
-  expect_true(nrow(df2) > nrow(opt_data))
-})
-
 test_that("Get error when missing `opt_data`", {
   expect_error(
     optimize_demand(

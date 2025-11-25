@@ -1,6 +1,6 @@
 Package: flextools
-Title: Tools for demand-response simulations
-Version: 1.1.0
+Title: Tools For Demand-Response Simulations
+Version: 1.2.0
 Authors@R: 
     person(given = "Marc", family = "Cañigueral", role = c("aut", "cre"),
            email = "marccanyigueral@gmail.com",
@@ -27,6 +27,7 @@ Imports:
     osqp,
     Matrix,
     evsim,
+    timefully,
     dygraphs,
     ggplot2
 Suggests: 

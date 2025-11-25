@@ -1323,6 +1323,10 @@ get_sd_factor <- function(pct = 95) {
   stats::qnorm(1 - (1 - pct / 100) / 2)
 }
 
+round_to_interval <- function (dbl, interval) {
+  round(dbl/interval) * interval
+}
+
 get_window_not_outliers <- function(sessions, pct, time_resolution) {
   sd_factor <- get_sd_factor(pct)
   start_time_mean <- mean(as.numeric(sessions$ConnectionStartDateTime))
@@ -1341,6 +1345,8 @@ get_window_not_outliers <- function(sessions, pct, time_resolution) {
     )
   not_outliers
 }
+
+
 
 
 # Summarise by segment ----------------------------------------------------
@@ -1467,8 +1473,9 @@ print.SmartCharging <- function(x, ...) {
 #' @export
 #'
 #' @importFrom dplyr %>% mutate group_by summarise left_join select
-#' @importFrom evsim get_demand plot_ts
-#' @importFrom dygraphs dyStackedRibbonGroup
+#' @importFrom evsim get_demand
+#' @importFrom timefully plot_ts
+#' @importFrom dygraphs dyStackedRibbonGroup dySeries
 #' @importFrom rlang .data
 #'
 #' @examples
@@ -1588,7 +1595,10 @@ plot_smart_charging <- function(smart_charging, sessions = NULL, show_setpoint =
 
   if (show_setpoint) {
     plot_dy <- plot_dy %>%
-      dySeries("Setpoint", strokePattern = "dashed", color = "red", strokeWidth = 2)
+      dySeries(
+        "Setpoint", strokePattern = "dashed",
+        color = "red", strokeWidth = 2
+      )
   }
 
   if (is.null(by)) {
@@ -1601,7 +1611,10 @@ plot_smart_charging <- function(smart_charging, sessions = NULL, show_setpoint =
 
   if (!is.null(sessions)) {
     plot_dy <- plot_dy %>%
-      dySeries("Original EVs", strokePattern = "dashed", color = "gray", strokeWidth = 2)
+      dySeries(
+        "Original EVs", strokePattern = "dashed",
+        color = "gray", strokeWidth = 2
+      )
   }
 
   plot_dy

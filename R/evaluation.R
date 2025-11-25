@@ -353,6 +353,7 @@ get_imbalance_total_income <- function(df) {
 #' @importFrom dplyr %>% mutate left_join select any_of all_of
 #' @importFrom dygraphs dySeries dyLimit
 #' @importFrom rlang .data
+#' @importFrom timefully plot_ts
 #'
 #' @examples
 #' df <- dplyr::select(

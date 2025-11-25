@@ -60,32 +60,6 @@ check_optimization_data <- function(opt_data, opt_objective) {
   return( opt_data )
 }
 
-
-#' Add an extra day at the beginning and the end of datetime sequence
-#' using the last and first day of the data
-#'
-#' @param df data frame, first column named `datetime` of type `datetime`
-#'
-#' @return tibble
-#' @export
-#'
-#' @importFrom dplyr filter %>% bind_rows arrange
-#' @importFrom lubridate date days
-#'
-add_extra_days <- function(df) {
-  first_day <- df %>%
-    filter(date(.data$datetime) == min(date(.data$datetime)))
-  first_day$datetime <- first_day$datetime - days(1)
-  last_day <- df %>%
-    filter(date(.data$datetime) == max(date(.data$datetime)))
-  last_day$datetime <- last_day$datetime +days(1)
-
-  bind_rows(
-    first_day, df, last_day
-  ) %>%
-    arrange(.data$datetime)
-}
-
 triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
   if (direction == 'l') {
     return( as.matrix(Matrix::tril(mat, k = k)) )

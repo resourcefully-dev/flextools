@@ -12,6 +12,7 @@ library(lubridate)
 library(dygraphs)
 library(ggplot2)
 library(evsim)
+library(timefully)
 library(purrr)
 ```
 

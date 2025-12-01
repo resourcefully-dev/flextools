@@ -24,7 +24,7 @@ opt_data <- tibble(
         rep(100, 60 / 15 * (24 - 11)) # 11:00-24:00
     ), times = 1), 100) # 3 days + 1 extra time step
 )
-# plot_ts(opt_data)
+# timefully::plot_ts(opt_data)
 
 test_that("optimization for v2g works and negative import capacity is achieved", {
     v2g_results <- smart_v2g(
@@ -33,6 +33,7 @@ test_that("optimization for v2g works and negative import capacity is achieved",
         show_progress = TRUE, include_log = TRUE
     )
     # plot_smart_charging(v2g_results, sessions, legend_width = 150)
+    # view_smart_charging_logs(v2g_results)
 
     # check that setpoints are always lower than the import capacity
     expect_true(

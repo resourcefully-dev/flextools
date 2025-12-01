@@ -97,7 +97,9 @@ smart_v2g <- function(sessions, opt_data, opt_objective = "grid",
             .data$ChargingStartDateTime >= dttm_seq[flex_idx[1]],
             .data$ChargingStartDateTime <= dttm_seq[flex_idx[length(flex_idx)]]
           ) %>%
-          set_responsive(dttm_seq[flex_idx], responsive),
+          set_responsive(
+            dttm_seq[flex_idx], responsive, opt_objective, time_resolution
+          ),
         profiles_demand = profiles_demand[flex_idx, ],
         opt_data = opt_data[flex_idx, ]
       )
@@ -297,6 +299,8 @@ get_setpoints_v2g <- function(sessions_window, opt_data, profiles_demand, opt_ob
 
 
 get_setpoints_v2g_parallel <- function(windows_data, opt_objective, lambda) {
+  reset_message_once()
+
   purrr::map(
     windows_data,
     ~ get_setpoints_v2g(
@@ -586,8 +590,8 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
     evsim::expand_sessions(resolution = resolution) 
   sessions_expanded <- sessions_expanded %>%
     mutate(
-      Power = NA,
-      EnergyLeft = .data$EnergyRequired,
+      Power = 0,
+      EnergyToCharge = .data$EnergyRequired,
       Flexible = NA,
       Exploited = NA,
       BatteryCapacity = .data$EnergyRequired * 2, #  50% initial SOC
@@ -634,8 +638,9 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
     #   - `PowerTimeslot`: average charging power in the timeslot.
     #     The `PowerTimeslot` is the `PowerNominal` in all time slots,
     #     except when sessions finish charging in the middle of a time slot.
-    #   - `MinEnergyLeft`: minimum energy that must be charged to fulfill
-    #       the `energy_min` requirement.
+    #   - `MinEnergyToCharge`: minimum energy that must be charged to fulfill
+    #       the `energy_min` requirement. 
+    #   NOT USED ASSUMING ALL V2G CLIENTS WANT FULL CHARGE
     #   - `PossibleEnergyRest`: energy that can be charged at nominal power
     #       during the rest of connection hours (excluding this time slot).
     idx_timeslot <- sessions_expanded$Timeslot == timeslot
@@ -647,7 +652,7 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
     sessions_timeslot <- sessions_timeslot %>%
       mutate(
         PowerTimeslot = pmin(
-          .data$EnergyLeft / (resolution / 60), .data$PowerNominal
+          .data$EnergyToCharge / (resolution / 60), .data$PowerNominal
         ),
         PossibleEnergyRest = .data$PowerNominal *
           pmax(.data$ConnectionHoursLeft - resolution / 60, 0)
@@ -657,22 +662,30 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
     # The minimum power that can be charged in this time slot is
     # lower than the nominal power. The minimum power is defined by:
     #  - The minimum energy that must be charged in the time slot, defined by
-    #      - The minimum State-of-Charge (`SOCmin`)
     #      - The energy that must be charged to reach 100% SOC at departure
+    #      - The minimum State-of-Charge (`SOCmin`) allowed
     #      - The energy that can be charged at nominal power the rest of connection hours
 
     sessions_timeslot <- sessions_timeslot %>%
       mutate(
         MinEnergyTimeslot = pmax( # Can be negative (discharging)
-          .data$EnergyLeft - .data$PossibleEnergyRest, # Energy to reach full SOC
-          .data$BatteryCapacity * SOCmin - .data$EnergyInBattery #  Energy to reach min SOC
+           # Difference between energy to reach full charge and
+           # possible energy that can be charged the rest of connection
+           # If it is negative, it means that we have time to charge later
+           # so now we can discharge
+          .data$EnergyToCharge - .data$PossibleEnergyRest,
+          # Difference between energy to reach min SOC and
+          # energy in battery
+          # If it is negative, it means that we are above min SOC
+          # so now we can discharge
+          .data$BatteryCapacity * SOCmin - .data$EnergyInBattery
         ),
         MinPowerTimeslot = pmax( # Can be negative (discharging)
           .data$MinEnergyTimeslot / (resolution / 60),
           -.data$PowerNominal # Maximum discharging power
         ),
         Flexible = ifelse( # Added error tolerance
-          (.data$EnergyLeft > 0.025) &
+          # (.data$EnergyToCharge > 0.025) & 
             (.data$PowerTimeslot - .data$MinPowerTimeslot > 0.1),
           TRUE,
           FALSE
@@ -789,24 +802,24 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
       ] <- sessions_timeslot$Exploited[s]
 
 
-      # If there are more time slots afterwards, update `EnergyLeft`
+      # If there are more time slots afterwards, update `EnergyToCharge`
       session_after_idx <- (sessions_expanded$Session == sessions_timeslot$Session[s]) &
         (sessions_expanded$ID > sessions_timeslot$ID[s])
 
       if (length(session_after_idx) > 0) {
         session_energy <- sessions_timeslot$Power[s] * resolution / 60
 
-        # Update `EnergyLeft`
+        # Update `EnergyToCharge`
         # We assume that the session is charging the whole timeslot, so:
         # `ChargingHours = resolution/60`
-        session_energy_left <- sessions_timeslot$EnergyLeft[s] - session_energy
-        sessions_expanded$EnergyLeft[session_after_idx] <- session_energy_left
+        session_energy_to_charge <- sessions_timeslot$EnergyToCharge[s] - session_energy
+        sessions_expanded$EnergyToCharge[session_after_idx] <- session_energy_to_charge
 
         # Update `EnergyInBattery`
         session_energy_in <- sessions_timeslot$EnergyInBattery[s] + session_energy
         sessions_expanded$EnergyInBattery[session_after_idx] <- session_energy_in
       } else {
-        session_energy_left <- 0
+        session_energy_to_charge <- 0
         session_energy_in <- 0
       }
     }
@@ -841,7 +854,7 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
   # Update the sessions data set with all variables from the original data set
   sessions_segmented <- sessions_expanded %>%
     select(any_of(c(
-      evsim::sessions_feature_names, "Timeslot", "EnergyLeft",
+      evsim::sessions_feature_names, "Timeslot", "EnergyToCharge",
       "ConnectionHoursLeft", "Flexible", "Exploited"
     ))) %>%
     dplyr::mutate(
@@ -859,7 +872,7 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
   sessions_sch_flex <- sessions_sch %>%
     select("Session", !any_of(names(sessions_segmented))) %>%
     left_join(sessions_segmented, by = "Session") %>%
-    select(any_of(names(sessions_sch)), "Flexible", "Exploited", "EnergyLeft", "ConnectionHoursLeft")
+    select(any_of(names(sessions_sch)), "Flexible", "Exploited", "EnergyToCharge", "ConnectionHoursLeft")
 
 
   list(

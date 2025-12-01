@@ -4,7 +4,7 @@ output: html_document
 ---
 
 
-```{r setup, echo=FALSE, message=F, warning=FALSE, fig.width=12}
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE, fig.width=12}
 library(flextools)
 # devtools::load_all()
 library(dplyr)

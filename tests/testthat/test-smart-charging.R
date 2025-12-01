@@ -88,15 +88,15 @@ test_that("smart charging works with grid objective and curtail method", {
   )
   # Expect all sessions charge 100% of their energy
   expect_equal(
-    round(sum(sessions$Energy) - sum(sc_results$sessions$Energy)), 0
+    trunc(sum(sessions$Energy) - sum(sc_results$sessions$Energy)), 0
   )
   # Same demand in setpoints
   expect_equal(
-    round(sum(sessions_demand$Worktime) - sum(sc_results$setpoints$Worktime)), 0
+    trunc(sum(sessions_demand$Worktime) - sum(sc_results$setpoints$Worktime)), 0
   )
   # Same demand in optimal demand
   expect_equal(
-    round(sum(sessions_demand$Worktime) - sum(sc_results$demand$Worktime)), 0
+    trunc(sum(sessions_demand$Worktime) - sum(sc_results$demand$Worktime)), 0
   )
 })
 

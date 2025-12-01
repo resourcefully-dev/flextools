@@ -45,7 +45,7 @@ summarise_energy_charged <- function(smart_charging, sessions) {
 
   energy_charged <- smart_charging$sessions %>%
     group_by(.data$Session) %>%
-    summarise(EnergyCharged = round(sum(.data$Energy), 2))
+    summarise(EnergyCharged = round(sum(.data$Energy, na.rm = TRUE), 2))
 
   sessions %>%
     select("Session", EnergyRequired = "Energy") %>%

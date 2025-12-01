@@ -252,7 +252,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
             .data$ChargingStartDateTime >= dttm_seq[flex_idx[1]],
             .data$ChargingStartDateTime <= dttm_seq[flex_idx[length(flex_idx)]]
           ) %>%
-          set_responsive(dttm_seq[flex_idx], responsive),
+          set_responsive(
+            dttm_seq[flex_idx], responsive, opt_objective, time_resolution
+          ),
         profiles_demand = profiles_demand[flex_idx, ],
         opt_data = opt_data[flex_idx, ]
       )
@@ -350,6 +352,9 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 #' @param sessions_window tibble, sessions corresponding to a single windows
 #' @param dttm_seq datetime vector
 #' @param responsive named list with responsive ratios
+#' @param opt_objective character, optimization objective being `"none"`, `"grid"`,
+#'  `"cost"` or a value between 0 (cost) and 1 (grid).
+#' @param time_resolution numeric, time resolution in minutes
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
 #' @importFrom lubridate hour minute date
@@ -360,7 +365,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 #'
 #' @keywords internal
 #'
-set_responsive <- function(sessions_window, dttm_seq, responsive) {
+set_responsive <- function(sessions_window, dttm_seq, responsive, opt_objective, time_resolution) {
   if (nrow(sessions_window) == 0) {
     return(tibble())
   }
@@ -410,13 +415,13 @@ set_responsive <- function(sessions_window, dttm_seq, responsive) {
     #   1. Charging end time inside the optimization window
     end_charge_window <- sessions_window_prof$ChargingEndDateTime <= dttm_seq[length(dttm_seq)]
 
-    # #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
-    # #       This is done only if optimization is used to find a setpoint
-    # if (opt_objective != "none") {
-    #   not_outliers <- get_window_not_outliers(sessions_window_prof, pct = 95, time_resolution)
-    # } else {
-    #   not_outliers <- TRUE
-    # }
+    #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
+    #       This is done only if optimization is used to find a setpoint
+    if (opt_objective != "none") {
+      not_outliers <- get_window_not_outliers(sessions_window_prof, pct = 95, time_resolution)
+    } else {
+      not_outliers <- TRUE
+    }
 
     # Sessions that are "potentially responsive":
     # potentially_responsive_idx <- which(end_charge_window & not_outliers)
@@ -742,10 +747,13 @@ smart_charging_window <- function(sessions_window, profiles_demand, setpoints, m
       setpoint = setpoints[[profile]] - L_fixed_prof
     )
     results <- schedule_sessions(
-      sessions = sessions_window_prof_flex, setpoint = setpoint_prof,
+      sessions = sessions_window_prof_flex, 
+      setpoint = setpoint_prof,
       method = method, power_th = power_th,
-      charging_power_min = charging_power_min, energy_min = energy_min,
-      include_log = include_log, show_progress = FALSE
+      charging_power_min = charging_power_min, 
+      energy_min = energy_min,
+      include_log = include_log, 
+      show_progress = FALSE
     )
 
     # Final profile sessions
@@ -916,7 +924,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     expand_sessions(resolution = resolution)
   sessions_expanded <- sessions_expanded %>%
     mutate(
-      Power = NA,
+      Power = 0,
       EnergyLeft = .data$EnergyRequired,
       Flexible = NA,
       Exploited = NA
@@ -994,7 +1002,8 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           Flexible = ifelse(
-            (.data$EnergyCharged == 0) & (.data$MinEnergyLeft <= .data$PossibleEnergyRest),
+            (.data$EnergyCharged == 0) & 
+              (.data$MinEnergyLeft <= .data$PossibleEnergyRest),
             TRUE, FALSE
           )
         )
@@ -1466,7 +1475,7 @@ print.SmartCharging <- function(x, ...) {
 #' @param show_setpoint logical, whether to show the setpoint line or not
 #' @param by character, name of a character column in `smart_charging$sessions` (e.g. `"Profile"`) or
 #' `"FlexType"` (i.e. "Exploited", "Not exploited", "Not flexible", "Not responsive" and "Not considered")
-#' @param ... extra arguments of function `evsim::plot_ts()` or other arguments
+#' @param ... extra arguments of function `timefully::plot_ts()` or other arguments
 #' to pass to `dygraphs::dyOptions()`.
 #'
 #' @return dygraphs plot

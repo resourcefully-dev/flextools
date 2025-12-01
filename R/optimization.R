@@ -12,7 +12,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
     opt_data$static <- 0
   }
   if (!("production" %in% names(opt_data))) {
-    message("Warning: `production` variable not found in `opt_data`. No local energy production will be considered.")
+    warning("`production` variable not found in `opt_data`. No local energy production will be considered.")
     opt_data$production <- 0
   }
 
@@ -43,11 +43,11 @@ check_optimization_data <- function(opt_data, opt_objective) {
 
   if (opt_objective == "cost" || is.numeric(opt_objective)) {
     if (!("price_imported" %in% names(opt_data))) {
-      message("Warning: `price_imported` variable not found in `opt_data`.")
+      warning("`price_imported` variable not found in `opt_data`.")
       opt_data$price_imported <- 1
     }
     if (!("price_exported" %in% names(opt_data))) {
-      message("Warning: `price_exported` variable not found in `opt_data`.")
+      message("`price_exported` variable not found in `opt_data`.")
       opt_data$price_exported <- 0
     }
     if (!("price_turn_up" %in% names(opt_data))) {
@@ -118,7 +118,7 @@ get_flex_windows <- function(dttm_seq, window_days, window_start_hour, flex_wind
     flex_windows_length <- windows_length
   } else {
     if (flex_window_hours > 24 * window_days) {
-      message("Warning: `flex_window_hours` must be lower than `window_days` hours.")
+      message("`flex_window_hours` must be lower than `window_days` hours.")
       flex_window_hours <- 24 * window_days
     }
     flex_window_length <- flex_window_hours * 60 / resolution
@@ -788,7 +788,7 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   }
 
   if (Bcap == 0 || Bc == 0 || Bd == 0 || SOCmin == SOCmax) {
-    message("\u26A0\uFE0F Warning: battery parameters don't allow optimization.")
+    message("\u26A0\uFE0F Optimization warning: battery parameters don't allow optimization.")
     return( rep(0, nrow(opt_data)) )
   }
 

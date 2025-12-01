@@ -925,7 +925,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
   sessions_expanded <- sessions_expanded %>%
     mutate(
       Power = 0,
-      EnergyLeft = .data$EnergyRequired,
+      EnergyToCharge = .data$EnergyRequired,
       Flexible = NA,
       Exploited = NA
     ) %>%
@@ -971,7 +971,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     #     The `PowerTimeslot` is the `PowerNominal` in all time slots,
     #     except when sessions finish charging in the middle of a time slot.
     #   - `EnergyCharged`: energy that has been already charged before this time slot.
-    #   - `MinEnergyLeft`: minimum energy that must be charged to fulfill
+    #   - `MinEnergyToCharge`: minimum energy that must be charged to fulfill
     #       the `energy_min` requirement.
     #   - `PossibleEnergyRest`: energy that can be charged at nominal power
     #       during the rest of connection hours (excluding this time slot).
@@ -984,10 +984,10 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     sessions_timeslot <- sessions_timeslot %>%
       mutate(
         PowerTimeslot = pmin(
-          .data$EnergyLeft / (resolution / 60), .data$PowerNominal
+          .data$EnergyToCharge / (resolution / 60), .data$PowerNominal
         ),
-        EnergyCharged = .data$EnergyRequired - .data$EnergyLeft,
-        MinEnergyLeft = pmax(
+        EnergyCharged = .data$EnergyRequired - .data$EnergyToCharge,
+        MinEnergyToCharge = pmax(
           .data$EnergyRequired * energy_min - .data$EnergyCharged, 0
         ),
         PossibleEnergyRest = .data$PowerNominal *
@@ -1003,7 +1003,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
         mutate(
           Flexible = ifelse(
             (.data$EnergyCharged == 0) & 
-              (.data$MinEnergyLeft <= .data$PossibleEnergyRest),
+              (.data$MinEnergyToCharge <= .data$PossibleEnergyRest),
             TRUE, FALSE
           )
         )
@@ -1013,7 +1013,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           Flexible = ifelse( # Added error tolerance
-            (.data$EnergyLeft > 0.025) & (.data$MinEnergyLeft <= .data$PossibleEnergyRest),
+            (.data$EnergyToCharge > 0.025) & (.data$MinEnergyToCharge <= .data$PossibleEnergyRest),
             TRUE, FALSE
           )
         )
@@ -1040,7 +1040,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           MinEnergyTimeslot = pmax(
-            .data$MinEnergyLeft - .data$PossibleEnergyRest, 0
+            .data$MinEnergyToCharge - .data$PossibleEnergyRest, 0
           ),
           MinPowerTimeslot = pmax(
             .data$MinEnergyTimeslot / (resolution / 60),
@@ -1050,7 +1050,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
             )
           ),
           Flexible = ifelse( # Added error tolerance
-            (.data$EnergyLeft > 0.025) &
+            (.data$EnergyToCharge > 0.025) &
               (.data$PowerTimeslot - .data$MinPowerTimeslot > 0.1),
             TRUE,
             FALSE
@@ -1231,17 +1231,17 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       ] <- sessions_timeslot$Exploited[s]
 
 
-      # If there are more time slots afterwards, update `EnergyLeft` and `FlexibilityHours`
+      # If there are more time slots afterwards, update `EnergyToCharge` and `FlexibilityHours`
       session_after_idx <- (sessions_expanded$Session == sessions_timeslot$Session[s]) &
         (sessions_expanded$ID > sessions_timeslot$ID[s])
 
       if (length(session_after_idx) > 0) {
-        # Update `EnergyLeft`
+        # Update `EnergyToCharge`
         # We assume that the session is charging the whole timeslot, so:
         # `ChargingHours = resolution/60`
         session_energy <- sessions_timeslot$Power[s] * resolution / 60
-        session_energy_left <- sessions_timeslot$EnergyLeft[s] - session_energy
-        sessions_expanded$EnergyLeft[session_after_idx] <- session_energy_left
+        session_energy_to_charge <- sessions_timeslot$EnergyToCharge[s] - session_energy
+        sessions_expanded$EnergyToCharge[session_after_idx] <- session_energy_to_charge
 
         # Update `FlexibilityHours`
         if (method %in% c("postpone", "interrupt")) {
@@ -1250,7 +1250,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           sessions_expanded$FlexibilityHours[session_after_idx] <- session_flexibility_hours
         }
       } else {
-        session_energy_left <- 0
+        session_energy_to_charge <- 0
         session_flexibility_hours <- 0
       }
     }
@@ -1297,7 +1297,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
   # Update the sessions data set with all variables from the original data set
   sessions_segmented <- sessions_expanded %>%
     select(any_of(c(
-      evsim::sessions_feature_names, "Timeslot", "EnergyLeft",
+      evsim::sessions_feature_names, "Timeslot", "EnergyToCharge",
       "ConnectionHoursLeft", "Flexible", "Exploited"
     ))) %>%
     mutate(
@@ -1315,7 +1315,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
   sessions_sch_flex <- sessions_sch %>%
     select("Session", !any_of(names(sessions_segmented))) %>%
     left_join(sessions_segmented, by = "Session") %>%
-    select(any_of(names(sessions_sch)), "Flexible", "Exploited", "EnergyLeft", "ConnectionHoursLeft")
+    select(any_of(names(sessions_sch)), "Flexible", "Exploited", "EnergyToCharge", "ConnectionHoursLeft")
 
   return(
     list(
@@ -1899,572 +1899,3 @@ summarise_profile_smart_charging_sessions <- function(profile_sessions) {
     ungroup() %>%
     filter(n_sessions > 0)
 }
-
-
-#'
-#' #' Control sessions according to optimal setpoint
-#' #'
-#' #' @param sessions tibble, sessions data set containing the following variables:
-#' #' `"Session"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`.
-#' #'
-#' #' IMPORTANT: Make sure that the `sessions` `ConnectionStartDateTime` and
-#' #' `ChargingStartDateTime` are in the same time resolution than `setpoint$datetime`.
-#' #' @param setpoint tibble with columns `datetime` and `setpoint`.
-#' #' @param method character, being `"postpone"`, `"curtail"` or `"interrupt"`.
-#' #' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
-#' #' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
-#' #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
-#' #' @param user_end_time logical, whether the end time of the session is known or not.
-#' #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
-#' #' @param show_progress logical, whether to output the progress bar in the console
-#' #'
-#' #' @return list of two elements `sessions` and `log`
-#' #' @export
-#' #'
-#' #' @importFrom dplyr tibble %>% filter mutate arrange desc left_join select
-#' #' @importFrom rlang .data
-#' #' @importFrom lubridate as_datetime tz
-#' #' @importFrom evsim expand_sessions
-#' #'
-#' control_sessions <- function(sessions, setpoint, method, power_th = 0,
-#'                               user_end_time = FALSE,
-#'                               include_log = FALSE, show_progress = TRUE) {
-#'   log <- c()
-#'
-#'   # Parameters check
-#'   if (is.null(sessions) | nrow(sessions) == 0) {
-#'     message("Error: `sessions` parameter is empty.")
-#'     return( NULL )
-#'   }
-#'   sessions_basic_vars <- c(
-#'     "Session", "ConnectionStartDateTime", "ConnectionHours", "Power", "Energy"
-#'   )
-#'   if (!all(sessions_basic_vars %in% colnames(sessions))) {
-#'     message("Error: `sessions` does not contain all required variables (see Arguments description)")
-#'     return( NULL )
-#'   }
-#'   if (!all(c("datetime", "setpoint") %in% colnames(setpoint))) {
-#'     message("Error: `setpoint` does not contain all required variables (see Arguments description)")
-#'     return( NULL )
-#'   }
-#'
-#'   sessions_sch <- sessions %>%
-#'     filter(.data$ConnectionStartDateTime %in% setpoint$datetime) %>%
-#'     mutate(
-#'       ChargingHours = round(.data$Energy/.data$Power, 2),
-#'       FlexibilityHours = round(.data$ConnectionHours - .data$ChargingHours, 2)
-#'     )
-#'   if (nrow(sessions_sch) == 0) {
-#'     message("Error: no `sessions` for `setpoint$datetime` period")
-#'     return( NULL )
-#'   }
-#'
-#'   resolution <- get_time_resolution(setpoint$datetime, units = "mins")
-#'   sessions_expanded <- sessions_sch %>%
-#'     expand_sessions(resolution = resolution)
-#'   sessions_expanded <- sessions_expanded %>%
-#'     mutate(
-#'       Power = 0,
-#'       EnergyLeft = sessions_expanded$EnergyRequired,
-#'       Flexible = FALSE,
-#'       Exploited = FALSE
-#'     ) %>%
-#'     left_join(
-#'       select(sessions_sch, all_of(c("Session", "ConnectionStartDateTime", "FlexibilityHours"))),
-#'       by = "Session"
-#'     )
-#'
-#'   if (show_progress) {
-#'     pb <- progress::progress_bar$new(
-#'       format = "[:bar] :percent eta: :eta",
-#'       total = length(setpoint$datetime)
-#'     )
-#'   }
-#'
-#'   dttm_tz <- tz(setpoint$datetime)
-#'
-#'   for (timeslot in setpoint$datetime) {
-#'
-#'     if (show_progress) pb$tick()
-#'
-#'     # Filter sessions that are charging (`EnergyLeft > 0`) during this time slot
-#'     # and calculate their average charging power `PowerTimeslot` in the time slot
-#'     # The `PowerTimeslot` is the `PowerNominal` in all time slots, except when
-#'     # the session finishes charging in the middle of a time slot.
-#'     sessions_timeslot <- sessions_expanded %>%
-#'       filter(.data$Timeslot == timeslot, .data$EnergyLeft > 0)
-#'
-#'     if (nrow(sessions_timeslot) == 0) {
-#'       next
-#'     }
-#'
-#'     sessions_timeslot <- sessions_timeslot %>%
-#'       mutate(
-#'         PowerTimeslot = pmin(
-#'           .data$EnergyLeft/(resolution/60), .data$PowerNominal
-#'         ),
-#'         EnergyCharged = .data$EnergyRequired - .data$EnergyLeft
-#'       )
-#'
-#'     sessions_timeslot_power <- sum(sessions_timeslot$PowerTimeslot)
-#'
-#'     setpoint_timeslot_power <- setpoint$setpoint[
-#'       setpoint$datetime == timeslot
-#'     ]
-#'
-#'     flex_req <- round(sessions_timeslot_power - setpoint_timeslot_power * (1 + power_th), 2)
-#'
-#'     # If demand should be reduced
-#'     if (flex_req > 0) {
-#'
-#'       if (include_log) {
-#'         log_message <- paste(
-#'           as_datetime(timeslot, tz=dttm_tz),
-#'           "- Flexibility requirement of", flex_req, "kW and",
-#'           nrow(sessions_timeslot), "sessions connected."
-#'         )
-#'
-#'         message(log_message)
-#'         log <- c(
-#'           log,
-#'           log_message
-#'         )
-#'       }
-#'
-#'       if (method %in% c("postpone", "interrupt")) {
-#'
-#'         # Time flexibility (Postpone / Interrupt) ----------------------------------------------------------------
-#'
-#'         # Filter shiftable sessions and arrange them by Flexibility potential
-#'         # * Postpone: the EV has not started charging yet, and the energy required
-#'         #    can be charged during the rest of the connection time at the nominal charging power.
-#'         # * Interrupt: the charge is not completed yet, and the energy required
-#'         #    can be charged during the rest of the connection time at the nominal charging power.
-#'         if (method == "postpone") {
-#'           sessions_timeslot <- sessions_timeslot %>%
-#'             mutate(
-#'               Flexible = ifelse(
-#'                 .data$EnergyCharged == 0,
-#'                 TRUE, FALSE
-#'               )
-#'             )
-#'         } else {
-#'           sessions_timeslot <- sessions_timeslot %>%
-#'             mutate(
-#'               Flexible = ifelse(
-#'                 .data$EnergyLeft > 0,
-#'                 TRUE, FALSE
-#'               )
-#'             )
-#'         }
-#'
-#'         # Get the maximum flexible power of this time slot
-#'         shift_flex_available <- sum(sessions_timeslot$PowerTimeslot[sessions_timeslot$Flexible])
-#'
-#'         # If the available flexibility is higher than the flexibility request,
-#'         # then allow the sessions with less flexibility to charge.
-#'         # Else, shift all sessions.
-#'         if (shift_flex_available >= flex_req) {
-#'
-#'           sessions_timeslot_shiftable <- sessions_timeslot %>%
-#'             filter(.data$Flexible)
-#'
-#'           # Arrange charging priority according to the method:
-#'           #  - Postpone: start and end times define priority
-#'           #  - Interrupt: start and end times, and energy charged define priority
-#'           if (method == "postpone") {
-#'             if (user_end_time) {
-#'               sessions_timeslot_shiftable <- sessions_timeslot_shiftable %>%
-#'                 arrange(desc(.data$ConnectionStartDateTime), desc(.data$ConnectionHoursLeft))
-#'             } else {
-#'               sessions_timeslot_shiftable <- sessions_timeslot_shiftable %>%
-#'                 arrange(desc(.data$ConnectionStartDateTime))
-#'             }
-#'           } else {
-#'             if (user_end_time) {
-#'               sessions_timeslot_shiftable <- sessions_timeslot_shiftable %>%
-#'                 arrange(desc(.data$EnergyCharged), desc(.data$ConnectionStartDateTime), desc(.data$ConnectionHoursLeft))
-#'             } else {
-#'               sessions_timeslot_shiftable <- sessions_timeslot_shiftable %>%
-#'                 arrange(desc(.data$EnergyCharged), desc(.data$ConnectionStartDateTime))
-#'             }
-#'           }
-#'
-#'           # Get the index of sessions that can charge
-#'           allowed_to_charge_idx <- rep(FALSE, nrow(sessions_timeslot_shiftable))
-#'           for (s in seq_len(nrow(sessions_timeslot_shiftable))) {
-#'             flex_req <- max(flex_req - sessions_timeslot_shiftable$PowerTimeslot[s], 0)
-#'             if (flex_req == 0) break
-#'           }
-#'           if ((s+1) <= length(allowed_to_charge_idx)) {
-#'             allowed_to_charge_idx[seq(s+1, length(allowed_to_charge_idx))] <- TRUE
-#'           }
-#'
-#'           # Update the `Exploited` variable to `TRUE` for sessions to shift
-#'           sessions_timeslot$Exploited[
-#'             sessions_timeslot$ID %in% sessions_timeslot_shiftable$ID[!allowed_to_charge_idx]
-#'           ] <- TRUE
-#'
-#'         } else {
-#'
-#'           # All `Flexible` sessions are `Exploited`
-#'           sessions_timeslot$Exploited <- sessions_timeslot$Flexible
-#'
-#'           # Update flexibility requirement with power from all shiftable sessions
-#'           flex_req <- round(flex_req - shift_flex_available, 2)
-#'
-#'           if (include_log) {
-#'             log_message <- paste0(
-#'               " -- Not enough flexibility available (", shift_flex_available, " kW)"
-#'             )
-#'             message(log_message)
-#'             log <- c(
-#'               log,
-#'               log_message
-#'             )
-#'           }
-#'
-#'         }
-#'
-#'         # Update the charging power of sessions that are NOT shifted
-#'         sessions_timeslot$Power[!sessions_timeslot$Exploited] <-
-#'           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
-#'       }
-#'
-#'       if ("curtail" %in% method) {
-#'
-#'         # Power flexibility (Curtail) ----------------------------------------------------------------
-#'
-#'         # Flexible sessions:
-#'         sessions_timeslot$Flexible[
-#'           sessions_timeslot$EnergyLeft > 0
-#'         ] <- TRUE
-#'
-#'         # Get the power demand from curtailable sessions
-#'         curtailable_sessions_power <- sum(
-#'           sessions_timeslot$PowerTimeslot[sessions_timeslot$Flexible]
-#'         )
-#'
-#'         # Power factor that would be required
-#'         power_factor <- (curtailable_sessions_power - flex_req)/curtailable_sessions_power
-#'
-#'         # All `Flexible` sessions are `Exploited`
-#'         sessions_timeslot$Exploited <- sessions_timeslot$Flexible
-#'
-#'         # Update the charging power of curtailed sessions
-#'         sessions_timeslot$Power[sessions_timeslot$Exploited] <-
-#'           sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited]*power_factor
-#'
-#'         # Update the charging power of sessions that are NOT curtailed
-#'         sessions_timeslot$Power[!sessions_timeslot$Exploited] <-
-#'           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
-#'
-#'         if (include_log) {
-#'           flex_provided <- round(curtailable_sessions_power -
-#'                                    sum(sessions_timeslot$Power[sessions_timeslot$Exploited]), 2)
-#'           if (flex_provided < flex_req) {
-#'             log_message <- paste0(
-#'               " -- Not enough flexibility available (", flex_provided, " kW)"
-#'             )
-#'             message(log_message)
-#'             log <- c(
-#'               log,
-#'               log_message
-#'             )
-#'           }
-#'         }
-#'
-#'         # Update flexibility requirement
-#'         flex_req <- round(flex_req - (curtailable_sessions_power - curtailable_sessions_power*power_factor), 2)
-#'
-#'       }
-#'
-#'     } else {
-#'
-#'       if (include_log) {
-#'         log_message <- paste(
-#'           as_datetime(timeslot, tz=dttm_tz),
-#'           "- No flexibility required"
-#'         )
-#'
-#'         message(log_message)
-#'         log <- c(
-#'           log,
-#'           log_message
-#'         )
-#'       }
-#'
-#'       # No flexibility required: charge all sessions
-#'       sessions_timeslot <- sessions_timeslot %>%
-#'         mutate(Power = .data$PowerTimeslot)
-#'
-#'     }
-#'
-#'
-#'     # Update data set ----------------------------------------------------------------
-#'
-#'     # For every session update in `sessions_expanded` table
-#'     #   1. The charging power during THIS TIME SLOT (session id == `ID`)
-#'     #       If energy left is less than the energy that can be charged in this
-#'     #       time slot, then only charge the energy left, so the AVERAGE charging
-#'     #       power will be calculated with the energy left (lower than nominal power)
-#'     #   2. The energy left and the available flexibility for the FOLLOWING time
-#'     #       slots of THIS SESSION (session id == `Session`)
-#'     for (s in seq_len(nrow(sessions_timeslot))) {
-#'
-#'       # Update `Power`
-#'       sessions_expanded$Power[
-#'         sessions_expanded$ID == sessions_timeslot$ID[s]
-#'       ] <- sessions_timeslot$Power[s]
-#'       # Update `Flexible`
-#'       sessions_expanded$Flexible[
-#'         sessions_expanded$ID == sessions_timeslot$ID[s]
-#'       ] <- sessions_timeslot$Flexible[s]
-#'       # Update `Exploited`
-#'       sessions_expanded$Exploited[
-#'         sessions_expanded$ID == sessions_timeslot$ID[s]
-#'       ] <- sessions_timeslot$Exploited[s]
-#'
-#'
-#'       # If there are more time slots afterwards, update `EnergyLeft` and `FlexibilityHours`
-#'       session_after_idx <- (sessions_expanded$Session == sessions_timeslot$Session[s]) &
-#'         (sessions_expanded$ID > sessions_timeslot$ID[s])
-#'
-#'       if (length(session_after_idx) > 0) {
-#'
-#'         # Update `EnergyLeft`
-#'         session_energy <- round(sessions_timeslot$Power[s]*resolution/60, 2)
-#'         session_energy_left <- round(sessions_timeslot$EnergyLeft[s] - session_energy, 2)
-#'         sessions_expanded$EnergyLeft[session_after_idx] <- session_energy_left
-#'
-#'         # Update `FlexibilityHours`
-#'         session_flexibility_hours <- round(max(sessions_timeslot$FlexibilityHours[s] - resolution/60, 0), 2)
-#'         sessions_timeslot$FlexibilityHours[s] <- session_flexibility_hours
-#'         sessions_expanded$FlexibilityHours[session_after_idx] <- session_flexibility_hours
-#'
-#'       } else {
-#'         session_energy_left <- 0
-#'         session_flexibility_hours <- 0
-#'       }
-#'
-#'     }
-#'
-#'     # Log message ----------------------------------------------------------------
-#'
-#'     if (include_log) {
-#'
-#'       exploited_sessions <- sessions_timeslot %>% filter(.data$Exploited)
-#'
-#'       for (s in seq_len(nrow(exploited_sessions))) {
-#'
-#'         if (method %in% c("postpone", "interrupt")) {
-#'           if (user_end_time) {
-#'             session_flexibility_hours <- exploited_sessions$FlexibilityHours[s]
-#'             original_flexibility <- sessions_sch$FlexibilityHours[sessions$Session == exploited_sessions$Session[s]]
-#'             pct_flexibility_available <- round(session_flexibility_hours/original_flexibility*100)
-#'             log_message <- paste0(
-#'               "---- Session ", exploited_sessions$Session[s], " shifted (",
-#'               exploited_sessions$PowerTimeslot[s], " kW, ",
-#'               pct_flexibility_available, "% of flexible time still available)"
-#'             )
-#'           } else {
-#'             log_message <- paste0(
-#'               "---- Session ", exploited_sessions$Session[s], " shifted (",
-#'               exploited_sessions$PowerTimeslot[s], " kW)"
-#'             )
-#'           }
-#'
-#'         } else {
-#'           power_reduction <- round(exploited_sessions$PowerTimeslot[s] - exploited_sessions$Power[s], 2)
-#'           pct_power_reduction <- round(power_reduction/exploited_sessions$PowerTimeslot[s]*100)
-#'           log_message <- paste0(
-#'             "---- Session ", exploited_sessions$Session[s],
-#'             " provides ", power_reduction, " kW of flexibility (",
-#'             pct_power_reduction, "% power reduction)"
-#'           )
-#'         }
-#'
-#'         message(log_message)
-#'         log <- c(
-#'           log,
-#'           log_message
-#'         )
-#'       }
-#'
-#'     }
-#'
-#'   }
-#'
-#'   # Update the sessions data set with all variables from the original data set
-#'   sessions_expanded2 <- left_join(
-#'     sessions_expanded %>%
-#'       select(any_of(c(
-#'         'Session', 'Timeslot', 'Power', 'FlexibilityHours', 'EnergyLeft',
-#'         'ConnectionHoursLeft', 'Flexible', 'Exploited'
-#'       ))),
-#'     sessions_sch %>%
-#'       select('Session', !any_of(evsim::sessions_feature_names)),
-#'     by = 'Session'
-#'   ) %>%
-#'     mutate(
-#'       ConnectionStartDateTime = .data$Timeslot,
-#'       ConnectionEndDateTime = .data$Timeslot + minutes(resolution),
-#'       ChargingStartDateTime = .data$Timeslot,
-#'       ChargingEndDateTime = .data$Timeslot + minutes(resolution),
-#'       ConnectionHours = resolution/60,
-#'       ChargingHours = resolution/60,
-#'       Energy = round(.data$Power*.data$ChargingHours, 2)
-#'     ) %>%
-#'     select(any_of(names(sessions)), 'EnergyLeft', 'ConnectionHoursLeft', 'Flexible', 'Exploited')
-#'
-#'   return(
-#'     list(
-#'       sessions = sessions_expanded2,
-#'       log = log
-#'     )
-#'   )
-#' }
-#'
-
-
-#' #' Simulate charging power limitation based on grid capacity signals
-#' #'
-#' #' @param sessions tibble, charging sessions data set.
-#' #' If sessions have been expanded using `evsim::expand_session` function, set parameter `expand = FALSE`.
-#' #' @param grid_capacity tibble, grid capacity time-series with columns `datetime` and `max_amps` per phase
-#' #' @param amps_car_min integer, minimum current to charge the vehicles
-#' #' @param expand logical, whether to expand session using `evsim::expand_session` function
-#' #' @param include_log logical, whether to print and return log messages
-#' #'
-#' #' @return tibble
-#' #' @export
-#' #'
-#' #' @importFrom dplyr %>% tibble mutate select all_of row_number filter group_by summarise
-#' #' @importFrom lubridate as_datetime tz
-#' #' @importFrom rlang .data
-#' #' @importFrom evsim get_demand expand_sessions
-#' #'
-#' simulate_flexpower <- function(sessions, grid_capacity, amps_car_min = 8, expand = TRUE, include_log = FALSE) {
-#'   log_messages <- c()
-#'
-#'   if (expand) {
-#'     resolution <- as.integer(as.numeric(grid_capacity$datetime[2] - grid_capacity$datetime[1], unit = 'hours')*60)
-#'     sessions_expanded <- sessions %>%
-#'       split(1:nrow(sessions)) %>%
-#'       map_dfr(
-#'         ~ expand_session(.x, resolution = resolution)
-#'       ) %>%
-#'       mutate(ID = row_number())
-#'   } else {
-#'     sessions_expanded <- sessions
-#'   }
-#'
-#'
-#'   for (timeslot in grid_capacity$datetime) {
-#'
-#'     # Sessions that are charging (EnergyLeft > 0) during this time slot
-#'     sessions_timeslot <- sessions_expanded %>%
-#'       filter(.data$Timeslot == timeslot, .data$EnergyLeft > 0) %>%
-#'       mutate(ChargingPointLimit = 16)
-#'
-#'     if (nrow(sessions_timeslot) == 0) {
-#'       next
-#'     }
-#'
-#'     # Find the maximum current allowed by the MSR per charging socket
-#'     phases_used_by_chpoint <- sessions_timeslot %>%
-#'       group_by(.data$ChargingPoint) %>%
-#'       summarise(n_phases = sum(.data$Phases)) %>%
-#'       mutate(n_sessions = ifelse(.data$n_phases <= 3, 1, 2))
-#'     n_times_phases_used <- sum(phases_used_by_chpoint$n_sessions)
-#'
-#'     amps_msr_max <- grid_capacity$max_amps[
-#'       grid_capacity$datetime == timeslot
-#'     ]/n_times_phases_used
-#'
-#'     # Find the maximum current allowed by every charging point per charging socket
-#'     for (chpoint in unique(sessions_timeslot$ChargingPoint)) {
-#'       sessions_chpoint <- sessions_timeslot %>%
-#'         filter(.data$ChargingPoint == chpoint)
-#'
-#'       if (nrow(sessions_chpoint) > 2) {
-#'         message(paste(
-#'           "Warning: more than 2 sessions in charging point",
-#'           chpoint, "at", sessions_timeslot$Timeslot[1]
-#'         ))
-#'         print(sessions_chpoint)
-#'         sessions_chpoint <- sessions_chpoint[c(1, 2), ]
-#'       }
-#'
-#'       amps_charging_point_max <- ifelse(
-#'         sum(sessions_chpoint$Phases) <= 3, 16, 12.5
-#'       )
-#'
-#'       sessions_timeslot$ChargingPointLimit[
-#'         sessions_timeslot$ChargingPoint == chpoint
-#'       ] <- amps_charging_point_max
-#'     }
-#'
-#'     # Charging current of session, comparing:
-#'     #   1. Charging point limit
-#'     #   2. MSR limit
-#'     #   4. Minimum charging current per vehicle (typically 8A). The equivalence
-#'     #      of the rotation system is to divide minimum current by the number
-#'     #      of charging cars during that time slot.
-#'     sessions_timeslot <- sessions_timeslot %>%
-#'       mutate(
-#'         Amps = max(
-#'           min(.data$ChargingPointLimit, amps_msr_max),
-#'           amps_car_min/nrow(sessions_timeslot)
-#'         )
-#'       )
-#'
-#'     # For every session update in `sessions` table
-#'     #   1. The charging power during THIS time slot (session id == `ID`)
-#'     #   2. The energy left for the ALL time slots of the session (session id == `Session`)
-#'     for (s in 1:nrow(sessions_timeslot)) {
-#'       session_power <- sessions_timeslot$Amps[s]*230*sessions_timeslot$Phases[s]/1000
-#'       session_energy <- session_power*resolution/60
-#'
-#'       # If energy left is less than the energy that can be charged in this
-#'       # time slot, then only charge the energy left.
-#'       if (sessions_timeslot$EnergyLeft[s] < session_energy) {
-#'         session_power <- sessions_timeslot$EnergyLeft[s]/(resolution/60)
-#'         session_energy <- sessions_timeslot$EnergyLeft[s]
-#'       }
-#'
-#'       if (include_log) {
-#'         log_message <- paste(
-#'           as_datetime(timeslot, tz = tz(grid_capacity$datetime)),
-#'           "- Session", sessions_timeslot$Session[s],
-#'           "at", session_power, "kW. Charged",
-#'           session_energy, "kWh of",
-#'           sessions_timeslot$EnergyLeft[s], "kWh required"
-#'         )
-#'
-#'         message(log_message)
-#'         log_messages <- c(
-#'           log_messages,
-#'           log_message
-#'         )
-#'       }
-#'
-#'       # Update power
-#'       sessions_expanded$Power[
-#'         sessions_expanded$ID == sessions_timeslot$ID[s]
-#'       ] <- session_power
-#'
-#'       # Update energy
-#'       session_energy_idx <- sessions_expanded$Session == sessions_timeslot$Session[s]
-#'       sessions_expanded$EnergyLeft[session_energy_idx] <-
-#'         round(sessions_timeslot$EnergyLeft[s] - session_energy, 2)
-#'     }
-#'   }
-#'
-#'   return(
-#'     list(
-#'       sessions = sessions_expanded,
-#'       log = log_messages
-#'     )
-#'   )
-#' }

@@ -246,15 +246,16 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
   windows_data <- map(
     flex_windows_idx$flex_idx,
     function(flex_idx) {
+      sessions_window <- sessions %>%
+        filter(
+          .data$ChargingStartDateTime >= dttm_seq[flex_idx[1]],
+          .data$ChargingStartDateTime <= dttm_seq[flex_idx[length(flex_idx)]]
+        ) %>%
+        set_responsive(
+          dttm_seq[flex_idx], responsive, opt_objective, time_resolution
+        )
       list(
-        sessions_window = sessions %>%
-          filter(
-            .data$ChargingStartDateTime >= dttm_seq[flex_idx[1]],
-            .data$ChargingStartDateTime <= dttm_seq[flex_idx[length(flex_idx)]]
-          ) %>%
-          set_responsive(
-            dttm_seq[flex_idx], responsive, opt_objective, time_resolution
-          ),
+        sessions_window = sessions_window,
         profiles_demand = profiles_demand[flex_idx, ],
         opt_data = opt_data[flex_idx, ]
       )
@@ -357,7 +358,7 @@ smart_charging <- function(sessions, opt_data, opt_objective, method,
 #' @param time_resolution numeric, time resolution in minutes
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
-#' @importFrom lubridate hour minute date
+#' @importFrom lubridate hour minute date minutes
 #' @importFrom rlang .data
 #' @importFrom stats sd
 #' @importFrom purrr set_names
@@ -413,7 +414,8 @@ set_responsive <- function(sessions_window, dttm_seq, responsive, opt_objective,
 
     # Potentially responsive sessions are defined according to the following conditions:
     #   1. Charging end time inside the optimization window
-    end_charge_window <- sessions_window_prof$ChargingEndDateTime <= dttm_seq[length(dttm_seq)]
+    end_dttm <- dttm_seq[length(dttm_seq)]
+    end_charge_window <- sessions_window_prof$ChargingEndDateTime <= end_dttm 
 
     #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
     #       This is done only if optimization is used to find a setpoint
@@ -424,17 +426,32 @@ set_responsive <- function(sessions_window, dttm_seq, responsive, opt_objective,
     }
 
     # Sessions that are "potentially responsive":
-    # potentially_responsive_idx <- which(end_charge_window & not_outliers)
-    potentially_responsive_idx <- which(end_charge_window)
+    potentially_responsive_idx <- which(end_charge_window & not_outliers)
+    # potentially_responsive_idx <- which(end_charge_window)
 
-    # From the potentially responsive sessions select randomly the configured
-    # number of `responsive` sessions:
+    # From the potentially responsive sessions, randomly
+    # select the configured number of `responsive` sessions:
     n_responsive <- round(length(potentially_responsive_idx) * window_responsive[[profile]])
     set.seed(1234)
     responsive_idx <- sample(potentially_responsive_idx, n_responsive)
-    non_responsive_idx <- potentially_responsive_idx[!(potentially_responsive_idx %in% responsive_idx)]
+    non_responsive_idx <- potentially_responsive_idx[
+      !(potentially_responsive_idx %in% responsive_idx)
+    ]
     sessions_window_prof$Responsive[responsive_idx] <- TRUE
     sessions_window_prof$Responsive[non_responsive_idx] <- FALSE
+
+    # For the `Responsive` sessions, 
+    # limit the `ConnectionEndDateTime` to window's end
+    max_end_connection_dttm <- end_dttm + minutes(time_resolution)
+    sessions_window_prof$ConnectionEndDateTime[
+      sessions_window_prof$Responsive &
+        (sessions_window_prof$ConnectionEndDateTime > max_end_connection_dttm)
+    ] <- max_end_connection_dttm
+    sessions_window_prof$ConnectionHours <- round(as.numeric(
+      sessions_window_prof$ConnectionEndDateTime -
+        sessions_window_prof$ConnectionStartDateTime,
+      unit = "hours"
+    ), 2)
 
     sessions_considered <- bind_rows(
       sessions_considered, sessions_window_prof
@@ -493,7 +510,7 @@ arrange_by_flex_potential <- function(sessions, descendent = TRUE) {
 #'
 get_setpoints <- function(sessions_window, opt_data, profiles_demand, opt_objective, lambda) {
   if (nrow(sessions_window) == 0) {
-    return(sessions_window)
+    return(profiles_demand)
   }
 
   dttm_seq <- opt_data$datetime
@@ -533,10 +550,10 @@ get_setpoints <- function(sessions_window, opt_data, profiles_demand, opt_object
 
       # Optimization ------------------------------------------------------------
 
-      # Limit `ConnectionEndDateTime` to window's end
-      sessions_window_prof_flex$ConnectionEndDateTime[
-        (sessions_window_prof_flex$ConnectionEndDateTime >= dttm_seq[length(dttm_seq)] + minutes(time_resolution))
-      ] <- dttm_seq[length(dttm_seq)] + minutes(time_resolution)
+      # # Limit `ConnectionEndDateTime` to window's end
+      # sessions_window_prof_flex$ConnectionEndDateTime[
+      #   (sessions_window_prof_flex$ConnectionEndDateTime >= dttm_seq[length(dttm_seq)] + minutes(time_resolution))
+      # ] <- dttm_seq[length(dttm_seq)] + minutes(time_resolution)
 
       # Setpoint datetime sequence
       window_prof_dttm <- c(
@@ -712,16 +729,22 @@ get_setpoints_parallel <- function(windows_data, opt_objective, lambda) {
 smart_charging_window <- function(sessions_window, profiles_demand, setpoints, method, power_th = 0,
                                   charging_power_min = 0, energy_min = 1,
                                   include_log = FALSE) {
-  if (nrow(sessions_window) == 0) {
-    return(sessions_window)
-  }
-
   dttm_seq <- setpoints$datetime
-  sessions_considered <- tibble()
   log <- list()
   log_window_name <- as.character(date(dttm_seq[1]))
   log[[log_window_name]] <- list() # In the `log` object even though `include_log = FALSE`
 
+
+  if (nrow(sessions_window) == 0) {
+    return(list(
+      sessions = sessions_window,
+      demand = profiles_demand,
+      setpoints = setpoints,
+      log = log
+    ))
+  }
+
+  sessions_considered <- tibble()
   opt_profiles <- get_opt_profiles(sessions_window)
 
   for (profile in opt_profiles) {
@@ -747,12 +770,12 @@ smart_charging_window <- function(sessions_window, profiles_demand, setpoints, m
       setpoint = setpoints[[profile]] - L_fixed_prof
     )
     results <- schedule_sessions(
-      sessions = sessions_window_prof_flex, 
+      sessions = sessions_window_prof_flex,
       setpoint = setpoint_prof,
       method = method, power_th = power_th,
-      charging_power_min = charging_power_min, 
+      charging_power_min = charging_power_min,
       energy_min = energy_min,
-      include_log = include_log, 
+      include_log = include_log,
       show_progress = FALSE
     )
 
@@ -882,11 +905,11 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
     "Session", "ConnectionStartDateTime", "ConnectionHours", "Power", "Energy"
   )
   if (!all(sessions_basic_vars %in% colnames(sessions))) {
-    stop("Error: `sessions` does not contain all required variables 
+    stop("Error: `sessions` does not contain all required variables
       (see Arguments description)")
   }
   if (!all(c("datetime", "setpoint") %in% colnames(setpoint))) {
-    stop("Error: `setpoint` does not contain all required variables 
+    stop("Error: `setpoint` does not contain all required variables
       (see Arguments description)")
   }
   if (!(method %in% c("postpone", "interrupt", "curtail"))) {
@@ -938,7 +961,8 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
   timeslot_dttm <- NULL
   if (show_progress) {
     cli::cli_progress_step(
-      "Simulating timeslot: {timeslot_dttm}", spinner = TRUE
+      "Simulating timeslot: {timeslot_dttm}",
+      spinner = TRUE
     )
   }
 
@@ -951,7 +975,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       log <- c(
         log,
         paste(
-          "\u2500\u2500", timeslot_dttm, 
+          "\u2500\u2500", timeslot_dttm,
           # "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
           # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
           # \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
@@ -1002,7 +1026,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           Flexible = ifelse(
-            (.data$EnergyCharged == 0) & 
+            (.data$EnergyCharged == 0) &
               (.data$MinEnergyToCharge <= .data$PossibleEnergyRest),
             TRUE, FALSE
           )
@@ -1045,7 +1069,7 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           MinPowerTimeslot = pmax(
             .data$MinEnergyTimeslot / (resolution / 60),
             pmin(
-              .data$PowerNominal * charging_power_min_ratio, 
+              .data$PowerNominal * charging_power_min_ratio,
               charging_power_min_kW
             )
           ),
@@ -1159,30 +1183,53 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
       if ("curtail" %in% method) {
         # Power flexibility (Curtail) ----------------------------------------------------------------
 
-        # All `Flexible` sessions are `Exploited` with `curtail`
-        sessions_timeslot$Exploited[sessions_timeslot$Flexible] <- TRUE
+        sessions_timeslot <- sessions_timeslot %>%
+          mutate(
+            # Before we set that `Flexible` if `MaxPowerReduction` > 0.1,
+            MaxPowerReduction = .data$PowerTimeslot - .data$MinPowerTimeslot
+          )
 
-        # Get the BAU power demand from curtailable sessions
-        curtailable_sessions_power <- sum(
-          sessions_timeslot$PowerTimeslot[sessions_timeslot$Flexible]
-        )
+        if (any(sessions_timeslot$Flexible)) {
+          # All `Flexible` sessions are `Exploited` with `curtail`
+          sessions_timeslot$Exploited[sessions_timeslot$Flexible] <- TRUE
 
-        # Power factor that would be required
-        power_factor <- (curtailable_sessions_power - flex_req) / curtailable_sessions_power
+          # Get the maximum power reduction from all `Flexible` sessions
+          max_power_reduction <- sum(
+            sessions_timeslot$MaxPowerReduction[sessions_timeslot$Flexible]
+          )
 
-        # Update the charging power of curtailed sessions
-        sessions_timeslot$Power[sessions_timeslot$Exploited] <- pmax(
-          sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] * power_factor,
-          sessions_timeslot$MinPowerTimeslot[sessions_timeslot$Exploited]
-        )
+          # Power reduction factor that would be required
+          reduction_factor <- min(flex_req / max_power_reduction, 1)
+
+          # Update the charging power of curtailed sessions
+          sessions_timeslot$Power[sessions_timeslot$Exploited] <-
+            sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] -
+            sessions_timeslot$MaxPowerReduction[sessions_timeslot$Exploited] * reduction_factor
+
+          # Update flexibility requirement
+          flex_provided <- round(max_power_reduction * reduction_factor, 2)
+          flex_req <- round(flex_req - flex_provided, 2)
+        }
+
+        # # Get the BAU power demand from curtailable sessions
+        # curtailable_sessions_power <- sum(
+        #   sessions_timeslot$PowerTimeslot[sessions_timeslot$Flexible]
+        # )
+
+        # # Power factor that would be required
+        # power_factor <- (curtailable_sessions_power - flex_req) / curtailable_sessions_power
+
+        # # Update the charging power of curtailed sessions
+        # sessions_timeslot$Power[sessions_timeslot$Exploited] <- pmax(
+        #   sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] * power_factor,
+        #   sessions_timeslot$MinPowerTimeslot[sessions_timeslot$Exploited]
+        # )
 
         # Update the charging power of sessions that are NOT curtailed
         sessions_timeslot$Power[!sessions_timeslot$Exploited] <-
           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
         if (include_log) {
-          flex_provided <- round(curtailable_sessions_power -
-            sum(sessions_timeslot$Power[sessions_timeslot$Exploited]), 2)
           if (flex_provided < flex_req) {
             log_message <- paste0(
               "\u2716 Not enough flexibility available (", flex_provided, " kW)"
@@ -1195,8 +1242,8 @@ schedule_sessions <- function(sessions, setpoint, method, power_th = 0,
           }
         }
 
-        # Update flexibility requirement
-        flex_req <- round(flex_req - (curtailable_sessions_power - curtailable_sessions_power * power_factor), 2)
+        # # Update flexibility requirement
+        # flex_req <- round(flex_req - (curtailable_sessions_power - curtailable_sessions_power * power_factor), 2)
       }
     } else {
       # No flexibility required: charge all sessions
@@ -1332,8 +1379,8 @@ get_sd_factor <- function(pct = 95) {
   stats::qnorm(1 - (1 - pct / 100) / 2)
 }
 
-round_to_interval <- function (dbl, interval) {
-  round(dbl/interval) * interval
+round_to_interval <- function(dbl, interval) {
+  round(dbl / interval) * interval
 }
 
 get_window_not_outliers <- function(sessions, pct, time_resolution) {
@@ -1354,8 +1401,6 @@ get_window_not_outliers <- function(sessions, pct, time_resolution) {
     )
   not_outliers
 }
-
-
 
 
 # Summarise by segment ----------------------------------------------------
@@ -1605,7 +1650,8 @@ plot_smart_charging <- function(smart_charging, sessions = NULL, show_setpoint =
   if (show_setpoint) {
     plot_dy <- plot_dy %>%
       dySeries(
-        "Setpoint", strokePattern = "dashed",
+        "Setpoint",
+        strokePattern = "dashed",
         color = "red", strokeWidth = 2
       )
   }
@@ -1621,7 +1667,8 @@ plot_smart_charging <- function(smart_charging, sessions = NULL, show_setpoint =
   if (!is.null(sessions)) {
     plot_dy <- plot_dy %>%
       dySeries(
-        "Original EVs", strokePattern = "dashed",
+        "Original EVs",
+        strokePattern = "dashed",
         color = "gray", strokeWidth = 2
       )
   }

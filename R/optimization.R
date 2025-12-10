@@ -11,7 +11,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
   if (!("static" %in% names(opt_data))) {
     opt_data$static <- 0
   }
-  if (!("production" %in% names(opt_data))) {
+  if (!("production" %in% names(opt_data)) & (opt_objective == "grid")) {
     warning("`production` variable not found in `opt_data`. No local energy production will be considered.")
     opt_data$production <- 0
   }

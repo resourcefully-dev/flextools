@@ -167,7 +167,9 @@ profile:</p>
 <span>  window_days <span class="op">=</span> <span class="fl">1</span>, </span>
 <span>  window_start_hour <span class="op">=</span> <span class="fl">6</span></span>
 <span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## Warning: `production` variable not found in `opt_data`. No local energy production will be considered.</span></span></code></pre>
+<pre><code><span><span class="co">## Warning in check_optimization_data(opt_data, opt_objective): `production`</span></span>
+<span><span class="co">## variable not found in `opt_data`. No local energy production will be</span></span>
+<span><span class="co">## considered.</span></span></code></pre>
 <div class="sourceCode" id="cb10"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sc_results</span>, sessions <span class="op">=</span> <span class="va">ev_sessions</span><span class="op">)</span></span></code></pre></div>
 <div class="dygraphs html-widget html-fill-item" id="htmlwidget-e5c8c404fe174e4c81bd" style="width:700px;height:432.632880098888px;"></div>
@@ -199,7 +201,9 @@ algorithm works and the corresponding impact to the vehicles:</p>
 <span>  window_start_hour <span class="op">=</span> <span class="fl">6</span>,</span>
 <span>  energy_min <span class="op">=</span> <span class="fl">0</span></span>
 <span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## Warning: `production` variable not found in `opt_data`. No local energy production will be considered.</span></span></code></pre>
+<pre><code><span><span class="co">## Warning in check_optimization_data(opt_data, opt_objective): `production`</span></span>
+<span><span class="co">## variable not found in `opt_data`. No local energy production will be</span></span>
+<span><span class="co">## considered.</span></span></code></pre>
 <div class="sourceCode" id="cb13"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sc_results</span>, sessions <span class="op">=</span> <span class="va">ev_sessions</span><span class="op">)</span></span></code></pre></div>
 <div class="dygraphs html-widget html-fill-item" id="htmlwidget-36aa3d2a04d42bbc2145" style="width:700px;height:432.632880098888px;"></div>
@@ -327,7 +331,9 @@ charge at least a 70% of their energy requirements:</p>
 <span>  window_start_hour <span class="op">=</span> <span class="fl">6</span>,</span>
 <span>  energy_min <span class="op">=</span> <span class="fl">0.7</span></span>
 <span><span class="op">)</span></span></code></pre></div>
-<pre><code><span><span class="co">## Warning: `production` variable not found in `opt_data`. No local energy production will be considered.</span></span></code></pre>
+<pre><code><span><span class="co">## Warning in check_optimization_data(opt_data, opt_objective): `production`</span></span>
+<span><span class="co">## variable not found in `opt_data`. No local energy production will be</span></span>
+<span><span class="co">## considered.</span></span></code></pre>
 <div class="sourceCode" id="cb17"><pre class="downlit sourceCode r">
 <code class="sourceCode R"><span><span class="fu"><a href="https://rdrr.io/r/graphics/plot.default.html" class="external-link">plot</a></span><span class="op">(</span><span class="va">sc_results</span>, sessions <span class="op">=</span> <span class="va">ev_sessions</span><span class="op">)</span></span></code></pre></div>
 <div class="dygraphs html-widget html-fill-item" id="htmlwidget-febe03efa1a2d8d52a86" style="width:700px;height:432.632880098888px;"></div>

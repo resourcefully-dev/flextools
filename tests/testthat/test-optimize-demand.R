@@ -31,7 +31,7 @@ test_that("Get error when missing `flexible` column in `opt_data`", {
 })
 
 test_that("Get message when missing `production` column in `opt_data`", {
-  expect_message(
+  expect_warning(
     opt_data %>%
       mutate(
         flexible = building

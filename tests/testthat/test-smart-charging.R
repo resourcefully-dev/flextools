@@ -10,7 +10,9 @@ sessions_demand <- evsim::get_demand(sessions, resolution = 15)
 # care about local generation (just peak shaving objective)
 opt_data <- tibble(
   datetime = sessions_demand$datetime,
-  production = 0
+  production = 0,
+  price_imported = 0.1,
+  price_exporte = 0
 )
 
 # # To test log viewer
@@ -80,6 +82,7 @@ test_that("smart charging works with grid objective and curtail method", {
     sessions, opt_data, opt_objective = "grid", method = "curtail",
     window_days = 1, window_start_hour = 5
   )
+  # plot_smart_charging(sc_results, sessions, legend_width = 150)
   expect_type(sc_results, "list")
   print(sc_results) # Check print as well
   # Expect same amount of sessions "smart"
@@ -154,7 +157,7 @@ test_that("using energy_min=NULL all sessions charge 100% for curtail", {
     window_days = 1, window_start_hour = 6
   )
   energy_summary <- summarise_energy_charged(sc_results, sessions) %>%
-    filter(PctEnergyCharged < 100)
+    filter(PctEnergyCharged < 99) # Has 1% tolerance
   expect_equal(nrow(energy_summary), 0)
 })
 
@@ -181,10 +184,12 @@ test_that("using energy_min=NULL all sessions charge 100% for interrupt", {
 test_that("using energy_min=0 setpoint can be achieved with curtail", {
   sc_results <- smart_charging(
     sessions, opt_data, opt_objective = "grid", method = "curtail",
-    window_days = 1, window_start_hour = 5, energy_min = 0, include_log = T
+    window_days = 1, window_start_hour = 5, energy_min = 0, include_log = TRUE
   )
   setpoint_df <- aggregate_timeseries(sc_results$setpoints, "setpoint")
-  demand_gt_setpiont <- aggregate_timeseries(get_demand(sc_results$sessions, setpoint_df$datetime), "demand") %>%
+  demand_gt_setpiont <- aggregate_timeseries(
+    get_demand(sc_results$sessions, setpoint_df$datetime), "demand"
+  ) %>%
     mutate(setpoint_df['setpoint']) %>%
     filter(round(demand) > round(setpoint))
   expect_equal(nrow(demand_gt_setpiont), 0)

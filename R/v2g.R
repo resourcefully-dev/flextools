@@ -283,13 +283,13 @@ get_setpoints_v2g <- function(sessions_window, opt_data, profiles_demand, opt_ob
         L_others <- rep(0, length(dttm_seq))
       }
 
-      profile_power_limited <- pmin(
-        pmax(
-          opt_data$import_capacity - (L_fixed + L_others),
-          0
-        ),
-        profiles_demand[[profile]]
-      )
+      # Respect both import and export capacity when no optimisation is used
+      upper_bound <- opt_data$import_capacity - (L_fixed + L_others)
+      lower_bound <- -opt_data$export_capacity - (L_fixed + L_others)
+
+      profile_power_limited <- profiles_demand[[profile]]
+      profile_power_limited <- pmin(profile_power_limited, upper_bound)
+      profile_power_limited <- pmax(profile_power_limited, lower_bound)
       setpoints[[profile]] <- profile_power_limited
     }
   }
@@ -315,21 +315,21 @@ get_setpoints_v2g_parallel <- function(windows_data, opt_objective, lambda) {
 
 
 smart_v2g_window <- function(sessions_window, profiles_demand, setpoints, include_log = FALSE) {
-  if (nrow(sessions_window) == 0) {
-    return(
-      list(
-        sessions = dplyr::tibble(),
-        demand = profiles_demand,
-        setpoints = setpoints,
-        log = list()
-      )
-    )
-  }
 
   dttm_seq <- setpoints$datetime
   log <- list()
-  log_window_name <- as.character(lubridate::date(dttm_seq[1]))
-  log[[log_window_name]] <- list()
+  log_window_name <- as.character(date(dttm_seq[1]))
+  log[[log_window_name]] <- list() # In the `log` object even though `include_log = FALSE`
+  
+  if (nrow(sessions_window) == 0) {
+    return(list(
+      sessions = sessions_window,
+      demand = profiles_demand,
+      setpoints = setpoints,
+      log = log
+    ))
+  }
+
   sessions_considered <- dplyr::tibble()
 
   opt_profiles <- get_opt_profiles(sessions_window)
@@ -585,7 +585,7 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
   }
 
   SOCini <- 0.5
-  SOCmin <- 0.1
+  SOCmin <- 0.2
   sessions_expanded <- sessions_sch %>%
     evsim::expand_sessions(resolution = resolution) 
   sessions_expanded <- sessions_expanded %>%
@@ -684,9 +684,9 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
           .data$MinEnergyTimeslot / (resolution / 60),
           -.data$PowerNominal # Maximum discharging power
         ),
+        MaxPowerReduction = .data$PowerTimeslot - .data$MinPowerTimeslot,
         Flexible = ifelse( # Added error tolerance
-          # (.data$EnergyToCharge > 0.025) & 
-            (.data$PowerTimeslot - .data$MinPowerTimeslot > 0.1),
+          .data$MaxPowerReduction > 0.1,
           TRUE,
           FALSE
         )
@@ -720,7 +720,7 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
       if (include_log) {
         log_message <- c(
           paste("\u2139 Flexibility requirement of", flex_req, "kW"),
-          paste("\u2139", nrow(sessions_timeslot), "potentially flexible sessions")
+          paste("\u2139", nrow(sessions_timeslot), "connected vehicles")
         )
 
         # message(log_message)
@@ -732,44 +732,43 @@ schedule_sessions_v2g <- function(sessions, setpoint, power_th = 0,
 
       # Power flexibility (V2G) ----------------------------------------------------------------
 
-      # All `Flexible` sessions are `Exploited` with "V2G"
-      sessions_timeslot$Exploited[sessions_timeslot$Flexible] <- TRUE
+      if (any(sessions_timeslot$Flexible)) {
+        # All `Flexible` sessions are `Exploited` with "V2G"
+        sessions_timeslot$Exploited[sessions_timeslot$Flexible] <- TRUE
 
-      # Get the BAU power demand from curtailable sessions
-      curtailable_sessions_power <- sum(
-        sessions_timeslot$PowerTimeslot[sessions_timeslot$Flexible]
-      )
+        # Get the maximum power reduction from all `Flexible` sessions
+        max_power_reduction <- sum(
+          sessions_timeslot$MaxPowerReduction[sessions_timeslot$Flexible]
+        )
 
-      # Power factor that would be required
-      power_factor <- (curtailable_sessions_power - flex_req) / curtailable_sessions_power
+        # Power reduction factor that would be required
+        reduction_factor <- min(flex_req / max_power_reduction, 1)
 
-      # Update the charging power of curtailed sessions
-      sessions_timeslot$Power[sessions_timeslot$Exploited] <- pmax(
-        sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] * power_factor,
-        sessions_timeslot$MinPowerTimeslot[sessions_timeslot$Exploited]
-      )
-
+        # Update the charging power of curtailed sessions
+        sessions_timeslot$Power[sessions_timeslot$Exploited] <- 
+          sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] - 
+          sessions_timeslot$MaxPowerReduction[sessions_timeslot$Exploited] * reduction_factor
+      
+        # Update flexibility requirement
+        flex_provided <- round(max_power_reduction * reduction_factor, 2)
+        flex_req <- round(flex_req - flex_provided, 2)
+      }
+      
       # Update the charging power of sessions that are NOT curtailed
       sessions_timeslot$Power[!sessions_timeslot$Exploited] <-
         sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
       if (include_log) {
-        flex_provided <- round(curtailable_sessions_power -
-          sum(sessions_timeslot$Power[sessions_timeslot$Exploited]), 2)
         if (flex_provided < flex_req) {
           log_message <- paste0(
             "\u2716 Not enough flexibility available (", flex_provided, " kW)"
           )
-          # message(log_message)
           log <- c(
             log,
             log_message
           )
         }
       }
-
-      # Update flexibility requirement
-      flex_req <- round(flex_req - (curtailable_sessions_power - curtailable_sessions_power * power_factor), 2)
     } else {
       # No flexibility required: charge all sessions
       sessions_timeslot$Power <- sessions_timeslot$PowerTimeslot

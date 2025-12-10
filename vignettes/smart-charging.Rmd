@@ -4,7 +4,8 @@ output: html_document
 ---
 
 
-```{r setup, echo=FALSE, message=F, warning=FALSE, fig.width=12}
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo=FALSE, message=F, warning=FALSE, fig.width=12)
 library(flextools)
 # devtools::load_all()
 library(dplyr)
@@ -215,7 +216,7 @@ This classification is done by the smart charging algorithm according to the opt
 
 * **Considered**: charging sessions that charge within the optimization windows and are not considered outliers (their connection times fit the 95% percentile).
 * **Responsive**: charging sessions that accept to participate in the smart charging program. The ratio of responsive sessions from every EV user profile is configured with the `responsive` parameter.
-* **Flexible**: charging sessions that are flexible in a specific time slot. This depends on the session's features and the scheduling `method` (as described in the [Scheduling algorithm](https://resourcefully-dev.github.io/flextools/articles/smart_charging.html#scheduling-algorithm) section).
+* **Flexible**: charging sessions that are flexible in a specific time slot. This depends on the session's features and the scheduling `method` (as described in the [Scheduling algorithm](https://resourcefully-dev.github.io/flextools/articles/smart-charging.html#scheduling-algorithm) section).
 * **Exploited**: charging sessions that have been modified in a a specific time slot. 
 
 The following figure illustrates the classification of sessions according to smart charging program participation:

@@ -10,7 +10,6 @@ library(flextools)
 library(dplyr)
 library(lubridate)
 library(dygraphs)
-library(dutils)
 library(ggplot2)
 library(evsim)
 library(purrr)
@@ -102,7 +101,7 @@ ev_demand <- ev_sessions %>%
 ```
 ```{r, echo=FALSE}
 ev_demand %>% 
-  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T)
+  timefully::plot_ts(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T)
 ```
 
 
@@ -128,7 +127,7 @@ opt_data <- tibble(
 
 ```{r}
 opt_data %>% 
-  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 200) %>% 
+  timefully::plot_ts(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 200) %>% 
   dySeries("Worktime", "Worktime free capacity", color = "navy", strokeWidth = 2, strokePattern = "dashed") %>% 
   dyLimit(grid_capacity, "Grid capacity", color = "red")
 ```
@@ -155,7 +154,7 @@ ev_demand_opt <- sc_results$sessions %>%
 ```{r, echo = F}
 ev_demand_opt %>% 
   filter(date(datetime) < dmy("07-08-2024")) %>% 
-  dyplot(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
+  timefully::plot_ts(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T, legend_width = 150) %>% 
   dyLimit(grid_capacity, "Grid capacity", color = "red")
 ```
 

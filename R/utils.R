@@ -1,4 +1,3 @@
-
 .message_cache <- new.env(parent = emptyenv())
 
 message_once <- function(msg) {
@@ -9,6 +8,9 @@ message_once <- function(msg) {
 }
 
 reset_message_once <- function() {
-  rm(list = ls(envir = .message_cache, all.names = TRUE), envir = .message_cache)
+  rm(
+    list = ls(envir = .message_cache, all.names = TRUE),
+    envir = .message_cache
+  )
   invisible(NULL)
 }

@@ -1,0 +1,98 @@
+# Combined optimization
+
+Function
+[`optimize_demand()`](https://resourcefully-dev.github.io/flextools/reference/optimize_demand.md)
+and
+[`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)
+makes use of Quadratic programming in order to obtain the optimal power
+load given certain conditions. The Quadratic programming problem can be
+formulated according to multiple objectives. Currently, `flextools`
+package allows to optimize a time-series power load considering two
+different goals:
+
+- [Minimize the power exchanged with the grid (net
+  power)](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html)
+- [Minimize the energy
+  cost](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html)
+
+In this article, we’ll cover the optimization problem for the
+combination of both objectives, **net power minimization** and
+**energy_cost minimization**, for both the **flexible demand**
+(e.g. heatpumps, electric vehicles, etc.) and the **battery**.
+
+Below, the problem formulations are described, similarly to the
+corresponding articles for net power and costs minimization, but with an
+extra parameter **`w`**. The term `w` is the weight for the net power
+minimization over the cost optimization, so:
+
+- If $`w = 0`$, the cost is minimized
+- If $`w = 1`$, the net power is minimized
+- If $`0 \lt w \lt 1`$, both net power and cost are minimized
+
+## Demand optimization
+
+To minimize the energy cost using the **flexibility from a power demand
+profile**, the objective function of the optimization problem has been
+raised in the following way:
+
+``` math
+min \sum_{t=1}^{T} w·((LS_t + O_t - G_t)· \frac{\sum_{t=1}^{T}PI_t}{T})^2 + (1-w)·(I_t·PI_t - E_t·PE_t - PTU_t(O_t-LF_t)  - PTD_t(LF_t-O_t)) + \lambda (O_t-LF_t)^{2}
+```
+
+Note that, in contrast to the Net power optimization problem, here we
+add the average imported energy price $`\frac{\sum_{t=1}^{T}PI_t}{T}`$
+in the equation to convert the power units to cost units and balance the
+value ranges of the multiple terms in the equation.
+
+The objective function and constraints of this optimization problem are
+represented below, where:
+
+- $`T`$ : Number of time intervals within the optimization window
+- $`G_t`$ : Local power generation time-series vector
+- $`LS_t`$ : Non-flexible load time-series vector
+- $`LF_t`$ : Flexible load time-series vector (if not optimized)
+- $`O_t`$ : Optimal flexible load time-series vector
+- $`I_t`$ : imported energy
+- $`E_t`$ : exported energy
+- $`PI_t`$ : imported energy price
+- $`PE_t`$ : exported energy price
+- $`PTU_t`$ : balancing price for turn-up power
+- $`PTD_t`$ : balancing price for turn-down power
+- $`\lambda`$ : penalty on change for the flexible load
+
+Moreover, this optimization problem has the constraints described in
+[Energy cost optimization article (demand
+section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#demand-optimization).
+
+## Battery optimization
+
+To minimize the energy cost using the **flexibility from a battery**,
+the objective function of the optimization problem has been raised in
+the following way:
+
+``` math
+\min_{C_t, D_t, I_t, E_t} \sum_{t=1}^{T} \left[ w\left((L_t + C_t - D_t - G_t) \cdot \frac{\sum_{k=1}^{T}PI_k}{T}\right)^2 + (1-w)\left(I_t \cdot PI_t - E_t \cdot PE_t + (PTD_t - PTU_t)(C_t - D_t)\right) \right] + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
+```
+
+Where:
+
+- $`T`$ : Number of time intervals within the optimization window
+- $`G_t`$ : Local power generation time-series vector
+- $`L_t`$ : Power load time-series vector
+- $`C_t`$ : Battery charging power (decision variable, non-negative)
+- $`D_t`$ : Battery discharging power (decision variable, non-negative)
+- $`B_t = C_t - D_t`$ : Net battery exchange with the grid (positive =
+  charging)
+- $`I_t`$ : imported energy
+- $`E_t`$ : exported energy
+- $`PI_t`$ : imported energy price
+- $`PE_t`$ : exported energy price
+- $`PTU_t`$ : balancing price for turn-up power
+- $`PTD_t`$ : balancing price for turn-down power
+- $`\lambda`$ : penalty on change for the flexible load
+
+Moreover, this optimization problem has the constraints described in
+[Energy cost optimization article (battery
+section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization),
+including the charging and discharging efficiencies ($`\eta_c`$,
+$`\eta_d`$).

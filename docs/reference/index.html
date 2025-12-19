@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.1.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -44,53 +44,11 @@
     </div>
 
     <div class="section level2">
-      <h2 id="time-series-utils">Time-series utils<a class="anchor" aria-label="anchor" href="#time-series-utils"></a></h2>
-
-
-
-
-    </div><div class="section level2">
-
-
-
-
-      <dl><dt>
-
-          <code><a href="get_time_resolution.html">get_time_resolution()</a></code>
-
-        </dt>
-        <dd>Return the time resolution of a datetime sequence</dd>
-      </dl><dl><dt>
-
-          <code><a href="change_timeseries_resolution.html">change_timeseries_resolution()</a></code>
-
-        </dt>
-        <dd>Change time resolution of a time-series data frame</dd>
-      </dl><dl><dt>
-
-          <code><a href="change_timeseries_year.html">change_timeseries_year()</a></code>
-
-        </dt>
-        <dd>Change the year of a time series data frame keeping the original weekdays</dd>
-      </dl><dl><dt>
-
-          <code><a href="aggregate_timeseries.html">aggregate_timeseries()</a></code>
-
-        </dt>
-        <dd>Aggregate multiple timeseries columns to a single one</dd>
-      </dl><dl><dt>
-
-          <code><a href="add_extra_days.html">add_extra_days()</a></code>
-
-        </dt>
-        <dd>Add an extra day at the beginning and the end of datetime sequence using the last and first day of the data</dd>
-      </dl></div><div class="section level2">
       <h2 id="optimization">Optimization<a class="anchor" aria-label="anchor" href="#optimization"></a></h2>
 
 
 
-
-    </div><div class="section level2">
+      <dl></dl></div><div class="section level2">
 
 
 
@@ -101,7 +59,8 @@
 
         </dt>
         <dd>Optimize a vector of flexible demand</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="add_battery_optimization.html">add_battery_optimization()</a></code>
 
@@ -112,8 +71,7 @@
 
 
 
-
-    </div><div class="section level2">
+      <dl></dl></div><div class="section level2">
 
 
 
@@ -124,37 +82,47 @@
 
         </dt>
         <dd>Smart charging algorithm</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="schedule_sessions.html">schedule_sessions()</a></code>
 
         </dt>
         <dd>Schedule sessions according to optimal setpoint</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="plot_smart_charging.html">plot_smart_charging()</a></code>
 
         </dt>
         <dd>Plot smart charging results</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="summarise_smart_charging_sessions.html">summarise_smart_charging_sessions()</a></code>
 
         </dt>
         <dd>Get a summary of the new schedule of charging sessions</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="view_smart_charging_logs.html">view_smart_charging_logs()</a></code>
 
         </dt>
         <dd>Interactive Log Viewer</dd>
+
+        <dt>
+
+          <code><a href="smart_v2g.html">smart_v2g()</a></code>
+
+        </dt>
+        <dd>Smart V2G algorithm</dd>
       </dl></div><div class="section level2">
       <h2 id="battery">Battery<a class="anchor" aria-label="anchor" href="#battery"></a></h2>
 
 
 
-
-    </div><div class="section level2">
+      <dl></dl></div><div class="section level2">
 
 
 
@@ -165,7 +133,8 @@
 
         </dt>
         <dd>Simple battery profile</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_storage_level.html">get_storage_level()</a></code>
 
@@ -176,8 +145,7 @@
 
 
 
-
-    </div><div class="section level2">
+      <dl></dl></div><div class="section level2">
 
 
 
@@ -188,7 +156,8 @@
 
         </dt>
         <dd>Storage losses over time</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_conversion_losses.html">get_conversion_losses()</a></code>
 
@@ -199,8 +168,7 @@
 
 
 
-
-    </div><div class="section level2">
+      <dl></dl></div><div class="section level2">
 
 
 
@@ -211,61 +179,71 @@
 
         </dt>
         <dd>Obtain a list of energy indicators given the energy profiles</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_energy_balance.html">get_energy_balance()</a></code>
 
         </dt>
         <dd>Get energy balance time-series</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="plot_net_power.html">plot_net_power()</a></code>
 
         </dt>
         <dd>Plot net power interaction with the grid</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_energy_cost.html">get_energy_cost()</a></code>
 
         </dt>
         <dd>Get energy cost time-series</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_energy_total_cost.html">get_energy_total_cost()</a></code>
 
         </dt>
         <dd>Get energy total cost (one number)</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="plot_energy_cost.html">plot_energy_cost()</a></code>
 
         </dt>
         <dd>Plot hourly energy cost</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_imbalance_income.html">get_imbalance_income()</a></code>
 
         </dt>
         <dd>Get imbalance income time-series</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_imbalance_total_income.html">get_imbalance_total_income()</a></code>
 
         </dt>
         <dd>Get imbalance total income (one number)</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="get_load_duration_curve.html">get_load_duration_curve()</a></code>
 
         </dt>
         <dd>Load duration curve table</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="plot_load_duration_curve.html">plot_load_duration_curve()</a></code>
 
         </dt>
         <dd>Plot of the load duration curve</dd>
-      </dl><dl><dt>
+
+        <dt>
 
           <code><a href="summarise_energy_charged.html">summarise_energy_charged()</a></code>
 
@@ -281,7 +259,7 @@
 </div>
 
 <div class="pkgdown-footer-right">
-  <p>Site built with <a href="https://pkgdown.r-lib.org/" class="external-link">pkgdown</a> 2.1.3.</p>
+  <p>Site built with <a href="https://pkgdown.r-lib.org/" class="external-link">pkgdown</a> 2.2.0.</p>
 </div>
 
     </footer></div>

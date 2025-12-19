@@ -102,6 +102,7 @@ get_energy_balance <- function(df) {
 #'
 #' @importFrom dplyr %>% mutate summarise group_by filter between
 #' @importFrom rlang .data
+#' @importFrom timefully get_time_resolution
 #'
 #' @examples
 #' df <- dplyr::select(
@@ -496,7 +497,7 @@ plot_net_power <- function(
         strokeWidth = 0.8,
         fillGraph = FALSE
       )
-  } else if (!is.null(import_capacity)) {
+  } else if (!is.null(export_capacity)) {
     plot_dy <- plot_dy %>%
       dyLimit(-export_capacity, color = colors$export_capacity)
   }

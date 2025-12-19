@@ -1,0 +1,518 @@
+# Introduction to flextools
+
+Functions
+[`optimize_demand()`](https://resourcefully-dev.github.io/flextools/reference/optimize_demand.md),
+[`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md)
+and
+[`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)
+provide a framework to optimize time-series demand profiles according to
+different parameters, such as:
+
+- **Contextual variables** for the optimization problem (local energy
+  generation, static load, grid capacity, etc.). These values must be
+  collected in a data frame through the `opt_data` parameter.
+- **Optimization objective**, whether to minimize the net power, the
+  energy cost or both.
+- **Direction to shift energy** (forwards or backwards)
+- **Time horizon** of the energy shift, being the maximum number of
+  time-slots to shift demand from
+- **Optimization window** characteristics, such as the length (in days),
+  the starting hour or the hours where energy shifting is allowed.
+- **Penalty on change** for the flexible load or battery (parameter
+  `lambda`). The higher lambda, the lower flexibility potential.
+
+Moreover, package `flextools` provides an example data set of
+time-series energy and prices profiles to test its functions, called
+`energy_profiles`. We will filter the whole data set for just a single
+week, and rename the variables with custom names to fit the column names
+required in the `flextools` functions:
+
+``` r
+
+opt_data <- energy_profiles %>% 
+  filter(isoweek(datetime) == 18) %>% 
+  rename(
+    production = solar
+  )
+
+head(opt_data)
+```
+
+    ## # A tibble: 6 × 7
+    ##   datetime            production building price_imported price_exported
+    ##   <dttm>                   <dbl>    <dbl>          <dbl>          <dbl>
+    ## 1 2023-05-01 00:00:00          0     1.53         0.0999          0.025
+    ## 2 2023-05-01 00:15:00          0     1.49         0.0999          0.025
+    ## 3 2023-05-01 00:30:00          0     1.45         0.0999          0.025
+    ## 4 2023-05-01 00:45:00          0     1.41         0.0999          0.025
+    ## 5 2023-05-01 01:00:00          0     1.37         0.0955          0.025
+    ## 6 2023-05-01 01:15:00          0     1.32         0.0955          0.025
+    ## # ℹ 2 more variables: price_turn_up <dbl>, price_turn_down <dbl>
+
+For that week, we have a building energy consumption profile and a solar
+PV production profile, together with prices for imported and exported
+energy and for the imbalance market:
+
+## Net power minimization
+
+To minimize the energy exchanged with the distribution grid while
+maximizing the use of local generation, using the flexibility from a
+power demand profile (e.g. heatpumps, electric vehicles, etc.) or from a
+battery, we make use of Quadratic programming to obtain the optimal
+setpoints for the flexible assets. See the article [Net power
+optimization](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html)
+to learn more about the problem formulation for both **demand
+flexbility** and **battery flexibility**. Below, you can find examples
+of both applications.
+
+### Demand flexibility
+
+Let’s consider that the building demand profile is flexible and can be
+optimized. For than, we create a new column `flexible` in the `opt_data`
+tibble in order to tell the optimization function which is the flexible
+load. Since we want to perform net power minimization, then we set
+`opt_objective = "grid"` and for this example we will shift energy
+`forward`:
+
+``` r
+
+opt_building <- opt_data %>% 
+  mutate(
+    flexible = building
+  ) %>% 
+  optimize_demand(
+    opt_objective = "grid",
+    direction = "forward"
+  )
+```
+
+We see that the power demand during peak hours (18:00 - 22:00) is still
+high since we can’t postpone energy after midnight (optimization window
+is from 00:00 to 00:00 by default). Then we can try setting the
+optimization window from 5:00AM to 5:00AM:
+
+``` r
+
+opt_building <- opt_data %>% 
+  mutate(
+    flexible = building
+  ) %>% 
+  optimize_demand(
+    opt_objective = "grid",
+    direction = "forward",
+    window_start_hour = 5
+  )
+```
+
+The power peak reduction during evening peak hours is much more relevant
+now.
+
+### Battery flexibility
+
+Instead of using a building we can use a battery, considering a
+**capacity of 50kWh** and a **charge/discharge power of 4kW**. See that
+now we use the `building` column as `static` to avoid optimizing the
+building profile:
+
+``` r
+
+opt_battery <- opt_data %>% 
+  mutate(
+    static = building
+  ) %>%
+  add_battery_optimization(
+    opt_objective = "grid",
+    Bcap = 50, Bc = 10, Bd = 4,
+    window_start_hour = 5
+  )
+```
+
+## Cost minimization
+
+To minimize the energy cost while maximizing the income from imbalance
+markets, using the flexibility from a power demand profile
+(e.g. heatpumps, electric vehicles, etc.) or from a battery, we make use
+of Quadratic programming to obtain the optimal setpoints for the
+flexible assets. See the article [Energy cost
+optimization](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html)
+to learn more about the problem formulation for both **demand
+flexbility** and **battery flexibility**. Below, you can find examples
+of both applications.
+
+### Demand flexibility
+
+Imagine that the source of flexibility in the building is a heat-pump
+with a water tank storage. Therefore, in this case we shift energy
+`backward` to store hot water in the tank. To perform cost optimization,
+now we set `opt_objective = "cost"`:
+
+``` r
+
+opt_building <- opt_data %>% 
+  select(datetime, production, building, price_imported, price_exported) %>% 
+  mutate(
+    flexible = building
+  ) %>% 
+  optimize_demand(
+    opt_objective = "cost",
+    direction = "backward"
+  )
+```
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. No optimization provided.
+
+    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
+
+We see that a lot of power demand is concentrated when the price has
+lower values to obtain the minimum energy cost. This behavior can be
+constrained by multiple ways:
+
+- **Define a maximum load power**: this can be done by adding the
+  variable `load_capacity` in the `opt_data` parameter in the
+  optimization function
+- **Define a maximum grid (net) power**: this can be done by adding the
+  variable `grid_capacity` in the `opt_data` parameterin the
+  optimization function
+- **Use a penalty on change**: this can be done by using the `lambda`
+  parameter in the optimization function
+
+For example, let’s consider a maximum power demand of **5kW** with a
+`lambda = 0.005`:
+
+``` r
+
+opt_building <- opt_data %>% 
+  select(datetime, production, building, price_imported, price_exported) %>% 
+  mutate(
+    flexible = building,
+    load_capacity = 5
+  ) %>% 
+  optimize_demand(
+    opt_objective = "cost",
+    direction = "backward",
+    lambda = 0.005
+  )
+```
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
+
+### Battery flexibility
+
+The same example can be done with a battery, considering a **capacity of
+50kWh** and a **charge/discharge power of 4kW**. See that now we use the
+`building` column as `static` to avoid optimizing the building profile:
+
+``` r
+
+opt_battery <- opt_data %>% 
+  select(datetime, production, building, price_imported, price_exported) %>% 
+  mutate(
+    static = building
+  ) %>%
+  add_battery_optimization(
+    opt_objective = "cost",
+    Bcap = 50, Bc = 4, Bd = 4,
+    window_start_hour = 5
+  )
+```
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+Since this example considers constant exported energy price, we can
+appreciate that battery discharges when the imported price goes up, and
+charges when the imported prices goes down. Moreover, we can see that
+the charging hours are mainly during solar production times, to minimize
+imported/exported energy.
+
+However, we see that the price fluctuation makes to increase the
+variability of the battery profile. To avoid switching from charging to
+discharging in small periods of time, the `lambda` parameter has been
+introduced to the problem formulation. Thus when `lambda > 0`, there is
+a penalty on changes of the battery power between consecutive
+time-slots. In this case, a value of `lambda = 0.1` gives reasonable
+results:
+
+``` r
+
+opt_battery <- opt_data %>% 
+  select(datetime, production, building, price_imported, price_exported) %>% 
+  mutate(
+    static = building
+  ) %>%
+  add_battery_optimization(
+    opt_objective = "cost",
+    Bcap = 50, Bc = 4, Bd = 4,
+    window_start_hour = 5,
+    lambda = 0.1
+  )
+```
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+To find the optimal lambda, we can apply an iteration over multiple
+values and calculate two significant indicators: the **energy cost**
+(the lower the better) and the **crossover times**, so the times that
+the battery shifted from charging to discharging (the lower the better).
+
+The following plot shows the normalized values (between 0 and 1) from
+these two indicators according to the `lambda` value:
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+We could consider the optimal lambda the “knee” of the curves, so
+approximately `lamda=0.1` as we have used before.
+
+Now let’s consider the prices for the imbalance market, assuming more
+income thanks to providing flexibility to the power system. We can
+appreciate how the battery is charging and discharging following the
+imbalance prices, specially for the “turn-up price” which has high
+values during certain periods:
+
+``` r
+
+opt_battery <- opt_data %>% 
+  select(datetime, production, building, price_imported, price_exported, price_turn_up, price_turn_down) %>% 
+  mutate(
+    static = building
+  ) %>%
+  add_battery_optimization(
+    opt_objective = "cost",
+    Bcap = 50, Bc = 4, Bd = 4,
+    window_start_hour = 5,
+    lambda = 0.1
+  )
+```
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+## Combined objectives
+
+To minimize the energy cost and the impact in the distribution grid,
+using the flexibility from a power demand profile (e.g. heatpumps,
+electric vehicles, etc.) or from a battery, we make use of Quadratic
+programming to obtain the optimal setpoints for the flexible assets. See
+the article [Combined
+optimization](https://resourcefully-dev.github.io/flextools/articles/combined_optimization.html)
+to learn more about the problem formulation for both **demand
+flexbility** and **battery flexibility**. Below, you can find examples
+of both applications.
+
+### Demand flexibility
+
+The parameter `opt_objective` can be `"grid"`, `"cost"` or a number
+between 0 and 1, being 0 the equivalent to “cost” and 1 the equivalent
+to “grid”. Thus, when `opt_objective` is a number, the optimization
+problem combines both objectives.
+
+To show the effect of this term, we can calculate the demand profiles
+corresponding to three different values of `opt_objective`:
+
+``` r
+
+opt_building <- purrr::map(
+  list(objective_0.25 = 0.25, objective_0.5 = 0.5, objective_0.75 = 0.75),
+  ~ opt_data %>% 
+    select(datetime, production, building, price_imported, price_exported) %>% 
+    mutate(
+      flexible = building
+    ) %>% 
+    optimize_demand(
+      opt_objective = .x,
+      direction = "forward"
+    )
+) %>% 
+  as_tibble()
+```
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
+
+We see that during production hours all three profiles follow the PV
+production as much as possible, but they differ in the periods where the
+prices fluctuates the most. This is also caused by the difference
+between a constant and low export price and a high and variable import
+price.
+
+### Battery flexibility
+
+The same example can be done with a battery, considering a **capacity of
+50kWh** and a **charge/discharge power of 4kW**. See that now we use the
+`building` column as `static` to avoid optimizing the building profile:
+
+``` r
+
+opt_battery <- purrr::map(
+  list(objective_0.25 = 0.25, objective_0.5 = 0.5, objective_0.75 = 0.75),
+  ~ opt_data %>% 
+    select(datetime, production, building, price_imported, price_exported) %>% 
+    mutate(
+      static = building
+    ) %>%
+    add_battery_optimization(
+      opt_objective = .x,
+      Bcap = 50, Bc = 4, Bd = 4,
+      window_start_hour = 5
+    )
+) %>% 
+  as_tibble()
+```
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
+
+    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+
+An interesting outcome of this simulation is that combining both
+objectives also smoothes out the effect of the price fluctuation in the
+battery profile. Since now it is also important to reduce the impact on
+the distribution network, now the `lambda` is not so required.

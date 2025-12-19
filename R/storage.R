@@ -1,5 +1,3 @@
-
-
 #' Storage losses over time
 #'
 #' @param power numeric vector, being positive when charging and negative when discharging
@@ -10,9 +8,9 @@
 #' @export
 #'
 get_storage_losses <- function(power, loss, time_resolution = 60) {
-  storage <- cumsum(power*time_resolution/60)
-  losses <- storage/(1-loss/100) - storage
-  return( losses )
+  storage <- cumsum(power * time_resolution / 60)
+  losses <- storage / (1 - loss / 100) - storage
+  return(losses)
 }
 
 
@@ -27,9 +25,13 @@ get_storage_losses <- function(power, loss, time_resolution = 60) {
 #'
 get_conversion_losses <- function(power, loss_charge, loss_discharge) {
   losses <- rep(0, length(power))
-  losses[power>0] <- power[power>0]/(1-loss_charge/100) - power[power>0]
-  losses[power<0] <- abs(power[power<0])/(1-loss_discharge/100) - abs(power[power<0])
-  return( losses )
+  losses[power > 0] <- power[power > 0] /
+    (1 - loss_charge / 100) -
+    power[power > 0]
+  losses[power < 0] <- abs(power[power < 0]) /
+    (1 - loss_discharge / 100) -
+    abs(power[power < 0])
+  return(losses)
 }
 
 
@@ -52,7 +54,13 @@ get_conversion_losses <- function(power, loss_charge, loss_discharge) {
 #'
 #' @importFrom dplyr lag
 #'
-get_storage_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1, time_resolution = 60) {
+get_storage_level <- function(
+  power,
+  init = 0,
+  charge_eff = 1,
+  discharge_eff = 1,
+  time_resolution = 60
+) {
   if (charge_eff <= 0 || discharge_eff <= 0) {
     stop("Error: efficiencies must be greater than 0")
   }
@@ -65,19 +73,28 @@ get_storage_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1
   charge_power <- attr(power, "charge")
   discharge_power <- attr(power, "discharge")
 
-  if (!is.null(charge_power) && !is.null(discharge_power) &&
+  if (
+    !is.null(charge_power) &&
+      !is.null(discharge_power) &&
       length(charge_power) == length(power) &&
-      length(discharge_power) == length(power)) {
-    energy_delta <- (charge_power * charge_eff - discharge_power / discharge_eff) * time_resolution/60
+      length(discharge_power) == length(power)
+  ) {
+    energy_delta <- (charge_power *
+      charge_eff -
+      discharge_power / discharge_eff) *
+      time_resolution /
+      60
   } else {
-    energy_delta <- power * time_resolution/60
-    energy_delta[energy_delta >= 0] <- energy_delta[energy_delta >= 0] * charge_eff
-    energy_delta[energy_delta < 0] <- energy_delta[energy_delta < 0] / discharge_eff
+    energy_delta <- power * time_resolution / 60
+    energy_delta[energy_delta >= 0] <- energy_delta[energy_delta >= 0] *
+      charge_eff
+    energy_delta[energy_delta < 0] <- energy_delta[energy_delta < 0] /
+      discharge_eff
   }
 
   storage <- c(init, init + cumsum(energy_delta))
   storage <- round(storage[seq_len(length(power))], 2)
-  return( storage )
+  return(storage)
 }
 
 
@@ -98,6 +115,7 @@ get_storage_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1
 #' @export
 #'
 #' @importFrom dplyr lag
+#' @importFrom timefully get_time_resolution
 #'
 #' @examples
 #' library(dplyr)
@@ -115,22 +133,31 @@ get_storage_level <- function(power, init = 0, charge_eff = 1, discharge_eff = 1
 #'
 #' df_batt %>% dygraphs::dygraph()
 #'
-add_battery_simple <- function(df, Bcap, Bc, Bd, SOCmin = 0, SOCmax = 100, SOCini = 0) {
+add_battery_simple <- function(
+  df,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin = 0,
+  SOCmax = 100,
+  SOCini = 0
+) {
   time_resolution <- get_time_resolution(df$datetime)
-  storage <- rep(0, (nrow(df)+1))
-  storage[1] <- Bcap*SOCini/100
-  battery_potential <- pmax(pmin(df$production - df$consumption, Bc), - Bd)
+  storage <- rep(0, (nrow(df) + 1))
+  storage[1] <- Bcap * SOCini / 100
+  battery_potential <- pmax(pmin(df$production - df$consumption, Bc), -Bd)
   # battery_potential[!(hour(datetime) %in% discharging_hours) & (battery_potential < 0)] <- 0
 
   for (i in 2:length(storage)) {
-    storage_i <- storage[i-1] + battery_potential[i-1]*time_resolution/60
-    storage_i <- max(min(storage_i, Bcap*SOCmax/100), Bcap*SOCmin/100)
+    storage_i <- storage[i - 1] +
+      battery_potential[i - 1] * time_resolution / 60
+    storage_i <- max(min(storage_i, Bcap * SOCmax / 100), Bcap * SOCmin / 100)
     storage[i] <- storage_i
   }
 
   battery <- storage - lag(storage, default = NA)
 
-  battery <- battery[seq(2, length(battery))]/(time_resolution/60)
+  battery <- battery[seq(2, length(battery))] / (time_resolution / 60)
 
-  return( battery )
+  return(battery)
 }

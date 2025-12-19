@@ -1,4 +1,3 @@
-
 # General functions -------------------------------------------------------
 
 check_optimization_data <- function(opt_data, opt_objective) {
@@ -12,7 +11,9 @@ check_optimization_data <- function(opt_data, opt_objective) {
     opt_data$static <- 0
   }
   if (!("production" %in% names(opt_data)) & (opt_objective == "grid")) {
-    warning("`production` variable not found in `opt_data`. No local energy production will be considered.")
+    warning(
+      "`production` variable not found in `opt_data`. No local energy production will be considered."
+    )
     opt_data$production <- 0
   }
 
@@ -37,7 +38,10 @@ check_optimization_data <- function(opt_data, opt_objective) {
     opt_data$load_capacity <- Inf
   }
 
-  if (!(opt_objective %in% c("grid", "cost", "none", "curtail")) && !is.numeric(opt_objective)) {
+  if (
+    !(opt_objective %in% c("grid", "cost", "none", "curtail")) &&
+      !is.numeric(opt_objective)
+  ) {
     stop("Error: `opt_objective` not valid")
   }
 
@@ -57,14 +61,14 @@ check_optimization_data <- function(opt_data, opt_objective) {
       opt_data$price_turn_down <- 0
     }
   }
-  return( opt_data )
+  return(opt_data)
 }
 
-triangulate_matrix <- function(mat, direction = c('l', 'u'), k=0) {
+triangulate_matrix <- function(mat, direction = c('l', 'u'), k = 0) {
   if (direction == 'l') {
-    return( as.matrix(Matrix::tril(mat, k = k)) )
+    return(as.matrix(Matrix::tril(mat, k = k)))
   } else if (direction == 'u') {
-    return( as.matrix(Matrix::triu(mat, k = k)) )
+    return(as.matrix(Matrix::triu(mat, k = k)))
   }
 }
 
@@ -73,30 +77,40 @@ get_lambda_matrix <- function(time_slots) {
   nextMat <- identityMat
   nextMat[1, 1] <- 0
   nextMat[time_slots, time_slots] <- 0
-  lambdaMat <- identityMat + nextMat -
+  lambdaMat <- identityMat +
+    nextMat -
     triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "u", 1), "l", 1
+      triangulate_matrix(matrix(1, time_slots, time_slots), "u", 1),
+      "l",
+      1
     ) -
     triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "l", -1), "u", -1
+      triangulate_matrix(matrix(1, time_slots, time_slots), "l", -1),
+      "u",
+      -1
     )
-  return( lambdaMat )
+  return(lambdaMat)
 }
 
 
-get_flex_windows <- function(dttm_seq, window_days, window_start_hour, flex_window_hours = NULL) {
-
+get_flex_windows <- function(
+  dttm_seq,
+  window_days,
+  window_start_hour,
+  flex_window_hours = NULL
+) {
   # Flexibility windows according to `window_start_hour` and `windows_days`
   start_hour_idx <- which(
     (lubridate::hour(dttm_seq) == window_start_hour) &
       (lubridate::minute(dttm_seq) == 0)
   )
-  n_windows <- trunc(length(start_hour_idx)/window_days)
+  n_windows <- trunc(length(start_hour_idx) / window_days)
 
   if (window_days > 1) {
     window_days_idx <- rep(seq_len(n_windows), each = window_days)
     start_windows_idx <- split(
-      start_hour_idx[seq_len(n_windows*window_days)], window_days_idx
+      start_hour_idx[seq_len(n_windows * window_days)],
+      window_days_idx
     ) %>%
       unname() %>%
       purrr::map_int(~ .x[1])
@@ -140,8 +154,17 @@ get_flex_windows <- function(dttm_seq, window_days, window_start_hour, flex_wind
 }
 
 
-get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity) {
-
+get_bounds <- function(
+  time_slots,
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity
+) {
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
 
@@ -155,9 +178,17 @@ get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, im
     if (time_horizon == time_slots) {
       horizonMat_cumsum <- matrix(0, time_slots, time_slots)
     } else {
-      horizonMat_cumsum <- triangulate_matrix(matrix(1, time_slots, time_slots), "l", -time_horizon)
+      horizonMat_cumsum <- triangulate_matrix(
+        matrix(1, time_slots, time_slots),
+        "l",
+        -time_horizon
+      )
     }
-    horizonMat_identity <- triangulate_matrix(triangulate_matrix(matrix(1, time_slots, time_slots), "l"), "u", -time_horizon)
+    horizonMat_identity <- triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "l"),
+      "u",
+      -time_horizon
+    )
 
     # Cumulative sum bounds
     lb_cumsum <- horizonMat_cumsum %*% LF
@@ -166,10 +197,17 @@ get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, im
     # Identity bounds
     ub_shift <- horizonMat_identity %*% LF
     ub_O <- pmin(pmax(ub_shift, lb_O), LFmax_vct) # The maximum average power in every time slot is the maximum power of the load `LFmax`
-
   } else {
-    horizonMat_cumsum <- triangulate_matrix(matrix(1, time_slots, time_slots), "l", time_horizon)
-    horizonMat_identity <- triangulate_matrix(triangulate_matrix(matrix(1, time_slots, time_slots), "u"), "l", time_horizon)
+    horizonMat_cumsum <- triangulate_matrix(
+      matrix(1, time_slots, time_slots),
+      "l",
+      time_horizon
+    )
+    horizonMat_identity <- triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "u"),
+      "l",
+      time_horizon
+    )
 
     # Cumulative sum bounds
     lb_cumsum <- cumsumMat %*% LF
@@ -194,7 +232,6 @@ get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, im
 
 
 # Optimization of load ------------------------------------------------------------
-
 
 #' Optimize a vector of flexible demand
 #'
@@ -258,10 +295,16 @@ get_bounds <- function(time_slots, G, LF, LS, direction, time_horizon, LFmax, im
 #' @importFrom purrr map
 #' @importFrom rlang .data
 #'
-optimize_demand <- function(opt_data, opt_objective = "grid",
-                            direction = 'forward', time_horizon = NULL,
-                            window_days = 1, window_start_hour = 0,
-                            flex_window_hours = NULL, lambda = 0) {
+optimize_demand <- function(
+  opt_data,
+  opt_objective = "grid",
+  direction = 'forward',
+  time_horizon = NULL,
+  window_days = 1,
+  window_start_hour = 0,
+  flex_window_hours = NULL,
+  lambda = 0
+) {
   # Parameters check
   opt_data <- check_optimization_data(opt_data, opt_objective)
   if (is.null(opt_data)) {
@@ -305,47 +348,43 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
         lambda = lambda
       )
     )
-
   } else if (opt_objective == "cost") {
-
     O_windows <- map(
       windows_data,
       ~ minimize_cost_window(
-          G = .x$production,
-          LF = .x$flexible,
-          LS = .x$static,
-          PI = .x$price_imported,
-          PE = .x$price_exported,
-          PTU = .x$price_turn_up,
-          PTD = .x$price_turn_down,
-          direction = direction,
-          time_horizon = time_horizon,
-          LFmax = .x$load_capacity,
-          import_capacity = .x$import_capacity,
-          export_capacity = .x$export_capacity,
-          lambda = lambda
-        )
+        G = .x$production,
+        LF = .x$flexible,
+        LS = .x$static,
+        PI = .x$price_imported,
+        PE = .x$price_exported,
+        PTU = .x$price_turn_up,
+        PTD = .x$price_turn_down,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = .x$load_capacity,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        lambda = lambda
+      )
     )
-
   } else if (is.numeric(opt_objective)) {
-
     O_windows <- map(
       windows_data,
       ~ optimize_demand_window(
-          G = .x$production,
-          LF = .x$flexible,
-          LS = .x$static,
-          PI = .x$price_imported,
-          PE = .x$price_exported,
-          PTU = .x$price_turn_up,
-          PTD = .x$price_turn_down,
-          direction = direction,
-          time_horizon = time_horizon,
-          LFmax = .x$load_capacity,
-          import_capacity = .x$import_capacity,
-          export_capacity = .x$export_capacity,
-          lambda = lambda,
-          w = opt_objective
+        G = .x$production,
+        LF = .x$flexible,
+        LS = .x$static,
+        PI = .x$price_imported,
+        PE = .x$price_exported,
+        PTU = .x$price_turn_up,
+        PTD = .x$price_turn_down,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = .x$load_capacity,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        lambda = lambda,
+        w = opt_objective
       )
     )
   } else {
@@ -355,7 +394,7 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
   O <- as.numeric(unlist(O_windows))
 
   if (length(flex_windows_idxs_seq) == length(dttm_seq)) {
-    return( O )
+    return(O)
   } else {
     # Create the complete demand vector with the time slots outside the
     # optimization windows
@@ -370,11 +409,9 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
       arrange(.data$idx)
 
     O_flex$O[is.na(O_flex$O)] <- opt_data$flexible[is.na(O_flex$O)]
-    return( O_flex$O )
+    return(O_flex$O)
   }
 }
-
-
 
 
 #' Perform demand optimization (just a window)
@@ -393,8 +430,18 @@ optimize_demand <- function(opt_data, opt_objective = "grid",
 #' @return numeric vector
 #' @keywords internal
 #'
-solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, P, q) {
-
+solve_optimization_window <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  P,
+  q
+) {
   # Round to 2 decimals to avoid problems with lower and upper bounds
   G <- round(G, 2)
   LF <- round(LF, 2)
@@ -409,21 +456,30 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
 
   # Constraints
   L_bounds <- get_bounds(
-    time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
+    time_slots,
+    G,
+    LF,
+    LS,
+    direction,
+    time_horizon,
+    LFmax,
+    import_capacity,
+    export_capacity
   )
 
   if (nrow(P) > time_slots) {
-
     ## Optimal demand bounds
     ##    0 <= O <= ub (calculated according to time_horizon)
-    Amat_O <- cbind(identityMat, identityMat*0, identityMat*0)
+    Amat_O <- cbind(identityMat, identityMat * 0, identityMat * 0)
     lb_O <- L_bounds$lb_O
     ub_O <- L_bounds$ub_O
 
     ## Imported energy bounds
     ## 0 <= It <= import_capacity
     Amat_I <- cbind(
-      identityMat*0, identityMat*1, identityMat*0
+      identityMat * 0,
+      identityMat * 1,
+      identityMat * 0
     )
     lb_I <- rep(0, time_slots)
     ub_I <- import_capacity
@@ -431,7 +487,9 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
     ## Exported energy bounds
     ## 0 <= Et <= export_capacity
     Amat_E <- cbind(
-      identityMat*0, identityMat*0, identityMat*1
+      identityMat * 0,
+      identityMat * 0,
+      identityMat * 1
     )
     lb_E <- rep(0, time_slots)
     ub_E <- export_capacity
@@ -439,29 +497,40 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
     ## Energy balance
     ## It - Et = OLt + LSt - Gt -> OLt - It + Et = Gt - LSt
     Amat_balance <- cbind(
-      identityMat*1, identityMat*-1, identityMat*1
+      identityMat * 1,
+      identityMat * -1,
+      identityMat * 1
     )
     lb_balance <- G - LS
     ub_balance <- G - LS
 
     ## Energy can only be shifted forwards or backwards with a specific time horizon
     ## This is done through cumulative sum matrices
-    Amat_cumsum <- cbind(L_bounds$Amat_cumsum, identityMat*0, identityMat*0)
+    Amat_cumsum <- cbind(L_bounds$Amat_cumsum, identityMat * 0, identityMat * 0)
     lb_cumsum <- L_bounds$lb_cumsum
     ub_cumsum <- L_bounds$ub_cumsum
 
     ## Total sum of O == E
-    Amat_energy <- cbind(matrix(1, ncol = time_slots), matrix(0, ncol = time_slots), matrix(0, ncol = time_slots))
+    Amat_energy <- cbind(
+      matrix(1, ncol = time_slots),
+      matrix(0, ncol = time_slots),
+      matrix(0, ncol = time_slots)
+    )
     lb_energy <- sum(LF)
     ub_energy <- sum(LF)
 
     # Join constraints
-    Amat <- rbind(Amat_O, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
+    Amat <- rbind(
+      Amat_O,
+      Amat_I,
+      Amat_E,
+      Amat_balance,
+      Amat_cumsum,
+      Amat_energy
+    )
     lb <- round(c(lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
     ub <- round(c(ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
-
   } else {
-
     # Lower and upper bounds
     ## General bounds
     ##  - Grid capacity: -export_capacity <= LF + LS - G <= +import_capacity
@@ -489,12 +558,15 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
     Amat <- rbind(Amat_O, Amat_cumsum, Amat_enery)
     lb <- round(c(lb_O, lb_cumsum, lb_energy), 2)
     ub <- round(c(ub_O, ub_cumsum, ub_energy), 2)
-
   }
 
   # Solve
   solver <- osqp::osqp(
-    P, q, Amat, lb, ub,
+    P,
+    q,
+    Amat,
+    lb,
+    ub,
     osqp::osqpSettings(
       verbose = FALSE,
       eps_abs = 1e-6,
@@ -507,28 +579,48 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
   if (O$info$status_val %in% c(1, 2)) {
-    return( round(O$x[seq_len(time_slots)], 2) )
+    return(round(O$x[seq_len(time_slots)], 2))
   } else {
     # If it's not feasible, then remove grid constraints
-    message_once("\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
+    message_once(
+      "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+    )
     import_capacity <- rep(Inf, time_slots)
     export_capacity <- rep(Inf, time_slots)
     L_bounds <- get_bounds(
-      time_slots, G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity
+      time_slots,
+      G,
+      LF,
+      LS,
+      direction,
+      time_horizon,
+      LFmax,
+      import_capacity,
+      export_capacity
     )
 
     if (nrow(P) > time_slots) {
       ub_I <- import_capacity
       ub_E <- export_capacity
-      lb <- round(c(L_bounds$lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-      ub <- round(c(L_bounds$ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+      lb <- round(
+        c(L_bounds$lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy),
+        2
+      )
+      ub <- round(
+        c(L_bounds$ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy),
+        2
+      )
     } else {
       lb <- round(c(L_bounds$lb_O, lb_cumsum, lb_energy), 2)
       ub <- round(c(L_bounds$ub_O, ub_cumsum, ub_energy), 2)
     }
 
     solver <- osqp::osqp(
-      P, q, Amat, lb, ub,
+      P,
+      q,
+      Amat,
+      lb,
+      ub,
       osqp::osqpSettings(
         verbose = FALSE,
         eps_abs = 1e-6,
@@ -539,14 +631,17 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
     O <- solver$Solve()
 
     if (O$info$status_val %in% c(1, 2)) {
-      return( round(O$x[seq_len(time_slots)], 2) )
+      return(round(O$x[seq_len(time_slots)], 2))
     } else {
-      message_once(paste0("\u26A0\uFE0F Optimization warning: ", O$info$status, ". No optimization provided."))
-      return( LF )
+      message_once(paste0(
+        "\u26A0\uFE0F Optimization warning: ",
+        O$info$status,
+        ". No optimization provided."
+      ))
+      return(LF)
     }
   }
 }
-
 
 
 #' Minimization of net power (just a window)
@@ -564,23 +659,39 @@ solve_optimization_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, lambda=0) {
-
+minimize_net_power_window <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  lambda = 0
+) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
 
   # Objective function terms
-  P <- 2*identityMat*(1+lambda)
-  q <- 2*(LS - G - lambda*LF)
+  P <- 2 * identityMat * (1 + lambda)
+  q <- 2 * (LS - G - lambda * LF)
 
   O <- solve_optimization_window(
-    G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, P, q
+    G,
+    LF,
+    LS,
+    direction,
+    time_horizon,
+    LFmax,
+    import_capacity,
+    export_capacity,
+    P,
+    q
   )
 
-  return( O )
+  return(O)
 }
-
-
 
 
 #' Minimization of the cost (just a window)
@@ -602,8 +713,21 @@ minimize_net_power_window <- function (G, LF, LS, direction, time_horizon, LFmax
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, import_capacity, export_capacity, lambda=0) {
-
+minimize_cost_window <- function(
+  G,
+  LF,
+  LS,
+  PI,
+  PE,
+  PTD,
+  PTU,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  lambda = 0
+) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
 
@@ -611,24 +735,41 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
   # unknown variable: X = [O, I, E]
   P <- rbind(
     cbind(
-      2*lambda*identityMat, identityMat*0, identityMat*0
+      2 * lambda * identityMat,
+      identityMat * 0,
+      identityMat * 0
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      identityMat * 0,
+      identityMat * 0,
+      identityMat * 0
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      identityMat * 0,
+      identityMat * 0,
+      identityMat * 0
     )
   )
   q <- c(
-    PTD - PTU - 2*lambda*LF, PI, -PE
+    PTD - PTU - 2 * lambda * LF,
+    PI,
+    -PE
   )
 
   O <- solve_optimization_window(
-    G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, P, q
+    G,
+    LF,
+    LS,
+    direction,
+    time_horizon,
+    LFmax,
+    import_capacity,
+    export_capacity,
+    P,
+    q
   )
 
-  return( O )
+  return(O)
 }
 
 
@@ -652,8 +793,22 @@ minimize_cost_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_h
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time_horizon, LFmax, import_capacity, export_capacity, w, lambda) {
-
+optimize_demand_window <- function(
+  G,
+  LF,
+  LS,
+  PI,
+  PE,
+  PTD,
+  PTU,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  w,
+  lambda
+) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
 
@@ -661,29 +816,42 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
   # unknown variable: X = [O, I, E]
   P <- rbind(
     cbind(
-      2*(w*mean(PI)^2+lambda)*identityMat, identityMat*0, identityMat*0
+      2 * (w * mean(PI)^2 + lambda) * identityMat,
+      identityMat * 0,
+      identityMat * 0
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      identityMat * 0,
+      identityMat * 0,
+      identityMat * 0
     ),
     cbind(
-      identityMat*0, identityMat*0, identityMat*0
+      identityMat * 0,
+      identityMat * 0,
+      identityMat * 0
     )
   )
   q <- c(
-    (1-w)*(PTD-PTU) - 2*lambda*LF - 2*w*mean(PI)^2*(G-LS), (1-w)*PI, -(1-w)*PE
+    (1 - w) * (PTD - PTU) - 2 * lambda * LF - 2 * w * mean(PI)^2 * (G - LS),
+    (1 - w) * PI,
+    -(1 - w) * PE
   )
 
   O <- solve_optimization_window(
-    G, LF, LS, direction, time_horizon, LFmax, import_capacity, export_capacity, P, q
+    G,
+    LF,
+    LS,
+    direction,
+    time_horizon,
+    LFmax,
+    import_capacity,
+    export_capacity,
+    P,
+    q
   )
 
-  return( O )
+  return(O)
 }
-
-
-
-
 
 
 # Battery optimization ------------------------------------------------------------
@@ -746,6 +914,7 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #'
 #' @importFrom dplyr tibble %>%
 #' @importFrom purrr map
+#' @importFrom timefully get_time_resolution
 #'
 #' @examples
 #' library(dplyr)
@@ -767,12 +936,22 @@ optimize_demand_window <- function (G, LF, LS, PI, PE, PTD, PTU, direction, time
 #'       window_start_hour = 5
 #'     )
 #'
-add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc, Bd,
-                                     SOCmin = 0, SOCmax = 100, SOCini = NULL,
-                                     window_days = 1, window_start_hour = 0,
-                                     flex_window_hours = 24, lambda = 0,
-                                     charge_eff = 1, discharge_eff = 1) {
-
+add_battery_optimization <- function(
+  opt_data,
+  opt_objective = "grid",
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin = 0,
+  SOCmax = 100,
+  SOCini = NULL,
+  window_days = 1,
+  window_start_hour = 0,
+  flex_window_hours = 24,
+  lambda = 0,
+  charge_eff = 1,
+  discharge_eff = 1
+) {
   # Parameters check
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
@@ -788,8 +967,10 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   }
 
   if (Bcap == 0 || Bc == 0 || Bd == 0 || SOCmin == SOCmax) {
-    message("\u26A0\uFE0F Optimization warning: battery parameters don't allow optimization.")
-    return( rep(0, nrow(opt_data)) )
+    message(
+      "\u26A0\uFE0F Optimization warning: battery parameters don't allow optimization."
+    )
+    return(rep(0, nrow(opt_data)))
   }
 
   if (is.null(SOCini)) {
@@ -839,69 +1020,90 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
   reset_message_once()
 
   if (opt_objective == "grid") {
-
     B_windows <- map(
       windows_data,
       ~ minimize_net_power_window_battery(
-        G = .x$production, L = .x$static,
-        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        Bcap = Bcap * 60 / time_resolution,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        lambda = lambda, charge_eff = charge_eff,
+        lambda = lambda,
+        charge_eff = charge_eff,
         discharge_eff = discharge_eff
       )
     )
-
   } else if (opt_objective == "curtail") {
-
     B_windows <- map(
       windows_data,
       ~ curtail_capacity_window_battery(
-        G = .x$production, L = .x$static,
-        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        Bcap = Bcap * 60 / time_resolution,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        lambda = lambda, charge_eff = charge_eff,
+        lambda = lambda,
+        charge_eff = charge_eff,
         discharge_eff = discharge_eff
       )
     )
-
   } else if (opt_objective == "cost") {
-
     B_windows <- map(
       windows_data,
       ~ minimize_cost_window_battery(
-        G = .x$production, L = .x$static,
-        PI = .x$price_imported, PE = .x$price_exported,
-        PTU = .x$price_turn_up, PTD = .x$price_turn_down,
-        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        PI = .x$price_imported,
+        PE = .x$price_exported,
+        PTU = .x$price_turn_up,
+        PTD = .x$price_turn_down,
+        Bcap = Bcap * 60 / time_resolution,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        lambda = lambda, charge_eff = charge_eff,
+        lambda = lambda,
+        charge_eff = charge_eff,
         discharge_eff = discharge_eff
       )
     )
-
   } else if (is.numeric(opt_objective)) {
-
     B_windows <- map(
       windows_data,
       ~ optimize_battery_window(
-        G = .x$production, L = .x$static,
-        PI = .x$price_imported, PE = .x$price_exported,
-        PTU = .x$price_turn_up, PTD = .x$price_turn_down,
-        Bcap = Bcap*60/time_resolution, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        PI = .x$price_imported,
+        PE = .x$price_exported,
+        PTU = .x$price_turn_up,
+        PTD = .x$price_turn_down,
+        Bcap = Bcap * 60 / time_resolution,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        w = opt_objective, lambda = lambda,
-        charge_eff = charge_eff, discharge_eff = discharge_eff
+        w = opt_objective,
+        lambda = lambda,
+        charge_eff = charge_eff,
+        discharge_eff = discharge_eff
       )
     )
-
   } else {
     stop("Error: invalid `opt_objective`")
   }
@@ -939,7 +1141,6 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 }
 
 
-
 #' Battery optimal charging/discharging profile to minimize grid interaction (just a window)
 #'
 #' @param G numeric vector, being the renewable generation profile
@@ -961,9 +1162,24 @@ add_battery_optimization <- function(opt_data, opt_objective = "grid", Bcap, Bc,
 #' @return numeric vector
 #' @keywords internal
 #'
-curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff) {
+curtail_capacity_window_battery <- function(
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  lambda,
+  charge_eff,
+  discharge_eff
+) {
   balance_sum <- tibble(
-    consumption = L, production = G
+    consumption = L,
+    production = G
   ) %>%
     get_energy_balance() %>%
     mutate(
@@ -974,20 +1190,31 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
     ) %>%
     summarise_all(sum)
 
-  Bcap_curtail <- min(max(balance_sum$exported_over, balance_sum$imported_over), Bcap)
+  Bcap_curtail <- min(
+    max(balance_sum$exported_over, balance_sum$imported_over),
+    Bcap
+  )
 
   if (Bcap_curtail == 0) {
     return(rep(0, length(G)))
   } else {
     minimize_net_power_window_battery(
-      G, L, Bcap_curtail, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff
+      G,
+      L,
+      Bcap_curtail,
+      Bc,
+      Bd,
+      SOCmin,
+      SOCmax,
+      SOCini,
+      import_capacity,
+      export_capacity,
+      lambda,
+      charge_eff,
+      discharge_eff
     )
   }
 }
-
-
-
-
 
 
 #' Perform battery optimization (just a window)
@@ -1010,8 +1237,22 @@ curtail_capacity_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax,
 #' @return numeric vector
 #' @keywords internal
 #'
-solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff) {
-
+solve_optimization_battery_window <- function(
+  P,
+  q,
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  charge_eff,
+  discharge_eff
+) {
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
@@ -1033,7 +1274,6 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
 
   # If has grid flows is cost or combined optimization
   if (has_grid_flows) {
-
     zeroMat <- identityMat * 0
 
     # Constraints
@@ -1056,9 +1296,14 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
     eq_balance <- G - L
 
     ## SOC limits including efficiencies
-    Amat_cumsum <- cbind(charge_eff * cumsumMat, -(1 / discharge_eff) * cumsumMat, zeroMat, zeroMat)
-    lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
-    ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
+    Amat_cumsum <- cbind(
+      charge_eff * cumsumMat,
+      -(1 / discharge_eff) * cumsumMat,
+      zeroMat,
+      zeroMat
+    )
+    lb_cumsum <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
+    ub_cumsum <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
 
     ## Total sum of SOC variation == 0
     Amat_energy <- cbind(
@@ -1077,8 +1322,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       ub_energy <- 0
 
       lb <- c(
-        rep(0, time_slots),           # charge lower
-        rep(0, time_slots),           # discharge lower
+        rep(0, time_slots), # charge lower
+        rep(0, time_slots), # discharge lower
         lb_I,
         lb_E,
         eq_balance,
@@ -1102,13 +1347,19 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       )
     }
 
-    Amat <- rbind(Amat_C, Amat_D, Amat_I, Amat_E, Amat_balance, Amat_cumsum, Amat_energy)
+    Amat <- rbind(
+      Amat_C,
+      Amat_D,
+      Amat_I,
+      Amat_E,
+      Amat_balance,
+      Amat_cumsum,
+      Amat_energy
+    )
     bounds <- bounds_with_capacities(import_capacity, export_capacity)
     lb <- bounds$lb
     ub <- bounds$ub
-
   } else {
-
     zeroMat <- identityMat * 0
 
     # Constraints for variables [C, D]
@@ -1122,9 +1373,12 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
     Amat_grid <- cbind(identityMat, -identityMat)
 
     # SOC limits with efficiencies
-    Amat_cumsum <- cbind(charge_eff * cumsumMat, -(1 / discharge_eff) * cumsumMat)
-    lb_cumsum <- rep((SOCmin - SOCini)/100*Bcap, time_slots)
-    ub_cumsum <- rep((SOCmax - SOCini)/100*Bcap, time_slots)
+    Amat_cumsum <- cbind(
+      charge_eff * cumsumMat,
+      -(1 / discharge_eff) * cumsumMat
+    )
+    lb_cumsum <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
+    ub_cumsum <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
 
     # Neutral SOC at the end of the window
     Amat_energy <- cbind(
@@ -1141,8 +1395,8 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       eq_energy <- 0
 
       lb <- c(
-        rep(0, time_slots),           # charge
-        rep(0, time_slots),           # discharge
+        rep(0, time_slots), # charge
+        rep(0, time_slots), # discharge
         lb_grid,
         lb_cumsum,
         eq_energy
@@ -1170,7 +1424,11 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
 
   # Solve
   solver <- osqp::osqp(
-    P, q, Amat, lb, ub,
+    P,
+    q,
+    Amat,
+    lb,
+    ub,
     osqp::osqpSettings(
       verbose = FALSE,
       eps_abs = 1e-6,
@@ -1189,22 +1447,34 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
     return(attach_profile(battery_profile, charge_solution, discharge_solution))
   } else {
     # If it's not feasible, then remove grid constraints
-    message_once("\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints.")
+    message_once(
+      "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+    )
     import_capacity <- rep(Inf, time_slots)
     export_capacity <- rep(Inf, time_slots)
 
     if (has_grid_flows) {
-      bounds <- bounds_with_capacities(rep(Inf, time_slots), rep(Inf, time_slots))
+      bounds <- bounds_with_capacities(
+        rep(Inf, time_slots),
+        rep(Inf, time_slots)
+      )
       lb <- bounds$lb
       ub <- bounds$ub
     } else {
-      bounds <- bounds_with_capacities(rep(Inf, time_slots), rep(Inf, time_slots))
+      bounds <- bounds_with_capacities(
+        rep(Inf, time_slots),
+        rep(Inf, time_slots)
+      )
       lb <- bounds$lb
       ub <- bounds$ub
     }
 
     solver <- osqp::osqp(
-      P, q, Amat, lb, ub,
+      P,
+      q,
+      Amat,
+      lb,
+      ub,
       osqp::osqpSettings(
         verbose = FALSE,
         eps_abs = 1e-6,
@@ -1218,9 +1488,17 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
       charge_solution <- B$x[seq_len(time_slots)]
       discharge_solution <- B$x[seq_len(time_slots) + time_slots]
       battery_profile <- charge_solution - discharge_solution
-      return(attach_profile(battery_profile, charge_solution, discharge_solution))
+      return(attach_profile(
+        battery_profile,
+        charge_solution,
+        discharge_solution
+      ))
     } else {
-      message_once(paste0("\u26A0\uFE0F Optimization warning: ", B$info$status, ". Disabling battery for some windows."))
+      message_once(paste0(
+        "\u26A0\uFE0F Optimization warning: ",
+        B$info$status,
+        ". Disabling battery for some windows."
+      ))
       zero_profile <- rep(0, time_slots)
       return(attach_profile(zero_profile, zero_profile, zero_profile))
     }
@@ -1247,15 +1525,28 @@ solve_optimization_battery_window <- function (P, q, G, L, Bcap, Bc, Bd, SOCmin,
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff) {
-
+minimize_net_power_window_battery <- function(
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  lambda,
+  charge_eff,
+  discharge_eff
+) {
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
   lambdaMat <- get_lambda_matrix(time_slots)
 
   # Objective function terms
-  penaltyMat <- identityMat + lambda*lambdaMat
+  penaltyMat <- identityMat + lambda * lambdaMat
   P_block <- 2 * penaltyMat
   P <- rbind(
     cbind(P_block, -P_block),
@@ -1265,10 +1556,23 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
   q <- c(q_block, -q_block)
 
   B <- solve_optimization_battery_window(
-    P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff
+    P,
+    q,
+    G,
+    L,
+    Bcap,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini,
+    import_capacity,
+    export_capacity,
+    charge_eff,
+    discharge_eff
   )
 
-  return( B )
+  return(B)
 }
 
 
@@ -1295,8 +1599,25 @@ minimize_net_power_window_battery <- function (G, L, Bcap, Bc, Bd, SOCmin, SOCma
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, lambda, charge_eff, discharge_eff) {
-
+minimize_cost_window_battery <- function(
+  G,
+  L,
+  PE,
+  PI,
+  PTD,
+  PTU,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  lambda,
+  charge_eff,
+  discharge_eff
+) {
   # Optimization parameters
   time_slots <- length(G)
   lambdaMat <- get_lambda_matrix(time_slots)
@@ -1335,13 +1656,24 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
   )
 
   B <- solve_optimization_battery_window(
-    P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff
+    P,
+    q,
+    G,
+    L,
+    Bcap,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini,
+    import_capacity,
+    export_capacity,
+    charge_eff,
+    discharge_eff
   )
 
-  return( B )
+  return(B)
 }
-
-
 
 
 #' Battery optimal charging/discharging profile to minimize net power and cost (just a window)
@@ -1368,8 +1700,26 @@ minimize_cost_window_battery <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, 
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, w, lambda, charge_eff, discharge_eff) {
-
+optimize_battery_window <- function(
+  G,
+  L,
+  PE,
+  PI,
+  PTD,
+  PTU,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  w,
+  lambda,
+  charge_eff,
+  discharge_eff
+) {
   # Optimization parameters
   time_slots <- length(G)
   identityMat <- diag(time_slots)
@@ -1400,17 +1750,30 @@ optimize_battery_window <- function (G, L, PE, PI, PTD, PTU, Bcap, Bc, Bd, SOCmi
       zero_square
     )
   )
-  q_block <- (1-w)*(PTD - PTU) - 2*w*mean(PI)^2*(G-L)
+  q_block <- (1 - w) * (PTD - PTU) - 2 * w * mean(PI)^2 * (G - L)
   q <- c(
     q_block,
     -q_block,
-    (1-w)*PI,
-    -(1-w)*PE
+    (1 - w) * PI,
+    -(1 - w) * PE
   )
 
   B <- solve_optimization_battery_window(
-    P, q, G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini, import_capacity, export_capacity, charge_eff, discharge_eff
+    P,
+    q,
+    G,
+    L,
+    Bcap,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini,
+    import_capacity,
+    export_capacity,
+    charge_eff,
+    discharge_eff
   )
 
-  return( B )
+  return(B)
 }

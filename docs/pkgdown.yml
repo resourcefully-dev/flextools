@@ -1,5 +1,5 @@
 pandoc: '3.8'
-pkgdown: 2.1.3
+pkgdown: 2.2.0
 pkgdown_sha: ~
 articles:
   combined_optimization: combined_optimization.html
@@ -10,7 +10,7 @@ articles:
   smart-charging-advanced: smart-charging-advanced.html
   smart-charging: smart-charging.html
   user-profiles: user-profiles.html
-last_built: 2025-09-25T09:29Z
+last_built: 2025-12-19T13:49Z
 urls:
   reference: https://resourcefully-dev.github.io/flextools/reference
   article: https://resourcefully-dev.github.io/flextools/articles

@@ -8,7 +8,6 @@ library(flextools)
 library(dplyr)
 library(lubridate)
 library(dygraphs)
-library(dutils)
 library(ggplot2)
 ```
 
@@ -38,7 +37,7 @@ For that week, we have a building energy consumption profile and a solar PV prod
 
 ```{r, echo=FALSE}
 opt_data %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Building", "navy") %>%
@@ -75,7 +74,7 @@ opt_building <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building) %>% 
   mutate(opt_building = opt_building) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dySeries("building", "Original building", "gray") %>%
   dySeries("opt_building", "Optimal building", "navy") %>%
@@ -103,7 +102,7 @@ opt_building <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building) %>% 
   mutate(opt_building = opt_building) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dySeries("building", "Original building", "gray") %>%
   dySeries("opt_building", "Optimal building", "navy") %>%
@@ -136,7 +135,7 @@ opt_battery <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building) %>% 
   mutate(battery = opt_battery) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dySeries("building", "Building", "navy") %>%
   dySeries("battery", "Battery", "purple") %>%
@@ -170,7 +169,7 @@ opt_building <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building, price_imported, price_exported) %>% 
   mutate(opt_building = opt_building) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Original building", "gray") %>%
@@ -209,7 +208,7 @@ opt_building <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building, price_imported, price_exported) %>% 
   mutate(opt_building = opt_building) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Original building", "gray") %>%
@@ -242,7 +241,7 @@ opt_battery <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building, price_imported, price_exported) %>% 
   mutate(battery = opt_battery) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Building", "navy") %>%
@@ -276,7 +275,7 @@ opt_battery <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building, price_imported, price_exported) %>% 
   mutate(battery = opt_battery) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Building", "navy") %>%
@@ -364,7 +363,7 @@ opt_battery <- opt_data %>%
 opt_data %>% 
   select(datetime, production, building, price_imported, price_exported, price_turn_up, price_turn_down) %>% 
   mutate(battery = opt_battery) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Building", "navy") %>%
@@ -409,7 +408,7 @@ opt_building <- purrr::map(
 opt_data %>% 
   select(datetime, production, building, price_imported, price_exported) %>% 
   mutate(opt_building) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Original building", "gray") %>%
@@ -448,7 +447,7 @@ opt_battery <- purrr::map(
 opt_data %>% 
   select(datetime, production, building, price_imported, price_exported) %>% 
   mutate(opt_battery) %>% 
-  dyplot() %>% 
+  timefully::plot_ts() %>% 
   dyAxis("y", "Power (kW)") %>% 
   dyAxis("y2", "Price (€/kWh)") %>% 
   dySeries("building", "Building", "navy") %>%

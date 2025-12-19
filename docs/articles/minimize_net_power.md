@@ -1,0 +1,182 @@
+# Net power optimization
+
+Functions
+[`optimize_demand()`](https://resourcefully-dev.github.io/flextools/reference/optimize_demand.md),
+[`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)
+or
+[`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md)
+make use of Quadratic programming in order to obtain the optimal power
+load given certain conditions. The Quadratic programming problem can be
+formulated according to multiple objectives. Currently, `flextools`
+package allows to optimize a time-series power load considering multiple
+objectives:
+
+- Minimize the power exchanged with the grid (net power)
+- Minimize the energy cost
+
+In this article, we’ll cover the optimization problem for the first
+objective, **net power minimization**, for both the **flexible demand**
+(e.g. heatpumps, electric vehicles, etc.) and the **battery**.
+
+## Demand optimization
+
+To minimize the energy exchanged with the distribution grid while
+maximizing the use of local generation, using the **flexibility from a
+power demand profile**, the objective function of the optimization
+problem has been raised in the following way:
+
+``` math
+min \sum_{t=1}^{T} (LS_t + O_t - G_t)^2 + \lambda (O_t-LF_t)^{2}
+```
+
+Where:
+
+- $`T`$ : Number of time intervals within the optimization window
+- $`G_t`$ : Local power generation time-series vector
+- $`LS_t`$ : Non-flexible load time-series vector
+- $`LF_t`$ : Flexible load time-series vector (if not optimized)
+- $`O_t`$ : Optimal flexible load time-series vector
+- $`\lambda`$ : penalty on change for the flexible load
+
+Moreover, the squared term penalizes high values of net power, so the
+optimization always results in the most flat as possible net power
+profile (**peak shaving**).
+
+This optimization problem has the following constraints:
+
+- The energy consumed by the flexible load must remain the same than the
+  expected behavior:
+
+``` math
+\sum_{t=1}^T O_t \Delta t = \sum_{t=1}^T LF_t \Delta t
+```
+
+- Optimal flexible load must be lower than a certain maximum power
+  $`LF_{max}`$:
+
+``` math
+0 \le O_t \le LFmax_t \quad t \in T
+```
+
+- The energy balance between generation and loads must be lower than the
+  grid import capacity $`IC_t`$:
+
+``` math
+O_t + LS_t - G_t \le IC_t \quad t \in T
+```
+
+At the same time, we can optimize the flexible energy demand with two
+opposite approaches:
+
+1.  Postpone the consumption to later time-slots (**shift the energy
+    forward**)
+2.  Consume now (store) the energy that will be consumed later (**shift
+    the energy backward**)
+
+We consider both approaches for different objectives or applications.
+The energy shift is always done within a maximum **time horizon**
+($`h`$) to consider realistic scenarios. For example, the time horizon
+for the energy demand of a water boiler could have a time horizon of 6
+hours, because it wouldn’t make sense to heat the water more than 6
+hours before the final consumption. Each one of these approaches brings
+extra constraints to the optimization problem:
+
+If the energy can only be shifted **forward**:
+
+- The cumulative sum of the optimal load $`O`$ must be higher than the
+  cumulative sum of the original flexible load $`LF`$ except the last
+  $`h`$ time slots, and lower than the total cumulative sum of the
+  original flexible load $`LF`$ (energy can only be shifted forwards):
+
+``` math
+\sum_{t = 1}^{u-h} LF_t \le \sum_{t=1}^u O_t \le \sum_{t=1}^u LF_t \quad u = 1 \dots T
+```
+
+- The maximum values for the optimal demand $`O_t`$ will depend on the
+  time horizon $`h`$:
+
+``` math
+O_u \le \sum_{t = u-h}^u LF_t \quad u = 1 \dots T
+```
+
+If the energy can only be shifted **backward**:
+
+- The cumulative sum of the optimal demand $`O`$ must be higher than the
+  total cumulative sum of the original demand $`LF`$ (energy can only be
+  shifted backwards), and lower than the cumulative sum of the original
+  demand $`LF`$ except the following $`h`$ time slots:
+
+``` math
+\sum_{t=1}^u LF_t \le \sum_{t=1}^u O_t \le \sum_{t=1}^{u+h} LF_t \quad u = 1 \dots T
+```
+
+- The maximum values for the optimal demand $`O_t`$ will depend on the
+  time horizon $`h`$:
+
+``` math
+O_u \le \sum_{t = u}^{u+h} LF_t \quad u = 1 \dots T
+```
+
+## Battery optimization
+
+To minimize the energy exchanged with the distribution grid while
+maximizing the use of local generation, using the **flexibility from a
+battery**, the objective function of the optimization problem has been
+raised in the following way:
+
+``` math
+\min_{C_t, D_t} \sum_{t=1}^{T} (L_t + C_t - D_t - G_t)^2 + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
+```
+
+Where:
+
+- $`T`$ : Number of time intervals within the optimization window
+- $`G_t`$ : Local power generation time-series vector
+- $`L_t`$ : Power load time-series vector
+- $`C_t`$ : Battery charging power (decision variable, non-negative)
+- $`D_t`$ : Battery discharging power (decision variable, non-negative)
+- $`B_t = C_t - D_t`$ : Net battery exchange with the grid (positive =
+  charging)
+- $`\lambda`$ : penalty on change for the flexible load
+
+Additionally, this optimization problem also counts with the following
+parameters used in the constraints below:
+
+- $`B_{cap}`$ : Battery capacity
+- $`B_c`$ : Maximum charging power
+- $`B_d`$ : Maximum discharging power
+- $`SOC_{min}`$ : Minimum state of charge of the battery
+- $`SOC_{max}`$ : Maximum state of charge of the battery
+- $`SOC_{ini}`$ : State of charge at the beginning/end of the
+  optimization window
+- $`\eta_c`$ : Battery charging efficiency
+- $`\eta_d`$ : Battery discharging efficiency
+
+Optimization constraints:
+
+- Battery charging and discharging limits:
+
+``` math
+0 \le C_t \le B_c \quad t \in T \qquad 0 \le D_t \le B_d \quad t \in T
+```
+
+- State of charge limits, accounting for non-ideal charging and
+  discharging:
+
+``` math
+SOC_{min} \le SOC_{ini} + \frac{1}{B_{cap}} \sum_{k=1}^t \left(\eta_c C_k - \frac{D_k}{\eta_d}\right) \Delta t \le SOC_{max} \quad t = 1, \dots, T
+```
+
+- The balance of stored energy must be 0 at the end of the optimization
+  window to keep the same initial state of charge:
+
+``` math
+\sum_{t=1}^T \left(\eta_c C_t - \frac{D_t}{\eta_d}\right) \Delta t = 0
+```
+
+- The energy balance of generation and loads must be between the import
+  capacity $`IC_t`$ and export capacity $`EC_t`$:
+
+``` math
+-EC_t \le C_t - D_t + L_t - G_t \le IC_t \quad t \in T
+```

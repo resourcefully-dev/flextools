@@ -108,7 +108,7 @@ smart_v2g <- function(
   }
 
   dttm_seq <- opt_data$datetime
-  time_resolution <- get_time_resolution(dttm_seq, units = "mins")
+  time_resolution <- timefully::get_time_resolution(dttm_seq, units = "mins")
   sessions <- sessions %>%
     evsim::adapt_charging_features(time_resolution = time_resolution)
 
@@ -741,7 +741,10 @@ schedule_sessions_v2g <- function(
     )
   }
 
-  resolution <- get_time_resolution(setpoint$datetime, units = "mins")
+  resolution <- timefully::get_time_resolution(
+    setpoint$datetime,
+    units = "mins"
+  )
   dttm_tz <- lubridate::tz(setpoint$datetime)
 
   sessions_sch <- sessions %>%

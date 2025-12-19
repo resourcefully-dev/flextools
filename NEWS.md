@@ -2,6 +2,7 @@
 
 * Added V2G functions
 * Introduced `timefully` package
+* Function `plot_net_power` allows grid capacities in `df`
 
 
 # flextools 1.1.0

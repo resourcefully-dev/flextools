@@ -4,7 +4,7 @@ library(dplyr)
 # Energy evaluation -------------------------------------------------------------
 
 df <- select(
-  energy_profiles,
+  energy_profiles[1:(96 * 7), ],
   "datetime",
   production = "solar",
   consumption = "building"
@@ -22,7 +22,41 @@ test_that("net power is plotted", {
 test_that("net power is plotted with original df", {
   building_variation <- rnorm(nrow(df), mean = 0, sd = 1)
   df2 <- dplyr::mutate(df, consumption = consumption + building_variation)
-  plot <- plot_net_power(df2, original_df = df, import_capacity = 10, export_capacity = 10)
+  plot <- plot_net_power(
+    df2,
+    original_df = df,
+    import_capacity = 10,
+    export_capacity = 10
+  )
+  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
+
+test_that("net power is plotted with capacity profiles", {
+  plot <- df |>
+    mutate(
+      import_capacity = 10,
+      export_capacity = 10
+    ) |>
+    plot_net_power()
+  expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
+
+test_that("net power is plotted with original df, dynamic capacities and custom colors", {
+  building_variation <- rnorm(nrow(df), mean = 0, sd = 1)
+  df2 <- df |>
+    mutate(
+      consumption = consumption + building_variation,
+      import_capacity = 10,
+      export_capacity = 10
+    )
+  plot <- plot_net_power(
+    df2,
+    original_df = df,
+    colors = list(
+      net_static = "purple",
+      net_flex = "blue"
+    )
+  )
   expect_equal(class(plot), c("dygraphs", "htmlwidget"))
 })
 
@@ -50,8 +84,12 @@ opt_data <- tibble(
   production = 0
 )
 sc_results <- smart_charging(
-  sessions, opt_data, opt_objective = "grid", method = "curtail",
-  window_days = 1, window_start_hour = 6,
+  sessions,
+  opt_data,
+  opt_objective = "grid",
+  method = "curtail",
+  window_days = 1,
+  window_start_hour = 6,
   responsive = list(Workday = list(Worktime = 0.9)),
   energy_min = 0.5
 )
@@ -61,7 +99,6 @@ test_that("energy charged is summarised", {
     tibble::is_tibble(summarise_energy_charged(sc_results, sessions))
   )
 })
-
 
 
 # Energy cost evaluation --------------------------------------------------
@@ -96,7 +133,6 @@ test_that("energy cost is plotted with original df", {
 })
 
 
-
 # Test imbalance income ---------------------------------------------------
 
 df <- dplyr::select(
@@ -110,7 +146,8 @@ df <- dplyr::select(
 # Build another random consumption profile
 building_variation <- rnorm(nrow(df), mean = 0, sd = 1)
 df <- dplyr::mutate(
-  df, demand_final = demand_baseline + building_variation
+  df,
+  demand_final = demand_baseline + building_variation
 )
 
 test_that("imbalance income is calculated", {

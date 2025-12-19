@@ -1,5 +1,3 @@
-
-
 # Smart charging impact ---------------------------------------------------
 
 #' Get a summary of the energy charged per session
@@ -42,7 +40,6 @@
 #' summarise_energy_charged(sc_results, sessions)
 #'
 summarise_energy_charged <- function(smart_charging, sessions) {
-
   energy_charged <- smart_charging$sessions %>%
     group_by(.data$Session) %>%
     summarise(EnergyCharged = round(sum(.data$Energy, na.rm = TRUE), 2))
@@ -51,7 +48,7 @@ summarise_energy_charged <- function(smart_charging, sessions) {
     select("Session", EnergyRequired = "Energy") %>%
     left_join(energy_charged, by = "Session") %>%
     mutate(
-      PctEnergyCharged = round(.data$EnergyCharged/.data$EnergyRequired*100)
+      PctEnergyCharged = round(.data$EnergyCharged / .data$EnergyRequired * 100)
     )
 }
 
@@ -127,24 +124,32 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
   df2 <- df %>%
     get_energy_balance() %>%
     mutate(
-      kg_co2 = .data$kg_co2_kwh*.data$imported*resolution,
+      kg_co2 = .data$kg_co2_kwh * .data$imported * resolution,
     )
 
-  peak_to_grid_dttm <- df2$datetime[which(df2$exported == max(df2$exported, na.rm = T))][1]
-  peak_from_grid_dttm <- df2$datetime[which(df2$imported == max(df2$imported, na.rm = T))][1]
+  peak_to_grid_dttm <- df2$datetime[which(
+    df2$exported == max(df2$exported, na.rm = T)
+  )][1]
+  peak_from_grid_dttm <- df2$datetime[which(
+    df2$imported == max(df2$imported, na.rm = T)
+  )][1]
 
   kpis_list <- df2 %>%
     summarise(
-      total_consumption = sum(.data$consumption*resolution, na.rm = T),
-      total_production = sum(.data$production*resolution, na.rm = T),
-      total_local = sum(.data$local*resolution, na.rm = T),
-      total_exported = sum(.data$exported*resolution, na.rm = T),
-      total_imported = sum(.data$imported*resolution, na.rm = T),
+      total_consumption = sum(.data$consumption * resolution, na.rm = T),
+      total_production = sum(.data$production * resolution, na.rm = T),
+      total_local = sum(.data$local * resolution, na.rm = T),
+      total_exported = sum(.data$exported * resolution, na.rm = T),
+      total_imported = sum(.data$imported * resolution, na.rm = T),
       selfconsumption = ifelse(
-        .data$total_production == 0, 0, .data$total_local/.data$total_production
+        .data$total_production == 0,
+        0,
+        .data$total_local / .data$total_production
       ),
       selfsufficiency = ifelse(
-        .data$total_consumption == 0, 0, .data$total_local/.data$total_consumption
+        .data$total_consumption == 0,
+        0,
+        .data$total_local / .data$total_consumption
       ),
       peak_to_grid = max(.data$exported, na.rm = T),
       peak_from_grid = max(.data$imported, na.rm = T),
@@ -162,12 +167,11 @@ get_energy_kpis <- function(df, kg_co2_kwh = 0.5) {
       ) %>%
       filter(!between(.data$net, -.data$export_capacity, .data$import_capacity))
 
-    kpis_list$congestion_time <- nrow(congestion_df)/nrow(df2)
+    kpis_list$congestion_time <- nrow(congestion_df) / nrow(df2)
   }
 
-  return( kpis_list )
+  return(kpis_list)
 }
-
 
 
 # Costs calculations ------------------------------------------------------
@@ -203,8 +207,9 @@ get_energy_cost <- function(df) {
   df %>%
     get_energy_balance() %>%
     mutate(
-      cost = .data$imported*.data$price_imported -
-        .data$exported*.data$price_exported
+      cost = .data$imported *
+        .data$price_imported -
+        .data$exported * .data$price_exported
     )
 }
 
@@ -240,7 +245,6 @@ get_energy_total_cost <- function(df) {
     pull("cost") %>%
     sum(na.rm = T)
 }
-
 
 
 #' Get imbalance income time-series
@@ -281,13 +285,18 @@ get_imbalance_income <- function(df) {
     mutate(
       demand_diff = .data$demand_final - .data$demand_baseline,
       demand_turn_up = ifelse(
-        .data$demand_diff > 0, .data$demand_diff, 0
+        .data$demand_diff > 0,
+        .data$demand_diff,
+        0
       ),
       demand_turn_down = ifelse(
-        .data$demand_diff < 0, -.data$demand_diff, 0
+        .data$demand_diff < 0,
+        -.data$demand_diff,
+        0
       ),
-      income = .data$demand_turn_up*.data$price_turn_up +
-        .data$demand_turn_down*.data$price_turn_down
+      income = .data$demand_turn_up *
+        .data$price_turn_up +
+        .data$demand_turn_down * .data$price_turn_down
     )
 }
 
@@ -340,12 +349,20 @@ get_imbalance_total_income <- function(df) {
 #' a comparison between the original scenario is done when
 #' `original_df` is not `NULL`.
 #'
-#' @param df tibble, with columns `datetime`, `consumption`, `production`
+#' @param df tibble, with columns `datetime`, `consumption`, `production`.
+#' Optional columns: `import_capacity` and `export_capacity` for dynamic capacities.
 #' @param original_df tibble with same columns than `df` corresponding to the
 #' original scenario (e.g. without flexibility)
-#' @param import_capacity numeric, maximum power to import from the grid (in kW)
-#' @param export_capacity numeric, maximum power to export to the grid (in kW, positive).
-#' @param ... extra arguments to pass to dygraphs::dyOptions function
+#' @param import_capacity numeric, maximum power to import from the grid.
+#' Not used when `df` contains a column with the same name.
+#' @param export_capacity numeric, maximum power to export to the grid (positive).
+#' Not used when `df` contains a column with the same name.
+#' @param colors named list with variable names and colors. For example:
+#' colors_def <- list(
+#'    "production" = "orange", "consumption" = "navy", "net" = "purple",
+#'    "import_capacity" = "brown", "export_capacity" = "brown"
+#' )
+#' @param ... extra arguments to pass to timefully::plot_ts function
 #'
 #' @return dygraphs plot
 #' @export
@@ -372,54 +389,155 @@ get_imbalance_total_income <- function(df) {
 #' df2 <- dplyr::mutate(df, consumption = consumption + building_variation)
 #' plot_net_power(df2, original_df = df)
 #'
-plot_net_power <- function(df, original_df = NULL, import_capacity = NULL, export_capacity = NULL, ...) {
+plot_net_power <- function(
+  df,
+  original_df = NULL,
+  import_capacity = NULL,
+  export_capacity = NULL,
+  colors = NULL,
+  ...
+) {
+  colors <- check_colors(colors)
 
   plot_df <- df %>%
-    get_energy_balance() %>%
-    rename(net_flex = "net")
+    get_energy_balance()
+
+  if ("export_capacity" %in% colnames(plot_df)) {
+    plot_df$export_capacity <- -plot_df$export_capacity
+  }
 
   if (is.null(original_df)) {
     plot_dy <- plot_df %>%
-      select(any_of(c("datetime", "consumption", "production", "net_flex"))) %>%
-      plot_ts(ylab = "Power demand (kW)", fillGraph = TRUE, strokeWidth = 2, ...) %>%
-      dySeries("production", "Production", color = "orange") %>%
-      dySeries("consumption", "Consumption",  color = "navy") %>%
-      dySeries("net_flex", "Net power", color = "brown", fillGraph = FALSE)
+      select(any_of(c(
+        "datetime",
+        "consumption",
+        "production",
+        "net",
+        "import_capacity",
+        "export_capacity"
+      ))) %>%
+      plot_ts(
+        ylab = "Power demand (kW)",
+        fillGraph = TRUE,
+        strokeWidth = 2,
+        ...
+      ) %>%
+      dySeries("production", "Production", color = colors$production) %>%
+      dySeries("consumption", "Consumption", color = colors$consumption) %>%
+      dySeries(
+        "net",
+        "Net power",
+        color = colors$net,
+        fillGraph = FALSE
+      )
   } else {
     original_df <- original_df %>%
       get_energy_balance() %>%
       rename(net_static = "net") %>%
-      select(all_of(c("datetime", "net_static")))
+      select(any_of(c("datetime", "net_static")))
     plot_dy <- plot_df %>%
-      select(all_of(c("datetime", "net_flex"))) %>%
-      left_join(original_df,by = "datetime") %>%
+      rename(net_flex = "net") %>%
+      select(any_of(c(
+        "datetime",
+        "net_flex",
+        "import_capacity",
+        "export_capacity"
+      ))) %>%
+      left_join(original_df, by = "datetime") %>%
       mutate(
         lwr = ifelse(
           .data$net_flex < .data$net_static,
-          .data$net_flex, .data$net_static
+          .data$net_flex,
+          .data$net_static
         ),
         upr = ifelse(
           .data$net_flex > .data$net_static,
-          .data$net_flex, .data$net_static
+          .data$net_flex,
+          .data$net_static
         )
       ) %>%
-      select(any_of(c("datetime", "net_static", "net_flex", "lwr", "upr"))) %>%
       plot_ts(ylab = "Net power (kW)", ...) %>%
-      dySeries(c("lwr", "net_static", "upr"), label = "Original case", color = "red", strokePattern = "dashed") %>%
-      dySeries("net_flex", label = "Flexible case", color = "darkgreen", strokeWidth = 2)
+      dySeries(
+        c("lwr", "net_static", "upr"),
+        label = "Original case",
+        color = colors$net_static,
+        strokePattern = "dashed"
+      ) %>%
+      dySeries(
+        "net_flex",
+        label = "Flexible case",
+        color = colors$net_flex,
+        strokeWidth = 2
+      )
   }
 
-  if (!is.null(import_capacity)) {
+  if ("import_capacity" %in% colnames(plot_df)) {
     plot_dy <- plot_dy %>%
-      dyLimit(import_capacity, color = "brown")
+      dySeries(
+        "import_capacity",
+        label = "Import capacity",
+        color = colors$import_capacity,
+        strokePattern = "dashed",
+        strokeWidth = 0.8,
+        fillGraph = FALSE
+      )
+  } else if (!is.null(import_capacity)) {
+    plot_dy <- plot_dy %>%
+      dyLimit(import_capacity, color = colors$import_capacity)
   }
 
-  if (!is.null(export_capacity)) {
+  if ("export_capacity" %in% colnames(plot_df)) {
     plot_dy <- plot_dy %>%
-      dyLimit(-export_capacity, color = "brown")
+      dySeries(
+        "export_capacity",
+        label = "Export capacity",
+        color = colors$export_capacity,
+        strokePattern = "dashed",
+        strokeWidth = 0.8,
+        fillGraph = FALSE
+      )
+  } else if (!is.null(import_capacity)) {
+    plot_dy <- plot_dy %>%
+      dyLimit(-export_capacity, color = colors$export_capacity)
   }
 
   plot_dy
+}
+
+
+check_colors <- function(colors) {
+  colors_def <- list(
+    "production" = "#FFA500",
+    "consumption" = "#000080",
+    "net" = "#A020F0",
+    "net_static" = "#FF0000",
+    "net_flex" = "#006400",
+    "import_capacity" = "#A52A2A",
+    "export_capacity" = "#A52A2A"
+  )
+
+  if (is.null(colors)) {
+    return(colors_def)
+  }
+
+  if (!is.list(colors)) {
+    stop("`colors` must be a list.")
+  }
+
+  for (var in c(
+    "production",
+    "consumption",
+    "net_static",
+    "net_flex",
+    "import_capacity",
+    "export_capacity"
+  )) {
+    if (is.null(colors[[var]])) {
+      colors[[var]] <- colors_def[[var]]
+    }
+  }
+
+  return(colors)
 }
 
 
@@ -464,7 +582,6 @@ plot_net_power <- function(df, original_df = NULL, import_capacity = NULL, expor
 #' plot_energy_cost(df2, original_df = df)
 #'
 plot_energy_cost <- function(df, original_df = NULL, ...) {
-
   plot_df <- df %>%
     get_energy_cost() %>%
     rename(cost_flex = "cost")
@@ -481,21 +598,39 @@ plot_energy_cost <- function(df, original_df = NULL, ...) {
       select(all_of(c("datetime", "cost_static")))
     plot_dy <- plot_df %>%
       select(all_of(c("datetime", "cost_flex"))) %>%
-      left_join(original_df,by = "datetime") %>%
+      left_join(original_df, by = "datetime") %>%
       mutate(
         lwr = ifelse(
           .data$cost_flex < .data$cost_static,
-          .data$cost_flex, .data$cost_static
+          .data$cost_flex,
+          .data$cost_static
         ),
         upr = ifelse(
           .data$cost_flex > .data$cost_static,
-          .data$cost_flex, .data$cost_static
+          .data$cost_flex,
+          .data$cost_static
         )
       ) %>%
-      select(any_of(c("datetime", "cost_static", "cost_flex", "lwr", "upr"))) %>%
+      select(any_of(c(
+        "datetime",
+        "cost_static",
+        "cost_flex",
+        "lwr",
+        "upr"
+      ))) %>%
       plot_ts(ylab = "Cost (Euros)", ...) %>%
-      dySeries(c("lwr", "cost_static", "upr"), label = "Original case", color = "red", strokePattern = "dashed") %>%
-      dySeries("cost_flex", label = "Flexible case", color = "darkgreen", strokeWidth = 2)
+      dySeries(
+        c("lwr", "cost_static", "upr"),
+        label = "Original case",
+        color = "red",
+        strokePattern = "dashed"
+      ) %>%
+      dySeries(
+        "cost_flex",
+        label = "Flexible case",
+        color = "darkgreen",
+        strokeWidth = 2
+      )
   }
 
   plot_dy
@@ -513,7 +648,7 @@ plot_energy_cost <- function(df, original_df = NULL, ...) {
 #' @keywords internal
 #'
 get_percentage_hours <- function(vct, threshold) {
-  sum(vct >= threshold)/length(vct)*100
+  sum(vct >= threshold) / length(vct) * 100
 }
 
 
@@ -538,7 +673,7 @@ get_duration_curve <- function(vct) {
   ) %>%
     group_by(.data$pct) %>%
     summarise(var = min(.data$var)) # Just one value of power per percentage
-  return( duration_tbl )
+  return(duration_tbl)
 }
 
 #' Load duration curve table
@@ -575,7 +710,7 @@ get_load_duration_curve <- function(df) {
   net <- df$consumption - df$production
   load_data <- get_duration_curve(net) %>%
     rename(power = "var")
-  return( load_data )
+  return(load_data)
 }
 
 
@@ -643,7 +778,10 @@ plot_load_duration_curve <- function(df, original_df = NULL) {
       fill("Original case", "Flexible case", .direction = "down") %>%
       pivot_longer(-"pct", names_to = "case", values_to = "power") %>%
       ggplot(aes(.data$pct, .data$power, color = .data$case)) +
-      scale_color_manual(values = c("red", "darkgreen") %>% setNames(c("Original case", "Flexible case"))) +
+      scale_color_manual(
+        values = c("red", "darkgreen") %>%
+          setNames(c("Original case", "Flexible case"))
+      ) +
       geom_line(linewidth = 1.2) +
       labs(x = "Percentage of hours (%)", y = "Power (kW)", color = "") +
       theme_light() +

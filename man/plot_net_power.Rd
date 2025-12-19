@@ -9,20 +9,30 @@ plot_net_power(
   original_df = NULL,
   import_capacity = NULL,
   export_capacity = NULL,
+  colors = NULL,
   ...
 )
 }
 \arguments{
-\item{df}{tibble, with columns \code{datetime}, \code{consumption}, \code{production}}
+\item{df}{tibble, with columns \code{datetime}, \code{consumption}, \code{production}.
+Optional columns: \code{import_capacity} and \code{export_capacity} for dynamic capacities.}
 
 \item{original_df}{tibble with same columns than \code{df} corresponding to the
 original scenario (e.g. without flexibility)}
 
-\item{import_capacity}{numeric, maximum power to import from the grid (in kW)}
+\item{import_capacity}{numeric, maximum power to import from the grid.
+Not used when \code{df} contains a column with the same name.}
 
-\item{export_capacity}{numeric, maximum power to export to the grid (in kW, positive).}
+\item{export_capacity}{numeric, maximum power to export to the grid (positive).
+Not used when \code{df} contains a column with the same name.}
 
-\item{...}{extra arguments to pass to dygraphs::dyOptions function}
+\item{colors}{named list with variable names and colors. For example:
+colors_def <- list(
+"production" = "orange", "consumption" = "navy", "net" = "purple",
+"import_capacity" = "brown", "export_capacity" = "brown"
+)}
+
+\item{...}{extra arguments to pass to timefully::plot_ts function}
 }
 \value{
 dygraphs plot

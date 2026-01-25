@@ -405,6 +405,15 @@ smart_v2g_window <- function(
   setpoints,
   include_log = FALSE
 ) {
+  if (nrow(setpoints) == 0) {
+    return(list(
+      sessions = sessions_window,
+      demand = profiles_demand,
+      setpoints = profiles_demand,
+      log = list()
+    ))
+  }
+
   dttm_seq <- setpoints$datetime
   log <- list()
   log_window_name <- as.character(date(dttm_seq[1]))

@@ -949,6 +949,8 @@ schedule_sessions_v2g <- function(
         # Update flexibility requirement
         flex_provided <- round(max_power_reduction * reduction_factor, 2)
         flex_req <- round(flex_req - flex_provided, 2)
+      } else {
+        flex_provided <- 0
       }
 
       # Update the charging power of sessions that are NOT curtailed

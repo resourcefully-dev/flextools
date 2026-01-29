@@ -1411,6 +1411,8 @@ schedule_sessions <- function(
           # Update flexibility requirement
           flex_provided <- round(max_power_reduction * reduction_factor, 2)
           flex_req <- round(flex_req - flex_provided, 2)
+        } else {
+          flex_provided <- 0
         }
 
         # # Get the BAU power demand from curtailable sessions

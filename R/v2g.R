@@ -368,11 +368,12 @@ get_setpoints_v2g <- function(
         L_others <- rep(0, length(dttm_seq))
       }
 
+      profile_power_limited <- profiles_demand[[profile]]
+
       # Respect both import and export capacity when no optimisation is used
       upper_bound <- opt_data$import_capacity - (L_fixed + L_others)
       lower_bound <- -opt_data$export_capacity - (L_fixed + L_others)
 
-      profile_power_limited <- profiles_demand[[profile]]
       profile_power_limited <- pmin(profile_power_limited, upper_bound)
       profile_power_limited <- pmax(profile_power_limited, lower_bound)
       setpoints[[profile]] <- profile_power_limited

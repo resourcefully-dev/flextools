@@ -735,8 +735,9 @@ get_setpoints <- function(
       setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
     } else if ("import_capacity" %in% colnames(opt_data)) {
       # Other profiles load
-      # Use current setpoints to avoid double-curtailing across profiles
-      L_others <- setpoints %>%
+      # Here we consider `profiles_demand` instead of `setpoint` because we
+      # update it in the scheduling (no optimization, just grid capacity)
+      L_others <- profiles_demand %>%
         select(-any_of(c(profile, "datetime"))) %>%
         rowSums()
       if (length(L_others) == 0) {
@@ -749,9 +750,8 @@ get_setpoints <- function(
           opt_data$import_capacity - (L_fixed + L_others),
           0
         ),
-        setpoints[[profile]]
+        profiles_demand[[profile]]
       )
-
       setpoints[[profile]] <- profile_power_limited
     } else {
       stop(paste(

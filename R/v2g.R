@@ -958,7 +958,7 @@ schedule_sessions_v2g <- function(
         sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
       if (include_log) {
-        if (flex_provided < flex_req) {
+        if (flex_req > 0) {
           log_message <- paste0(
             "\u2716 Not enough flexibility available (",
             flex_provided,

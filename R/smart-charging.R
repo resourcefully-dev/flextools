@@ -737,7 +737,7 @@ get_setpoints <- function(
       # Other profiles load
       # Here we consider `profiles_demand` instead of `setpoint` because we
       # update it in the scheduling (no optimization, just grid capacity)
-      L_others <- profiles_demand %>%
+      L_others <- setpoints %>%
         select(-any_of(c(profile, "datetime"))) %>%
         rowSums()
       if (length(L_others) == 0) {
@@ -748,7 +748,7 @@ get_setpoints <- function(
       profile_power_limited <- pmin(
         pmax(
           opt_data$import_capacity - (L_fixed + L_others),
-          0
+          0 # Not negative power
         ),
         profiles_demand[[profile]]
       )
@@ -1415,26 +1415,12 @@ schedule_sessions <- function(
           flex_provided <- 0
         }
 
-        # # Get the BAU power demand from curtailable sessions
-        # curtailable_sessions_power <- sum(
-        #   sessions_timeslot$PowerTimeslot[sessions_timeslot$Flexible]
-        # )
-
-        # # Power factor that would be required
-        # power_factor <- (curtailable_sessions_power - flex_req) / curtailable_sessions_power
-
-        # # Update the charging power of curtailed sessions
-        # sessions_timeslot$Power[sessions_timeslot$Exploited] <- pmax(
-        #   sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] * power_factor,
-        #   sessions_timeslot$MinPowerTimeslot[sessions_timeslot$Exploited]
-        # )
-
         # Update the charging power of sessions that are NOT curtailed
         sessions_timeslot$Power[!sessions_timeslot$Exploited] <-
           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
         if (include_log) {
-          if (flex_provided < flex_req) {
+          if (flex_req > 0) {
             log_message <- paste0(
               "\u2716 Not enough flexibility available (",
               flex_provided,
@@ -1447,9 +1433,6 @@ schedule_sessions <- function(
             )
           }
         }
-
-        # # Update flexibility requirement
-        # flex_req <- round(flex_req - (curtailable_sessions_power - curtailable_sessions_power * power_factor), 2)
       }
     } else {
       # No flexibility required: charge all sessions

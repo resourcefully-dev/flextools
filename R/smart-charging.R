@@ -61,8 +61,8 @@
 #' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
 #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
 #' @param charging_power_min numeric. It can be configured in two ways:
-#' (1) minimum allowed ratio (between 0 and 1) of nominal power (i.e. `Power` column in `sessions`), or
-#' (2) specific value of minimum power (in kW) higher than 1 kW.
+#' (1) minimum allowed ratio (between 0 and 0.999) of nominal power (i.e. `Power` column in `sessions`), or
+#' (2) specific value of minimum power (in kW) from 1 kW or higher.
 #'
 #' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
 #' be curtailed until the 50% of the nominal charging power.
@@ -1228,7 +1228,7 @@ schedule_sessions <- function(
         stop("`charging_power_min` should be numeric")
       }
 
-      if (charging_power_min <= 1) {
+      if (charging_power_min < 1) {
         charging_power_min_ratio <- charging_power_min
         charging_power_min_kW <- Inf
       } else {

@@ -74,8 +74,8 @@ For example, with \code{power_th = 0.1} and \code{setpoint = 100} for a certain 
 then sessions' demand can reach a value of \code{110} without needing to schedule sessions.}
 
 \item{charging_power_min}{numeric. It can be configured in two ways:
-(1) minimum allowed ratio (between 0 and 1) of nominal power (i.e. \code{Power} column in \code{sessions}), or
-(2) specific value of minimum power (in kW) higher than 1 kW.
+(1) minimum allowed ratio (between 0 and 0.999) of nominal power (i.e. \code{Power} column in \code{sessions}), or
+(2) specific value of minimum power (in kW) from 1 kW or higher.
 
 For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
 be curtailed until the 50\% of the nominal charging power.

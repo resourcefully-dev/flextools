@@ -45,8 +45,8 @@
 #' If columns of `opt_data` are user profiles names, these are used as setpoints
 #' and no optimization is performed for the corresponding user profiles.
 #'
-#' @param opt_objective character, optimization objective being `"none"`, `"grid"`,
-#'  `"cost"` or a value between 0 (cost) and 1 (grid).
+#' @param opt_objective character, optimization objective being `"none"`, `"curtail"`,
+#'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
 #' See details section for more information about the different objectives.
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
 #' If `none`, the scheduling part is skipped and the sessions returned in the
@@ -97,6 +97,10 @@
 #' the flexible load and the amount of imported power from the grid.
 #' If `production` is not found in `opt_data`, only a peak shaving objective
 #' will be considered.
+#'
+#' - Curtail excess (`opt_objective = "curtail"`): only the part of the flexible
+#' load that exceeds grid capacity is optimized (using `production` if available).
+#' The remaining part that fits under the grid capacity is kept fixed.
 #'
 #' - Minimize the energy cost (`opt_objective = "cost"`): minimizes the energy cost.
 #' In this case, the columns
@@ -428,8 +432,8 @@ smart_charging <- function(
 #' @param sessions_window tibble, sessions corresponding to a single windows
 #' @param dttm_seq datetime vector
 #' @param responsive named list with responsive ratios
-#' @param opt_objective character, optimization objective being `"none"`, `"grid"`,
-#'  `"cost"` or a value between 0 (cost) and 1 (grid).
+#' @param opt_objective character, optimization objective being `"none"`, `"curtail"`,
+#'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
 #' @param time_resolution numeric, time resolution in minutes
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
@@ -685,58 +689,87 @@ get_setpoints <- function(
       LS <- L_fixed + L_others + L_fixed_prof
 
       # Optimize the flexible profile's load according to `opt_objective`
-      if (opt_objective == "grid") {
-        O <- minimize_net_power_window(
-          G = opt_data$production[opt_idxs],
-          LF = LF[opt_idxs],
-          LS = LS[opt_idxs],
-          direction = "forward",
-          time_horizon = NULL,
-          LFmax = Inf,
-          import_capacity = opt_data$import_capacity[opt_idxs],
-          export_capacity = opt_data$export_capacity[opt_idxs],
-          lambda = lambda
+      if (opt_objective == "curtail") {
+        # Keep the portion under capacity fixed, and optimize only the excess.
+        capacity_available <- pmax(
+          opt_data$import_capacity + opt_data$production - LS,
+          0
         )
-      } else if (opt_objective == "cost") {
-        O <- minimize_cost_window(
-          G = opt_data$production[opt_idxs],
-          LF = LF[opt_idxs],
-          LS = LS[opt_idxs],
-          PI = opt_data$price_imported[opt_idxs],
-          PE = opt_data$price_exported[opt_idxs],
-          PTU = opt_data$price_turn_up[opt_idxs],
-          PTD = opt_data$price_turn_down[opt_idxs],
-          direction = "forward",
-          time_horizon = NULL,
-          LFmax = Inf,
-          import_capacity = opt_data$import_capacity[opt_idxs],
-          export_capacity = opt_data$export_capacity[opt_idxs],
-          lambda = lambda
-        )
-      } else if (is.numeric(opt_objective)) {
-        O <- optimize_demand_window(
-          G = opt_data$production[opt_idxs],
-          LF = LF[opt_idxs],
-          LS = LS[opt_idxs],
-          PI = opt_data$price_imported[opt_idxs],
-          PE = opt_data$price_exported[opt_idxs],
-          PTU = opt_data$price_turn_up[opt_idxs],
-          PTD = opt_data$price_turn_down[opt_idxs],
-          direction = "forward",
-          time_horizon = NULL,
-          LFmax = Inf,
-          import_capacity = opt_data$import_capacity[opt_idxs],
-          export_capacity = opt_data$export_capacity[opt_idxs],
-          w = opt_objective,
-          lambda = lambda
-        )
-      }
+        LF_fixed <- pmin(LF, capacity_available)
+        LF_excess <- pmax(LF - capacity_available, 0)
 
-      setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
+        if (sum(LF_excess[opt_idxs]) > 0) {
+          O_excess <- minimize_net_power_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF_excess[opt_idxs],
+            LS = (LS + LF_fixed)[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else {
+          O_excess <- rep(0, sum(opt_idxs))
+        }
+
+        setpoints[[profile]][opt_idxs] <-
+          O_excess + LF_fixed[opt_idxs] + L_fixed_prof[opt_idxs]
+      } else {
+        if (opt_objective == "grid") {
+          O <- minimize_net_power_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else if (opt_objective == "cost") {
+          O <- minimize_cost_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
+            PI = opt_data$price_imported[opt_idxs],
+            PE = opt_data$price_exported[opt_idxs],
+            PTU = opt_data$price_turn_up[opt_idxs],
+            PTD = opt_data$price_turn_down[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else if (is.numeric(opt_objective)) {
+          O <- optimize_demand_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
+            PI = opt_data$price_imported[opt_idxs],
+            PE = opt_data$price_exported[opt_idxs],
+            PTU = opt_data$price_turn_up[opt_idxs],
+            PTD = opt_data$price_turn_down[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            w = opt_objective,
+            lambda = lambda
+          )
+        }
+
+        setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
+      }
     } else if ("import_capacity" %in% colnames(opt_data)) {
       # Other profiles load
-      # Here we consider `profiles_demand` instead of `setpoint` because we
-      # update it in the scheduling (no optimization, just grid capacity)
+      # Here we consider `setpoints` instead of `profiles_demand` because we
+      # update it in every iteration (capacity limitation)
       L_others <- setpoints %>%
         select(-any_of(c(profile, "datetime"))) %>%
         rowSums()

@@ -135,6 +135,22 @@ test_that("smart charging works with grid objective and curtail method", {
   )
 })
 
+test_that("smart charging works with curtail objective and preserves profile energy", {
+  sc_results <- smart_charging(
+    sessions,
+    opt_data,
+    opt_objective = "curtail",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 5
+  )
+  expect_type(sc_results, "list")
+  expect_equal(
+    trunc(sum(sc_results$setpoints$Worktime) - sum(sessions_demand$Worktime)),
+    0
+  )
+})
+
 test_that("smart charging works with cost objective, interrupt method, responsiveness, and min energy of 0.5", {
   sc_results <- smart_charging(
     sessions,

@@ -45,7 +45,7 @@
 #' If columns of `opt_data` are user profiles names, these are used as setpoints
 #' and no optimization is performed for the corresponding user profiles.
 #'
-#' @param opt_objective character, optimization objective being `"none"`, `"curtail"`,
+#' @param opt_objective character, optimization objective being `"none"`, `"capacity"`,
 #'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
 #' See details section for more information about the different objectives.
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
@@ -98,7 +98,7 @@
 #' If `production` is not found in `opt_data`, only a peak shaving objective
 #' will be considered.
 #'
-#' - Curtail excess (`opt_objective = "curtail"`): only the part of the flexible
+#' - Capacity cap (`opt_objective = "capacity"`): only the part of the flexible
 #' load that exceeds grid capacity is optimized (using `production` if available).
 #' The remaining part that fits under the grid capacity is kept fixed.
 #'
@@ -432,7 +432,7 @@ smart_charging <- function(
 #' @param sessions_window tibble, sessions corresponding to a single windows
 #' @param dttm_seq datetime vector
 #' @param responsive named list with responsive ratios
-#' @param opt_objective character, optimization objective being `"none"`, `"curtail"`,
+#' @param opt_objective character, optimization objective being `"none"`, `"capacity"`,
 #'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
 #' @param time_resolution numeric, time resolution in minutes
 #'
@@ -688,35 +688,8 @@ get_setpoints <- function(
       }
       LS <- L_fixed + L_others + L_fixed_prof
 
-      # Optimize the flexible profile's load according to `opt_objective`
-      if (opt_objective == "curtail") {
-        # Keep the portion under capacity fixed, and optimize only the excess.
-        capacity_available <- pmax(
-          opt_data$import_capacity + opt_data$production - LS,
-          0
-        )
-        LF_fixed <- pmin(LF, capacity_available)
-        LF_excess <- pmax(LF - capacity_available, 0)
-
-        if (sum(LF_excess[opt_idxs]) > 0) {
-          O_excess <- minimize_net_power_window(
-            G = opt_data$production[opt_idxs],
-            LF = LF_excess[opt_idxs],
-            LS = (LS + LF_fixed)[opt_idxs],
-            direction = "forward",
-            time_horizon = NULL,
-            LFmax = Inf,
-            import_capacity = opt_data$import_capacity[opt_idxs],
-            export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
-          )
-        } else {
-          O_excess <- rep(0, sum(opt_idxs))
-        }
-
-        setpoints[[profile]][opt_idxs] <-
-          O_excess + LF_fixed[opt_idxs] + L_fixed_prof[opt_idxs]
-      } else {
+      if (opt_objective != "none") {
+        # Optimize the flexible profile's load according to `opt_objective`
         if (opt_objective == "grid") {
           O <- minimize_net_power_window(
             G = opt_data$production[opt_idxs],
@@ -762,6 +735,31 @@ get_setpoints <- function(
             w = opt_objective,
             lambda = lambda
           )
+        } else if (opt_objective == "capacity") {
+          # Keep the portion under capacity fixed, and optimize only the excess.
+          capacity_available <- pmax(
+            opt_data$import_capacity + opt_data$production - LS,
+            0
+          )
+          LF_fixed <- pmin(LF, capacity_available)
+          LF_excess <- pmax(LF - capacity_available, 0)
+          L_fixed_prof <- L_fixed_prof + LF_fixed # For later add it to `O`
+
+          if (sum(LF_excess[opt_idxs]) > 0) {
+            O <- minimize_net_power_window(
+              G = opt_data$production[opt_idxs],
+              LF = LF_excess[opt_idxs],
+              LS = (LS + LF_fixed)[opt_idxs],
+              direction = "forward",
+              time_horizon = NULL,
+              LFmax = Inf,
+              import_capacity = opt_data$import_capacity[opt_idxs],
+              export_capacity = opt_data$export_capacity[opt_idxs],
+              lambda = lambda
+            )
+          } else {
+            O <- rep(0, sum(opt_idxs))
+          }
         }
 
         setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]

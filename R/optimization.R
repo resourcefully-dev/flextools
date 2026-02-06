@@ -12,7 +12,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
   }
   if (
     !("production" %in% names(opt_data)) &
-      (opt_objective %in% c("grid", "curtail"))
+      (opt_objective %in% c("grid", "capacity"))
   ) {
     warning(
       "`production` variable not found in `opt_data`. No local energy production will be considered."
@@ -42,7 +42,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
   }
 
   if (
-    !(opt_objective %in% c("grid", "cost", "none", "curtail")) &&
+    !(opt_objective %in% c("grid", "cost", "none", "capacity")) &&
       !is.numeric(opt_objective)
   ) {
     stop("Error: `opt_objective` not valid")

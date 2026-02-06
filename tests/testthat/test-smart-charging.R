@@ -135,11 +135,11 @@ test_that("smart charging works with grid objective and curtail method", {
   )
 })
 
-test_that("smart charging works with curtail objective and preserves profile energy", {
+test_that("smart charging works with capacity objective and preserves profile energy", {
   sc_results <- smart_charging(
     sessions,
     opt_data,
-    opt_objective = "curtail",
+    opt_objective = "capacity",
     method = "curtail",
     window_days = 1,
     window_start_hour = 5

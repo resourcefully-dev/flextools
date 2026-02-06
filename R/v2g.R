@@ -357,6 +357,8 @@ get_setpoints_v2g <- function(
           export_capacity = opt_data$export_capacity[opt_idxs],
           lambda = lambda
         )
+      } else if (opt_objective %in% c("capacity", "curtail")) {
+        stop("Error: `opt_objective` 'capacity'/'curtail' is not supported for V2G yet.")
       }
 
       setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]

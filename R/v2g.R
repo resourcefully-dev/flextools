@@ -315,7 +315,32 @@ get_setpoints_v2g <- function(
       }
       LS <- L_fixed + L_others + L_fixed_prof
 
-      if (opt_objective == "grid") {
+      if (opt_objective == "capacity") {
+        # Keep the portion under capacity fixed, and optimize only the excess.
+        capacity_available <- pmax(
+          opt_data$import_capacity + opt_data$production - LS,
+          0
+        )
+        LF_fixed <- pmin(LF, capacity_available)
+        LF_excess <- pmax(LF - capacity_available, 0)
+        L_fixed_prof <- L_fixed_prof + LF_fixed # For later add it to `O`
+
+        if (sum(LF_excess[opt_idxs]) > 0) {
+          O <- minimize_net_power_v2g_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF_excess[opt_idxs],
+            LS = (LS + LF_fixed)[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else {
+          O <- rep(0, sum(opt_idxs))
+        }
+      } else if (opt_objective == "grid") {
         O <- minimize_net_power_v2g_window(
           G = opt_data$production[opt_idxs],
           LF = LF[opt_idxs],
@@ -357,13 +382,13 @@ get_setpoints_v2g <- function(
           export_capacity = opt_data$export_capacity[opt_idxs],
           lambda = lambda
         )
-      } else if (opt_objective %in% c("capacity", "curtail")) {
-        stop("Error: `opt_objective` 'capacity'/'curtail' is not supported for V2G yet.")
+      } else {
+        stop("Error: `opt_objective` not valid")
       }
 
       setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
     } else if ("import_capacity" %in% colnames(opt_data)) {
-      L_others <- profiles_demand %>%
+      L_others <- setpoints %>%
         dplyr::select(-any_of(c(profile, "datetime"))) %>%
         rowSums()
       if (length(L_others) == 0) {

@@ -735,30 +735,42 @@ get_setpoints <- function(
             lambda = lambda
           )
         } else if (opt_objective == "capacity") {
-          # Keep the portion under capacity fixed, and optimize only the excess.
+          # The capacity available also considers production
           capacity_available <- pmax(
             opt_data$import_capacity + opt_data$production - LS,
             0
           )
-          LF_fixed <- pmin(LF, capacity_available)
-          LF_excess <- pmax(LF - capacity_available, 0)
-          L_fixed_prof <- L_fixed_prof + LF_fixed # For later add it to `O`
+          # LF_fixed <- pmin(LF, capacity_available)
+          # LF_excess <- pmax(LF - capacity_available, 0)
+          # L_fixed_prof <- L_fixed_prof + LF_fixed # For later add it to `O`
 
           if (sum(LF_excess[opt_idxs]) > 0) {
-            O <- minimize_net_power_window(
-              G = opt_data$production[opt_idxs],
-              LF = LF_excess[opt_idxs],
-              LS = (LS + LF_fixed)[opt_idxs],
-              direction = "forward",
-              time_horizon = NULL,
-              LFmax = Inf,
-              import_capacity = opt_data$import_capacity[opt_idxs],
-              export_capacity = opt_data$export_capacity[opt_idxs],
-              lambda = lambda
+            # Capacity available should consider the same energy than LF to
+            # avoid pushing the demand to the end of the window
+            # In case of capacity limitation, we increase the
+            # capacity available by a factor
+            inc_capacity_factor <- max(
+              sum(LF[opt_idxs]) / sum(capacity_available[opt_idxs]),
+              1
             )
+            O <- capacity_available[opt_idxs] * inc_capacity_factor
+
+            # O <- minimize_net_power_window(
+            #   G = opt_data$production[opt_idxs],
+            #   LF = LF_excess[opt_idxs],
+            #   LS = (LS + LF_fixed)[opt_idxs],
+            #   direction = "forward",
+            #   time_horizon = NULL,
+            #   LFmax = Inf,
+            #   import_capacity = opt_data$import_capacity[opt_idxs],
+            #   export_capacity = opt_data$export_capacity[opt_idxs],
+            #   lambda = lambda
+            # )
           } else {
             O <- rep(0, sum(opt_idxs))
           }
+        } else {
+          stop("Error: `opt_objective` not valid")
         }
 
         setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
@@ -777,7 +789,7 @@ get_setpoints <- function(
       # Limit power profile up to total grid capacity
       profile_power_limited <- pmin(
         pmax(
-          opt_data$import_capacity - (L_fixed + L_others),
+          opt_data$import_capacity + opt_data$production - (L_fixed + L_others),
           0 # Not negative power
         ),
         profiles_demand[[profile]]

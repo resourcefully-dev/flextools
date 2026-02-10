@@ -266,8 +266,7 @@ get_setpoints_v2g <- function(
   }
 
   opt_profiles <- get_opt_profiles(sessions_window)
-  setpoints <- profiles_demand %>%
-    dplyr::select(any_of(c("datetime", opt_profiles)))
+  setpoints <- profiles_demand
 
   for (profile in opt_profiles) {
     if (profile %in% colnames(opt_data)) {
@@ -315,32 +314,7 @@ get_setpoints_v2g <- function(
       }
       LS <- L_fixed + L_others + L_fixed_prof
 
-      if (opt_objective == "capacity") {
-        # Keep the portion under capacity fixed, and optimize only the excess.
-        capacity_available <- pmax(
-          opt_data$import_capacity + opt_data$production - LS,
-          0
-        )
-        LF_fixed <- pmin(LF, capacity_available)
-        LF_excess <- pmax(LF - capacity_available, 0)
-        L_fixed_prof <- L_fixed_prof + LF_fixed # For later add it to `O`
-
-        if (sum(LF_excess[opt_idxs]) > 0) {
-          O <- minimize_net_power_v2g_window(
-            G = opt_data$production[opt_idxs],
-            LF = LF_excess[opt_idxs],
-            LS = (LS + LF_fixed)[opt_idxs],
-            direction = "forward",
-            time_horizon = NULL,
-            LFmax = Inf,
-            import_capacity = opt_data$import_capacity[opt_idxs],
-            export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
-          )
-        } else {
-          O <- rep(0, sum(opt_idxs))
-        }
-      } else if (opt_objective == "grid") {
+      if (opt_objective == "grid") {
         O <- minimize_net_power_v2g_window(
           G = opt_data$production[opt_idxs],
           LF = LF[opt_idxs],
@@ -382,6 +356,32 @@ get_setpoints_v2g <- function(
           export_capacity = opt_data$export_capacity[opt_idxs],
           lambda = lambda
         )
+      } else if (opt_objective == "capacity") {
+        # Keep the portion under capacity fixed, and optimize only the excess.
+        # In V2G we allow negative values until export capacity
+        capacity_available <- pmax(
+          opt_data$import_capacity + opt_data$production - LS,
+          -opt_data$export_capacity
+        )
+        LF_fixed <- pmin(LF, capacity_available) # Can be negative, if required
+        LF_excess <- pmax(LF - capacity_available, 0)
+        L_fixed_prof <- L_fixed_prof + LF_fixed # For later add it to `O`
+
+        if (sum(LF_excess[opt_idxs]) > 0) {
+          O <- minimize_net_power_v2g_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF_excess[opt_idxs],
+            LS = (LS + LF_fixed)[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else {
+          O <- rep(0, sum(opt_idxs))
+        }
       } else {
         stop("Error: `opt_objective` not valid")
       }
@@ -396,8 +396,12 @@ get_setpoints_v2g <- function(
       }
 
       # Respect both import and export capacity when no optimisation is used
-      upper_bound <- opt_data$import_capacity - (L_fixed + L_others)
-      lower_bound <- -opt_data$export_capacity - (L_fixed + L_others)
+      upper_bound <- opt_data$import_capacity +
+        opt_data$production -
+        (L_fixed + L_others)
+      lower_bound <- -opt_data$export_capacity +
+        opt_data$production -
+        (L_fixed + L_others)
 
       profile_power_limited <- profiles_demand[[profile]]
       profile_power_limited <- pmin(profile_power_limited, upper_bound)

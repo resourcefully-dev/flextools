@@ -52,9 +52,9 @@ If columns of \code{opt_data} are user profiles names, these are used as setpoin
 and no optimization is performed for the corresponding user profiles.}
 
 \item{opt_objective}{character, optimisation objective being
-\code{"none"}, \code{"grid"}, \code{"cost"} or a value between 0 (cost)
-and 1 (grid). Only the \code{"grid"} mode is currently supported
-by the V2G prototype.}
+\code{"none"}, \code{"capacity"}, \code{"grid"}, \code{"cost"} or a value between
+0 (cost) and 1 (grid). Only the \code{"grid"}/\code{"capacity"} modes are
+currently supported by the V2G prototype (cost/combined reuse grid).}
 
 \item{window_days}{integer, number of days to consider as optimization window.}
 

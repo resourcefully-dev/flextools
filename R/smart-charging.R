@@ -629,8 +629,7 @@ get_setpoints <- function(
   }
 
   opt_profiles <- get_opt_profiles(sessions_window)
-  setpoints <- profiles_demand %>%
-    select(any_of(c("datetime", opt_profiles)))
+  setpoints <- profiles_demand
 
   for (profile in opt_profiles) {
     # If `opt_data` contains user profile's name,

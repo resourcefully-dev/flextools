@@ -271,7 +271,7 @@ get_setpoints_v2g <- function(
   for (profile in opt_profiles) {
     if (profile %in% colnames(opt_data)) {
       setpoints[[profile]] <- opt_data[[profile]]
-    } else if (opt_objective != "none") {
+    } else {
       sessions_window_prof_flex <- sessions_window %>%
         dplyr::filter(.data$Profile == profile & .data$Responsive)
 
@@ -289,23 +289,12 @@ get_setpoints_v2g <- function(
         L_fixed_prof <- rep(0, length(dttm_seq))
       }
 
-      sessions_window_prof_flex$ConnectionEndDateTime[
-        (sessions_window_prof_flex$ConnectionEndDateTime >=
-          dttm_seq[length(dttm_seq)])
-      ] <- dttm_seq[length(dttm_seq)]
-
-      window_prof_dttm <- c(
-        min(sessions_window_prof_flex$ConnectionStartDateTime),
-        min(
-          max(sessions_window_prof_flex$ConnectionEndDateTime),
-          dttm_seq[length(dttm_seq)]
-        )
-      )
-      opt_idxs <- (dttm_seq >= window_prof_dttm[1]) &
-        (dttm_seq <= window_prof_dttm[2])
-
+      # The optimization flexible load is the load of the responsive sessions
       LF <- setpoints[[profile]] - L_fixed_prof
 
+      # Static load
+      # Here we consider `setpoints` instead of `profiles_demand` because we
+      # update it in every iteration (optimization)
       L_others <- setpoints %>%
         dplyr::select(-any_of(c(profile, "datetime"))) %>%
         rowSums()
@@ -314,64 +303,57 @@ get_setpoints_v2g <- function(
       }
       LS <- L_fixed + L_others + L_fixed_prof
 
-      if (opt_objective == "grid") {
-        O <- minimize_net_power_v2g_window(
-          G = opt_data$production[opt_idxs],
-          LF = LF[opt_idxs],
-          LS = LS[opt_idxs],
-          direction = "forward",
-          time_horizon = NULL,
-          LFmax = Inf,
-          import_capacity = opt_data$import_capacity[opt_idxs],
-          export_capacity = opt_data$export_capacity[opt_idxs],
-          lambda = lambda
-        )
-      } else if (opt_objective == "cost") {
-        message(
-          "Cost-based optimisation is not yet implemented for V2G; reusing grid objective."
-        )
-        O <- minimize_net_power_v2g_window(
-          G = opt_data$production[opt_idxs],
-          LF = LF[opt_idxs],
-          LS = LS[opt_idxs],
-          direction = "forward",
-          time_horizon = NULL,
-          LFmax = Inf,
-          import_capacity = opt_data$import_capacity[opt_idxs],
-          export_capacity = opt_data$export_capacity[opt_idxs],
-          lambda = lambda
-        )
-      } else if (is.numeric(opt_objective)) {
-        message(
-          "Combined optimisation is not yet implemented for V2G; reusing grid objective."
-        )
-        O <- minimize_net_power_v2g_window(
-          G = opt_data$production[opt_idxs],
-          LF = LF[opt_idxs],
-          LS = LS[opt_idxs],
-          direction = "forward",
-          time_horizon = NULL,
-          LFmax = Inf,
-          import_capacity = opt_data$import_capacity[opt_idxs],
-          export_capacity = opt_data$export_capacity[opt_idxs],
-          lambda = lambda
-        )
-      } else if (opt_objective == "capacity") {
-        # Keep the portion under capacity fixed, and optimize only the excess.
-        # In V2G we allow negative values until export capacity
-        capacity_available <- pmax(
-          opt_data$import_capacity + opt_data$production - LS,
-          -opt_data$export_capacity
-        )
-        LF_fixed <- pmin(LF, capacity_available) # Can be negative, if required
-        LF_excess <- pmax(LF - capacity_available, 0)
-        L_fixed_prof <- L_fixed_prof + LF_fixed # For later add it to `O`
+      # sessions_window_prof_flex$ConnectionEndDateTime[
+      #   (sessions_window_prof_flex$ConnectionEndDateTime >=
+      #     dttm_seq[length(dttm_seq)])
+      # ] <- dttm_seq[length(dttm_seq)]
 
-        if (sum(LF_excess[opt_idxs]) > 0) {
+      if (opt_objective != "none") {
+        window_prof_dttm <- c(
+          min(sessions_window_prof_flex$ConnectionStartDateTime),
+          min(
+            max(sessions_window_prof_flex$ConnectionEndDateTime),
+            dttm_seq[length(dttm_seq)]
+          )
+        )
+        opt_idxs <- (dttm_seq >= window_prof_dttm[1]) &
+          (dttm_seq <= window_prof_dttm[2])
+
+        if (opt_objective == "grid") {
           O <- minimize_net_power_v2g_window(
             G = opt_data$production[opt_idxs],
-            LF = LF_excess[opt_idxs],
-            LS = (LS + LF_fixed)[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else if (opt_objective == "cost") {
+          message(
+            "Cost-based optimisation is not yet implemented for V2G; reusing grid objective."
+          )
+          O <- minimize_net_power_v2g_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else if (is.numeric(opt_objective)) {
+          message(
+            "Combined optimisation is not yet implemented for V2G; reusing grid objective."
+          )
+          O <- minimize_net_power_v2g_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
             LFmax = Inf,
@@ -380,38 +362,38 @@ get_setpoints_v2g <- function(
             lambda = lambda
           )
         } else {
-          O <- rep(0, sum(opt_idxs))
+          stop("Error: `opt_objective` not valid")
         }
+
+        setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
+      } else if ("import_capacity" %in% colnames(opt_data)) {
+        # Calculate available capacity for this profile
+        capacity_available <- pmax(
+          opt_data$import_capacity +
+            opt_data$production -
+            (opt_data$static + L_others),
+          -opt_data$export_capacity # Allow negative power
+        )
+
+        # # Capacity available should allow the same energy than LF to
+        # # avoid pushing the demand to the end of the window.
+        # # In case of capacity limitation, we increase the
+        # # capacity available by a factor
+        # inc_capacity_factor <- max(
+        #   sum(profiles_demand[[profile]]) / sum(capacity_available),
+        #   1
+        # )
+        # setpoints[[profile]] <- capacity_available *
+        #   inc_capacity_factor
+
+        setpoints[[profile]] <- capacity_available
       } else {
-        stop("Error: `opt_objective` not valid")
+        stop(paste(
+          "Error: `opt_objective` is 'none' but no setpoint or grid capacity
+            is configured in `opt_data` for Profile",
+          profile
+        ))
       }
-
-      setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
-    } else if ("import_capacity" %in% colnames(opt_data)) {
-      L_others <- setpoints %>%
-        dplyr::select(-any_of(c(profile, "datetime"))) %>%
-        rowSums()
-      if (length(L_others) == 0) {
-        L_others <- rep(0, length(dttm_seq))
-      }
-
-      # Respect both import and export capacity when no optimisation is used
-      upper_bound <- opt_data$import_capacity +
-        opt_data$production -
-        (L_fixed + L_others)
-      lower_bound <- -opt_data$export_capacity +
-        opt_data$production -
-        (L_fixed + L_others)
-
-      profile_power_limited <- profiles_demand[[profile]]
-      profile_power_limited <- pmin(profile_power_limited, upper_bound)
-      profile_power_limited <- pmax(profile_power_limited, lower_bound)
-      setpoints[[profile]] <- profile_power_limited
-    } else {
-      stop(paste(
-        "Error: `opt_objective` is 'none' but no setpoint configured in `opt_data` for Profile",
-        profile
-      ))
     }
   }
 

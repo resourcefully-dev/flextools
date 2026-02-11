@@ -19,7 +19,7 @@ set_responsive(
 
 \item{responsive}{named list with responsive ratios}
 
-\item{opt_objective}{character, optimization objective being \code{"none"}, \code{"capacity"},
+\item{opt_objective}{character, optimization objective being \code{"none"},
 \code{"grid"}, \code{"cost"} or a value between 0 (cost) and 1 (grid).}
 
 \item{time_resolution}{numeric, time resolution in minutes}

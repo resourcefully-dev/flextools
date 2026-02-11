@@ -135,21 +135,6 @@ test_that("smart charging works with grid objective and curtail method", {
   )
 })
 
-test_that("smart charging works with capacity objective and preserves profile energy", {
-  sc_results <- smart_charging(
-    sessions,
-    opt_data,
-    opt_objective = "capacity",
-    method = "curtail",
-    window_days = 1,
-    window_start_hour = 5
-  )
-  expect_type(sc_results, "list")
-  expect_equal(
-    trunc(sum(sc_results$setpoints$Worktime) - sum(sessions_demand$Worktime)),
-    0
-  )
-})
 
 test_that("smart charging works with cost objective, interrupt method, responsiveness, and min energy of 0.5", {
   sc_results <- smart_charging(
@@ -192,13 +177,28 @@ test_that("smart charging works without optimization, curtail method and min cha
     window_start_hour = 6,
     responsive = list(Workday = list(Worktime = 0.9)),
     charging_power_min = 2,
-    include_log = T,
-    show_progress = T
+    include_log = TRUE,
+    show_progress = TRUE
   )
   expect_true(
     length(sc_results$log[[1]]) > 0
   )
   expect_type(sc_results, "list")
+})
+
+test_that("smart charging works without optimization but grid capacity limit and curtail method", {
+  opt_data$grid_capacity <- 50
+  sc_results <- smart_charging(
+    sessions,
+    opt_data,
+    opt_objective = "none",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 0,
+    responsive = list(Workday = list(Worktime = 1))
+  )
+  flex_demand <- round(rowSums(sc_results$demand[-1]))
+  expect_true(all(flex_demand <= opt_data$grid_capacity))
 })
 
 test_that("using responsiveness for specific user profiles", {

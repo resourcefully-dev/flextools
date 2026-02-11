@@ -9,10 +9,6 @@
 #' untouched.
 #'
 #' @inheritParams smart_charging
-#' @param opt_objective character, optimisation objective being
-#'   `"none"`, `"capacity"`, `"grid"`, `"cost"` or a value between
-#'   0 (cost) and 1 (grid). Only the `"grid"`/`"capacity"` modes are
-#'   currently supported by the V2G prototype (cost/combined reuse grid).
 #'
 #' @return list with setpoints, sessions and demand similar to
 #'   `smart_charging()`. Scheduling is still charging-only while

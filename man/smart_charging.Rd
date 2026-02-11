@@ -52,7 +52,7 @@ This is used when \code{opt_objective = "cost"}.
 If columns of \code{opt_data} are user profiles names, these are used as setpoints
 and no optimization is performed for the corresponding user profiles.}
 
-\item{opt_objective}{character, optimization objective being \code{"none"}, \code{"capacity"},
+\item{opt_objective}{character, optimization objective being \code{"none"},
 \code{"grid"}, \code{"cost"} or a value between 0 (cost) and 1 (grid).
 See details section for more information about the different objectives.}
 
@@ -112,9 +112,6 @@ There are three different optimization objectives implemented by this function:
 the flexible load and the amount of imported power from the grid.
 If \code{production} is not found in \code{opt_data}, only a peak shaving objective
 will be considered.
-\item Capacity cap (\code{opt_objective = "capacity"}): only the part of the flexible
-load that exceeds grid capacity is optimized (using \code{production} if available).
-The remaining part that fits under the grid capacity is kept fixed.
 \item Minimize the energy cost (\code{opt_objective = "cost"}): minimizes the energy cost.
 In this case, the columns
 \code{grid_capacity}, \code{price_imported}, \code{price_exported},
@@ -126,8 +123,9 @@ If these variables are not configured, default values of \code{grid_capacity = I
 the net power peaks and energy cost.
 \item No optimization (\code{opt_objective = "none"}): this will skip optimization and
 at least one user profile name must be in an \code{opt_data} column to be
-considered as a setpoint for the scheduling algorithm. The user profiles that
-don't appear in \code{opt_data} will not be optimized.
+considered as a setpoint for the scheduling algorithm, or a grid capacity variable
+such as \code{grid_capacity}, \code{import_capacity}or \code{export_capacity}.
+The user profiles that don't appear in \code{opt_data} will not be optimized.
 }
 }
 \examples{

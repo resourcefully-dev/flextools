@@ -45,7 +45,7 @@
 #' If columns of `opt_data` are user profiles names, these are used as setpoints
 #' and no optimization is performed for the corresponding user profiles.
 #'
-#' @param opt_objective character, optimization objective being `"none"`, `"capacity"`,
+#' @param opt_objective character, optimization objective being `"none"`,
 #'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
 #' See details section for more information about the different objectives.
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
@@ -98,10 +98,6 @@
 #' If `production` is not found in `opt_data`, only a peak shaving objective
 #' will be considered.
 #'
-#' - Capacity cap (`opt_objective = "capacity"`): only the part of the flexible
-#' load that exceeds grid capacity is optimized (using `production` if available).
-#' The remaining part that fits under the grid capacity is kept fixed.
-#'
 #' - Minimize the energy cost (`opt_objective = "cost"`): minimizes the energy cost.
 #' In this case, the columns
 #' `grid_capacity`, `price_imported`, `price_exported`,
@@ -115,8 +111,9 @@
 #'
 #' - No optimization (`opt_objective = "none"`): this will skip optimization and
 #' at least one user profile name must be in an `opt_data` column to be
-#' considered as a setpoint for the scheduling algorithm. The user profiles that
-#' don't appear in `opt_data` will not be optimized.
+#' considered as a setpoint for the scheduling algorithm, or a grid capacity variable
+#' such as `grid_capacity`, `import_capacity`or `export_capacity`.
+#' The user profiles that don't appear in `opt_data` will not be optimized.
 #'
 #' @examples
 #' # Example: we will use the example data set of charging sessions
@@ -432,7 +429,7 @@ smart_charging <- function(
 #' @param sessions_window tibble, sessions corresponding to a single windows
 #' @param dttm_seq datetime vector
 #' @param responsive named list with responsive ratios
-#' @param opt_objective character, optimization objective being `"none"`, `"capacity"`,
+#' @param opt_objective character, optimization objective being `"none"`,
 #'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
 #' @param time_resolution numeric, time resolution in minutes
 #'

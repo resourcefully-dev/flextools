@@ -39,7 +39,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
   }
 
   if (
-    !(opt_objective %in% c("grid", "cost", "none")) &&
+    !(opt_objective %in% c("grid", "cost", "none", "capacity")) &&
       !is.numeric(opt_objective)
   ) {
     stop("Error: `opt_objective` not valid")
@@ -891,7 +891,7 @@ optimize_demand_window <- function(
 #' This is used when `opt_objective = "cost"`.
 #'
 #' @param opt_objective character or numeric.
-#' Optimization objective can be `"grid"` (default), `"cost"` or `"curtail"`, or
+#' Optimization objective can be `"grid"` (default), `"cost"` or `"capacity"`, or
 #' a number between `0` and `1` to perform combined optimization
 #' where `0 == "cost"` and `1 == "grid"`.
 #' @param Bcap numeric, capacity of the battery (in kWh)
@@ -1038,7 +1038,7 @@ add_battery_optimization <- function(
         discharge_eff = discharge_eff
       )
     )
-  } else if (opt_objective == "curtail") {
+  } else if (opt_objective == "capacity") {
     B_windows <- map(
       windows_data,
       ~ curtail_capacity_window_battery(

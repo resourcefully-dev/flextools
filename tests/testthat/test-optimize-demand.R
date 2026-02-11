@@ -272,7 +272,7 @@ test_that("battery optimization works with constrained import capacity", {
 })
 
 
-test_that("battery optimization works with constrained import capacity and 'curtail' objective", {
+test_that("battery optimization works with constrained import capacity and 'capacity' objective", {
   opt_data_batt <- opt_data %>%
     select(datetime, production, static = building) %>%
     mutate(
@@ -286,7 +286,7 @@ test_that("battery optimization works with constrained import capacity and 'curt
 
   opt_battery_vct <- opt_data_batt %>%
     add_battery_optimization(
-      opt_objective = "curtail",
+      opt_objective = "capacity",
       Bcap = 5000,
       Bc = 500,
       Bd = 500,

@@ -46,7 +46,7 @@ This is used when \code{opt_objective = "cost"}.
 }}
 
 \item{opt_objective}{character or numeric.
-Optimization objective can be \code{"grid"} (default), \code{"cost"} or \code{"curtail"}, or
+Optimization objective can be \code{"grid"} (default), \code{"cost"} or \code{"capacity"}, or
 a number between \code{0} and \code{1} to perform combined optimization
 where \code{0 == "cost"} and \code{1 == "grid"}.}
 

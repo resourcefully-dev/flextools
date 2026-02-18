@@ -870,36 +870,40 @@ smart_charging_window <- function(
     ))
   }
 
-  sessions_considered <- tibble()
-  opt_profiles <- get_opt_profiles(sessions_window)
+  window_profiles <- unique(sessions_window$Profile)
 
-  for (profile in opt_profiles) {
-    # Select only RESPONSIVE sessions
-    sessions_window_prof_flex <- sessions_window %>%
-      filter(.data$Profile == profile & .data$Responsive)
+  sessions_window_flex <- sessions_window %>%
+    filter(.data$Responsive)
 
-    # Profile sessions that can't provide flexibility are not part of the setpoint
-    # Select now NON-RESPONSIVE sessions
-    non_responsive_sessions <- sessions_window %>%
-      filter(
-        .data$Profile == profile & (!.data$Responsive | is.na(.data$Responsive))
-      )
+  non_responsive_sessions <- sessions_window %>%
+    filter(!.data$Responsive | is.na(.data$Responsive))
 
-    if (nrow(non_responsive_sessions) > 0) {
-      L_fixed_prof <- non_responsive_sessions %>%
-        get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
-        pull(!!sym(profile))
-    } else {
-      L_fixed_prof <- rep(0, nrow(setpoints))
-    }
+  if (nrow(non_responsive_sessions) > 0) {
+    L_fixed_total <- non_responsive_sessions %>%
+      get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
+      select(-"datetime") %>%
+      rowSums()
+  } else {
+    L_fixed_total <- rep(0, length(dttm_seq))
+  }
 
-    setpoint_prof <- tibble(
-      datetime = dttm_seq,
-      setpoint = setpoints[[profile]] - L_fixed_prof
-    )
+  setpoint_total <- setpoints %>%
+    select(any_of(window_profiles)) %>%
+    rowSums()
+  if (length(setpoint_total) == 0) {
+    setpoint_total <- rep(0, length(dttm_seq))
+  }
+
+  setpoint_flex <- tibble(
+    datetime = dttm_seq,
+    setpoint = setpoint_total - L_fixed_total
+  )
+
+  results_log <- character(0)
+  if (nrow(sessions_window_flex) > 0) {
     results <- schedule_sessions(
-      sessions = sessions_window_prof_flex,
-      setpoint = setpoint_prof,
+      sessions = sessions_window_flex,
+      setpoint = setpoint_flex,
       method = method,
       power_th = power_th,
       charging_power_min = charging_power_min,
@@ -907,30 +911,31 @@ smart_charging_window <- function(
       include_log = include_log,
       show_progress = FALSE
     )
+    sessions_window_flex_final <- results$sessions
+    results_log <- results$log
+  } else {
+    sessions_window_flex_final <- tibble()
+  }
 
-    # Final profile sessions
-    sessions_window_prof_final <- bind_rows(
-      results$sessions,
-      non_responsive_sessions
+  sessions_window_final <- bind_rows(
+    sessions_window_flex_final,
+    non_responsive_sessions
+  )
+
+  if (nrow(sessions_window_final) > 0) {
+    sessions_window_final_demand <- get_demand(
+      sessions_window_final,
+      dttm_seq = dttm_seq,
+      by = "Profile"
     )
+    profile_cols <- intersect(window_profiles, names(profiles_demand))
+    profiles_demand[profile_cols] <- sessions_window_final_demand[profile_cols]
+  }
 
-    # Update the time-series demand
-    sessions_window_prof_final_demand <- get_demand(
-      sessions_window_prof_final,
-      dttm_seq = dttm_seq
-    )
-    profiles_demand[[profile]] <-
-      sessions_window_prof_final_demand[[profile]]
+  sessions_considered <- sessions_window_final
 
-    # Join with the rest of data set
-    sessions_considered <- bind_rows(
-      sessions_considered,
-      sessions_window_prof_final
-    )
-
-    if (include_log) {
-      log[[log_window_name]][[profile]] <- results$log
-    }
+  if (include_log) {
+    log[[log_window_name]][["all"]] <- results_log
   }
 
   list(

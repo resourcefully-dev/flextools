@@ -92,8 +92,8 @@ And if \code{charging_power_min = 2}, sessions' charging power can be curtailed 
 \value{
 a list with three elements:
 optimal setpoints (tibble), sessions schedule (tibble) and log messages
-(list with character strings). The date-time values in the log list are in
-the time zone of the \code{opt_data}.
+(list of character vectors, one per window). The date-time values in the log
+list are in the time zone of the \code{opt_data}.
 }
 \description{
 This function provides a framework to simulate different smart charging methods

@@ -13,7 +13,7 @@ view_smart_charging_logs(smart_charging)
 Opens Viewer with the log viewer mini app
 }
 \description{
-Launches an interactive Shiny app to explore smart charging logs by window and profile.
+Launches an interactive Shiny app to explore smart charging logs by window.
 This function requires the \code{shiny} package to be installed.
 }
 \examples{

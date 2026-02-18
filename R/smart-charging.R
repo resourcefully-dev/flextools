@@ -83,8 +83,8 @@
 #'
 #' @return a list with three elements:
 #' optimal setpoints (tibble), sessions schedule (tibble) and log messages
-#' (list with character strings). The date-time values in the log list are in
-#' the time zone of the `opt_data`.
+#' (list of character vectors, one per window). The date-time values in the log
+#' list are in the time zone of the `opt_data`.
 #' @export
 #'
 #' @details
@@ -859,7 +859,7 @@ smart_charging_window <- function(
   dttm_seq <- setpoints$datetime
   log <- list()
   log_window_name <- as.character(date(dttm_seq[1]))
-  log[[log_window_name]] <- list() # In the `log` object even though `include_log = FALSE`
+  log[[log_window_name]] <- character(0) # In the `log` object even though `include_log = FALSE`
 
   if (nrow(sessions_window) == 0) {
     return(list(
@@ -935,7 +935,7 @@ smart_charging_window <- function(
   sessions_considered <- sessions_window_final
 
   if (include_log) {
-    log[[log_window_name]][["all"]] <- results_log
+    log[[log_window_name]] <- results_log
   }
 
   list(
@@ -1984,7 +1984,7 @@ plot.SmartCharging <- function(x, ...) {
 
 #' Interactive Log Viewer
 #'
-#' Launches an interactive Shiny app to explore smart charging logs by window and profile.
+#' Launches an interactive Shiny app to explore smart charging logs by window.
 #' This function requires the `shiny` package to be installed.
 #'
 #' @param smart_charging `SmartCharging` object returned by `smart_charging`  function
@@ -2037,8 +2037,7 @@ view_smart_charging_logs <- function(smart_charging) {
           "selected_window",
           "Select Window",
           choices = names(log)
-        ),
-        shiny::uiOutput("profile_selector") # Dynamically generated profile list
+        )
       ),
       shiny::mainPanel(
         shiny::verbatimTextOutput("log_output")
@@ -2047,26 +2046,12 @@ view_smart_charging_logs <- function(smart_charging) {
   )
 
   server <- function(input, output, session) {
-    # Update profile list based on selected window
-    output$profile_selector <- shiny::renderUI({
-      shiny::req(input$selected_window)
-      profiles <- names(log[[input$selected_window]])
-      if (is.null(profiles)) {
-        return("No logs for this window.")
-      }
-      shiny::selectInput(
-        "selected_profile",
-        "Select Profile",
-        choices = profiles
-      )
-    })
-
-    # Show logs based on both selections
+    # Show logs based on window selection
     output$log_output <- shiny::renderText({
-      shiny::req(input$selected_window, input$selected_profile)
-      msgs <- log[[input$selected_window]][[input$selected_profile]]
-      if (is.null(msgs)) {
-        return("No logs for this profile.")
+      shiny::req(input$selected_window)
+      msgs <- log[[input$selected_window]]
+      if (is.null(msgs) || length(msgs) == 0) {
+        return("No logs for this window.")
       }
       paste(msgs, collapse = "\n")
     })

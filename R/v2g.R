@@ -420,7 +420,7 @@ smart_v2g_window <- function(
   dttm_seq <- setpoints$datetime
   log <- list()
   log_window_name <- as.character(date(dttm_seq[1]))
-  log[[log_window_name]] <- list() # In the `log` object even though `include_log = FALSE`
+  log[[log_window_name]] <- character(0) # In the `log` object even though `include_log = FALSE`
 
   if (nrow(sessions_window) == 0) {
     return(list(
@@ -493,7 +493,7 @@ smart_v2g_window <- function(
   sessions_considered <- sessions_window_final
 
   if (include_log) {
-    log[[log_window_name]][["all"]] <- results_log
+    log[[log_window_name]] <- results_log
   }
 
   list(

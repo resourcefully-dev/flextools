@@ -165,6 +165,8 @@ smart_v2g <- function(
   scheduling_lst <- smart_v2g_window_parallel(
     windows_data,
     setpoints_lst,
+    power_th,
+    energy_min,
     include_log
   )
 
@@ -406,6 +408,8 @@ smart_v2g_window <- function(
   sessions_window,
   profiles_demand,
   setpoints,
+  power_th = 0,
+  energy_min = 1,
   include_log = FALSE
 ) {
   if (nrow(setpoints) == 0) {
@@ -465,6 +469,7 @@ smart_v2g_window <- function(
     results <- schedule_sessions_v2g(
       sessions = sessions_window_flex,
       setpoint = setpoint_flex,
+      energy_min = energy_min,
       include_log = include_log,
       show_progress = FALSE,
       power_th = power_th
@@ -509,6 +514,8 @@ smart_v2g_window <- function(
 smart_v2g_window_parallel <- function(
   windows_data,
   setpoints_lst,
+  power_th,
+  energy_min,
   include_log
 ) {
   if (
@@ -523,6 +530,8 @@ smart_v2g_window_parallel <- function(
           sessions_window = x$sessions_window,
           profiles_demand = x$profiles_demand,
           setpoints = y,
+          power_th = power_th,
+          energy_min = energy_min,
           include_log = include_log
         )
       }
@@ -537,10 +546,14 @@ smart_v2g_window_parallel <- function(
             sessions_window = x$sessions_window,
             profiles_demand = x$profiles_demand,
             setpoints = y,
+            power_th = power_th,
+            energy_min = energy_min,
             include_log = include_log
           )
         },
         smart_v2g_window = smart_v2g_window,
+        power_th = power_th,
+        energy_min = energy_min,
         include_log = include_log
       )
     )
@@ -734,6 +747,7 @@ schedule_sessions_v2g <- function(
   sessions,
   setpoint,
   power_th = 0,
+  energy_min = 1,
   include_log = FALSE,
   show_progress = FALSE
 ) {
@@ -835,9 +849,9 @@ schedule_sessions_v2g <- function(
     #   - `PowerTimeslot`: average charging power in the timeslot.
     #     The `PowerTimeslot` is the `PowerNominal` in all time slots,
     #     except when sessions finish charging in the middle of a time slot.
+    #   - `EnergyCharged`: energy already charged before this time slot.
     #   - `MinEnergyToCharge`: minimum energy that must be charged to fulfill
     #       the `energy_min` requirement.
-    #   NOT USED ASSUMING ALL V2G CLIENTS WANT FULL CHARGE
     #   - `PossibleEnergyRest`: energy that can be charged at nominal power
     #       during the rest of connection hours (excluding this time slot).
     idx_timeslot <- sessions_expanded$Timeslot == timeslot
@@ -852,6 +866,11 @@ schedule_sessions_v2g <- function(
           .data$EnergyToCharge / (resolution / 60),
           .data$PowerNominal
         ),
+        EnergyCharged = .data$EnergyRequired - .data$EnergyToCharge,
+        MinEnergyToCharge = pmax(
+          .data$EnergyRequired * energy_min - .data$EnergyCharged,
+          0
+        ),
         PossibleEnergyRest = .data$PowerNominal *
           pmax(.data$ConnectionHoursLeft - resolution / 60, 0)
       )
@@ -860,7 +879,7 @@ schedule_sessions_v2g <- function(
     # The minimum power that can be charged in this time slot is
     # lower than the nominal power. The minimum power is defined by:
     #  - The minimum energy that must be charged in the time slot, defined by
-    #      - The energy that must be charged to reach 100% SOC at departure
+    #      - The energy that must be charged to reach the `energy_min` target at departure
     #      - The minimum State-of-Charge (`SOCmin`) allowed
     #      - The energy that can be charged at nominal power the rest of connection hours
 
@@ -868,11 +887,11 @@ schedule_sessions_v2g <- function(
       mutate(
         MinEnergyTimeslot = pmax(
           # Can be negative (discharging)
-          # Difference between energy to reach full charge and
-          # possible energy that can be charged the rest of connection
+          # Difference between energy to reach the minimum charge and
+          # possible energy that can be charged the rest of connection.
           # If it is negative, it means that we have time to charge later
-          # so now we can discharge
-          .data$EnergyToCharge - .data$PossibleEnergyRest,
+          # so now we can discharge.
+          .data$MinEnergyToCharge - .data$PossibleEnergyRest,
           # Difference between energy to reach min SOC and
           # energy in battery
           # If it is negative, it means that we are above min SOC

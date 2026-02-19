@@ -466,7 +466,8 @@ smart_v2g_window <- function(
       sessions = sessions_window_flex,
       setpoint = setpoint_flex,
       include_log = include_log,
-      show_progress = FALSE
+      show_progress = FALSE,
+      power_th = power_th
     )
     sessions_window_flex_final <- results$sessions
     results_log <- results$log

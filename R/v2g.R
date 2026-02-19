@@ -166,6 +166,7 @@ smart_v2g <- function(
     windows_data,
     setpoints_lst,
     power_th,
+    charging_power_min,
     energy_min,
     include_log
   )
@@ -409,6 +410,7 @@ smart_v2g_window <- function(
   profiles_demand,
   setpoints,
   power_th = 0,
+  charging_power_min = 0,
   energy_min = 1,
   include_log = FALSE
 ) {
@@ -469,6 +471,7 @@ smart_v2g_window <- function(
     results <- schedule_sessions_v2g(
       sessions = sessions_window_flex,
       setpoint = setpoint_flex,
+      charging_power_min = charging_power_min,
       energy_min = energy_min,
       include_log = include_log,
       show_progress = FALSE,
@@ -515,6 +518,7 @@ smart_v2g_window_parallel <- function(
   windows_data,
   setpoints_lst,
   power_th,
+  charging_power_min,
   energy_min,
   include_log
 ) {
@@ -531,6 +535,7 @@ smart_v2g_window_parallel <- function(
           profiles_demand = x$profiles_demand,
           setpoints = y,
           power_th = power_th,
+          charging_power_min = charging_power_min,
           energy_min = energy_min,
           include_log = include_log
         )
@@ -547,12 +552,14 @@ smart_v2g_window_parallel <- function(
             profiles_demand = x$profiles_demand,
             setpoints = y,
             power_th = power_th,
+            charging_power_min = charging_power_min,
             energy_min = energy_min,
             include_log = include_log
           )
         },
         smart_v2g_window = smart_v2g_window,
         power_th = power_th,
+        charging_power_min = charging_power_min,
         energy_min = energy_min,
         include_log = include_log
       )
@@ -747,6 +754,7 @@ schedule_sessions_v2g <- function(
   sessions,
   setpoint,
   power_th = 0,
+  charging_power_min = 0,
   energy_min = 1,
   include_log = FALSE,
   show_progress = FALSE
@@ -775,6 +783,17 @@ schedule_sessions_v2g <- function(
     units = "mins"
   )
   dttm_tz <- lubridate::tz(setpoint$datetime)
+
+  if (!is.numeric(charging_power_min)) {
+    stop("`charging_power_min` should be numeric")
+  }
+  if (charging_power_min < 1) {
+    charging_power_min_ratio <- charging_power_min
+    charging_power_min_kW <- Inf
+  } else {
+    charging_power_min_ratio <- 1
+    charging_power_min_kW <- charging_power_min
+  }
 
   sessions_sch <- sessions %>%
     dplyr::filter(.data$ConnectionStartDateTime %in% setpoint$datetime) %>%
@@ -871,6 +890,10 @@ schedule_sessions_v2g <- function(
           .data$EnergyRequired * energy_min - .data$EnergyCharged,
           0
         ),
+        ChargingPowerMin = pmin(
+          .data$PowerNominal * charging_power_min_ratio,
+          charging_power_min_kW
+        ),
         PossibleEnergyRest = .data$PowerNominal *
           pmax(.data$ConnectionHoursLeft - resolution / 60, 0)
       )
@@ -902,6 +925,11 @@ schedule_sessions_v2g <- function(
           # Can be negative (discharging)
           .data$MinEnergyTimeslot / (resolution / 60),
           -.data$PowerNominal # Maximum discharging power
+        ),
+        MinPowerTimeslot = ifelse(
+          .data$ChargingPowerMin > 0 & .data$MinPowerTimeslot > 0,
+          pmax(.data$MinPowerTimeslot, .data$ChargingPowerMin), # Charging
+          .data$MinPowerTimeslot # Discharging or no min power defined
         ),
         MaxPowerReduction = .data$PowerTimeslot - .data$MinPowerTimeslot,
         Flexible = ifelse(
@@ -965,14 +993,52 @@ schedule_sessions_v2g <- function(
         # Power reduction factor that would be required
         reduction_factor <- min(flex_req / max_power_reduction, 1)
 
-        # Update the charging power of curtailed sessions
+        # Apply reduction factor to compute target power
         sessions_timeslot$Power[sessions_timeslot$Exploited] <-
           sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] -
           sessions_timeslot$MaxPowerReduction[sessions_timeslot$Exploited] *
             reduction_factor
 
+        # Clamp target power to respect `charging_power_min`.
+        # Only needed when `MinPowerTimeslot <= 0` (discharging allowed),
+        # because the lower-bound constraint does not prevent small-magnitude
+        # powers inside (-charging_power_min, +charging_power_min).
+        # Allowed zones: [-PowerNominal, -charging_power_min] and
+        # [charging_power_min, PowerNominal].
+        if (charging_power_min > 0) {
+          idx_exploited <- sessions_timeslot$Exploited
+
+          idx_pos <- idx_exploited &
+            sessions_timeslot$MinPowerTimeslot <= 0 &
+            sessions_timeslot$Power > 0 &
+            sessions_timeslot$Power < sessions_timeslot$ChargingPowerMin
+          if (any(idx_pos)) {
+            sessions_timeslot$Power[idx_pos] <- pmin(
+              sessions_timeslot$ChargingPowerMin[idx_pos],
+              sessions_timeslot$PowerTimeslot[idx_pos]
+            )
+          }
+
+          idx_neg <- idx_exploited &
+            sessions_timeslot$MinPowerTimeslot <= 0 &
+            sessions_timeslot$Power < 0 &
+            sessions_timeslot$Power > -sessions_timeslot$ChargingPowerMin
+          if (any(idx_neg)) {
+            sessions_timeslot$Power[idx_neg] <- pmax(
+              -sessions_timeslot$ChargingPowerMin[idx_neg],
+              sessions_timeslot$MinPowerTimeslot[idx_neg]
+            )
+          }
+        }
+
         # Update flexibility requirement
-        flex_provided <- round(max_power_reduction * reduction_factor, 2)
+        flex_provided <- round(
+          sum(
+            sessions_timeslot$PowerTimeslot[sessions_timeslot$Exploited] -
+              sessions_timeslot$Power[sessions_timeslot$Exploited]
+          ),
+          2
+        )
         flex_req <- round(flex_req - flex_provided, 2)
       } else {
         flex_provided <- 0

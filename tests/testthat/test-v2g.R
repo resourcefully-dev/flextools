@@ -95,7 +95,7 @@ test_that("energy_min controls capacity compliance vs energy charged in v2g", {
         window_start_hour = 0,
         energy_min = 0
     )
-    plot_smart_charging(v2g_min_energy, sessions, legend_width = 150)
+    # plot_smart_charging(v2g_min_energy, sessions, legend_width = 150)
 
     demand_min <- rowSums(
         select(v2g_min_energy$demand, -datetime)
@@ -142,5 +142,51 @@ test_that("power_th allows limited capacity exceedance in v2g", {
             demand_threshold <=
                 opt_data_threshold$import_capacity * (1 + power_th + 1e-3) # Some tolerance
         )
+    )
+})
+
+test_that("charging_power_min enforces minimum absolute power in v2g", {
+    charging_power_min <- 2
+    sessions_min_power <- sessions %>%
+        filter(.data$Power >= charging_power_min)
+
+    demand_min_power <- evsim::get_demand(
+        sessions_min_power,
+        resolution = 15
+    )
+    opt_data_min_power <- tibble(
+        datetime = demand_min_power$datetime,
+        production = 0,
+        import_capacity = 5,
+        export_capacity = 0
+    )
+
+    v2g_min_power <- smart_v2g(
+        sessions = sessions_min_power,
+        opt_data_min_power,
+        opt_objective = "none",
+        window_days = 1,
+        window_start_hour = 0,
+        charging_power_min = charging_power_min,
+        energy_min = 0
+    )
+    # plot_smart_charging(v2g_min_power, sessions_min_power, legend_width = 150)
+
+    exploited_non_zero <- v2g_min_power$sessions %>%
+        filter(.data$Exploited) %>%
+        filter(.data$Power != 0)
+    # Exclude the last time step of each session if it has low power,
+    # since it might be lower (average timeslot power) than real charging power
+    exploited_filtered <- exploited_non_zero %>%
+        group_by(.data$Session) %>%
+        mutate(MaxEnd = max(.data$ChargingEndDateTime)) %>%
+        ungroup() %>%
+        filter(
+            !(.data$ChargingEndDateTime == .data$MaxEnd &
+                abs(.data$Power) < charging_power_min)
+        )
+    expect_gt(nrow(exploited_filtered), 0)
+    expect_true(
+        all(abs(exploited_filtered$Power) >= charging_power_min - 1e-6)
     )
 })

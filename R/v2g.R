@@ -9,6 +9,9 @@
 #' untouched.
 #'
 #' @inheritParams smart_charging
+#' @param discharge_eff numeric, discharge efficiency (0, 1], applied to energy
+#'   losses when discharging. For example, 0.9 means that for every 1 kWh
+#'   discharged, 1/0.9 kWh must be recharged.
 #'
 #' @return list with setpoints, sessions and demand similar to
 #'   `smart_charging()`. Scheduling is still charging-only while
@@ -25,6 +28,7 @@ smart_v2g <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0
@@ -168,6 +172,7 @@ smart_v2g <- function(
     power_th,
     charging_power_min,
     energy_min,
+    discharge_eff,
     include_log
   )
 
@@ -412,6 +417,7 @@ smart_v2g_window <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  discharge_eff = 1,
   include_log = FALSE
 ) {
   if (nrow(setpoints) == 0) {
@@ -473,6 +479,7 @@ smart_v2g_window <- function(
       setpoint = setpoint_flex,
       charging_power_min = charging_power_min,
       energy_min = energy_min,
+      discharge_eff = discharge_eff,
       include_log = include_log,
       show_progress = FALSE,
       power_th = power_th
@@ -520,6 +527,7 @@ smart_v2g_window_parallel <- function(
   power_th,
   charging_power_min,
   energy_min,
+  discharge_eff,
   include_log
 ) {
   if (
@@ -537,6 +545,7 @@ smart_v2g_window_parallel <- function(
           power_th = power_th,
           charging_power_min = charging_power_min,
           energy_min = energy_min,
+          discharge_eff = discharge_eff,
           include_log = include_log
         )
       }
@@ -554,6 +563,7 @@ smart_v2g_window_parallel <- function(
             power_th = power_th,
             charging_power_min = charging_power_min,
             energy_min = energy_min,
+            discharge_eff = discharge_eff,
             include_log = include_log
           )
         },
@@ -561,6 +571,7 @@ smart_v2g_window_parallel <- function(
         power_th = power_th,
         charging_power_min = charging_power_min,
         energy_min = energy_min,
+        discharge_eff = discharge_eff,
         include_log = include_log
       )
     )
@@ -756,6 +767,7 @@ schedule_sessions_v2g <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE
 ) {
@@ -793,6 +805,15 @@ schedule_sessions_v2g <- function(
   } else {
     charging_power_min_ratio <- 1
     charging_power_min_kW <- charging_power_min
+  }
+  if (
+    !is.numeric(discharge_eff) ||
+      length(discharge_eff) != 1 ||
+      is.na(discharge_eff) ||
+      discharge_eff <= 0 ||
+      discharge_eff > 1
+  ) {
+    stop("`discharge_eff` should be a numeric value in (0, 1]")
   }
 
   sessions_sch <- sessions %>%
@@ -1099,6 +1120,10 @@ schedule_sessions_v2g <- function(
 
       if (length(session_after_idx) > 0) {
         session_energy <- sessions_timeslot$Power[s] * resolution / 60
+        if (session_energy < 0) {
+          # Account for discharge losses: more energy must be recharged later.
+          session_energy <- session_energy / discharge_eff
+        }
 
         # Update `EnergyToCharge`
         # We assume that the session is charging the whole timeslot, so:

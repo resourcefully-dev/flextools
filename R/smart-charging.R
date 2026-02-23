@@ -1269,12 +1269,32 @@ schedule_sessions <- function(
     sessions_timeslot$Exploited <- FALSE
 
     # Power demand in this time slot
-    sessions_timeslot_power <- sum(sessions_timeslot$PowerTimeslot)
+    sessions_timeslot_power <- sum(
+      sessions_timeslot$PowerTimeslot,
+      na.rm = TRUE
+    )
 
     # Setpoint of power for this time slot
     setpoint_power_timeslot <- setpoint$setpoint[
       setpoint$datetime == timeslot
     ]
+    if (length(setpoint_power_timeslot) == 0) {
+      setpoint_power_timeslot <- NA_real_
+    }
+    if (is.na(setpoint_power_timeslot)) {
+      if (include_log) {
+        log <- c(
+          log,
+          paste0(
+            "! Missing setpoint at ",
+            timeslot_dttm,
+            "; 
+            skipping this timeslot."
+          )
+        )
+      }
+      setpoint_power_timeslot <- sessions_timeslot_power
+    }
 
     # Flexibility requirement
     flex_req <- round(

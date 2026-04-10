@@ -1,6 +1,6 @@
 # General functions -------------------------------------------------------
 
-check_optimization_data <- function(opt_data, opt_objective) {
+check_optimization_data_old <- function(opt_data, opt_objective) {
   if (!("datetime" %in% names(opt_data))) {
     stop("Error: `datetime` variable must exist in `opt_data`")
   }
@@ -64,7 +64,7 @@ check_optimization_data <- function(opt_data, opt_objective) {
   return(opt_data)
 }
 
-triangulate_matrix <- function(mat, direction = c('l', 'u'), k = 0) {
+triangulate_matrix_old <- function(mat, direction = c('l', 'u'), k = 0) {
   if (direction == 'l') {
     return(as.matrix(Matrix::tril(mat, k = k)))
   } else if (direction == 'u') {
@@ -72,20 +72,20 @@ triangulate_matrix <- function(mat, direction = c('l', 'u'), k = 0) {
   }
 }
 
-get_lambda_matrix <- function(time_slots) {
+get_lambda_matrix_old <- function(time_slots) {
   identityMat <- diag(time_slots)
   nextMat <- identityMat
   nextMat[1, 1] <- 0
   nextMat[time_slots, time_slots] <- 0
   lambdaMat <- identityMat +
     nextMat -
-    triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "u", 1),
+    triangulate_matrix_old(
+      triangulate_matrix_old(matrix(1, time_slots, time_slots), "u", 1),
       "l",
       1
     ) -
-    triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "l", -1),
+    triangulate_matrix_old(
+      triangulate_matrix_old(matrix(1, time_slots, time_slots), "l", -1),
       "u",
       -1
     )
@@ -93,7 +93,7 @@ get_lambda_matrix <- function(time_slots) {
 }
 
 
-get_flex_windows <- function(
+get_flex_windows_old <- function(
   dttm_seq,
   window_days,
   window_start_hour,
@@ -154,7 +154,7 @@ get_flex_windows <- function(
 }
 
 
-get_bounds <- function(
+get_bounds_old <- function(
   time_slots,
   G,
   LF,
@@ -166,7 +166,7 @@ get_bounds <- function(
   export_capacity
 ) {
   identityMat <- diag(time_slots)
-  cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), 'l')
+  cumsumMat <- triangulate_matrix_old(matrix(1, time_slots, time_slots), 'l')
 
   ## General bounds
   LFmax_vct <- round(pmin(pmax(G - LS + import_capacity, 0), LFmax), 2)
@@ -178,14 +178,14 @@ get_bounds <- function(
     if (time_horizon == time_slots) {
       horizonMat_cumsum <- matrix(0, time_slots, time_slots)
     } else {
-      horizonMat_cumsum <- triangulate_matrix(
+      horizonMat_cumsum <- triangulate_matrix_old(
         matrix(1, time_slots, time_slots),
         "l",
         -time_horizon
       )
     }
-    horizonMat_identity <- triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "l"),
+    horizonMat_identity <- triangulate_matrix_old(
+      triangulate_matrix_old(matrix(1, time_slots, time_slots), "l"),
       "u",
       -time_horizon
     )
@@ -198,13 +198,13 @@ get_bounds <- function(
     ub_shift <- horizonMat_identity %*% LF
     ub_O <- pmin(pmax(ub_shift, lb_O), LFmax_vct) # The maximum average power in every time slot is the maximum power of the load `LFmax`
   } else {
-    horizonMat_cumsum <- triangulate_matrix(
+    horizonMat_cumsum <- triangulate_matrix_old(
       matrix(1, time_slots, time_slots),
       "l",
       time_horizon
     )
-    horizonMat_identity <- triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "u"),
+    horizonMat_identity <- triangulate_matrix_old(
+      triangulate_matrix_old(matrix(1, time_slots, time_slots), "u"),
       "l",
       time_horizon
     )
@@ -295,7 +295,7 @@ get_bounds <- function(
 #' @importFrom purrr map
 #' @importFrom rlang .data
 #'
-optimize_demand <- function(
+optimize_demand_old <- function(
   opt_data,
   opt_objective = "grid",
   direction = 'forward',
@@ -306,7 +306,7 @@ optimize_demand <- function(
   lambda = 0
 ) {
   # Parameters check
-  opt_data <- check_optimization_data(opt_data, opt_objective)
+  opt_data <- check_optimization_data_old(opt_data, opt_objective)
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
   }
@@ -317,7 +317,7 @@ optimize_demand <- function(
 
   # Optimization windows
   dttm_seq <- opt_data$datetime
-  flex_windows_idxs <- get_flex_windows(
+  flex_windows_idxs <- get_flex_windows_old(
     dttm_seq = dttm_seq,
     window_days = window_days,
     window_start_hour = window_start_hour,
@@ -336,7 +336,7 @@ optimize_demand <- function(
   if (opt_objective == "grid") {
     O_windows <- map(
       windows_data,
-      ~ minimize_net_power_window(
+      ~ minimize_net_power_window_old(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,
@@ -351,7 +351,7 @@ optimize_demand <- function(
   } else if (opt_objective == "cost") {
     O_windows <- map(
       windows_data,
-      ~ minimize_cost_window(
+      ~ minimize_cost_window_old(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,
@@ -370,7 +370,7 @@ optimize_demand <- function(
   } else if (is.numeric(opt_objective)) {
     O_windows <- map(
       windows_data,
-      ~ optimize_demand_window(
+      ~ optimize_demand_window_old(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,
@@ -430,7 +430,7 @@ optimize_demand <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-solve_optimization_window <- function(
+solve_optimization_window_old <- function(
   G,
   LF,
   LS,
@@ -455,7 +455,7 @@ solve_optimization_window <- function(
   identityMat <- diag(time_slots)
 
   # Constraints
-  L_bounds <- get_bounds(
+  L_bounds <- get_bounds_old(
     time_slots,
     G,
     LF,
@@ -587,7 +587,7 @@ solve_optimization_window <- function(
     )
     import_capacity <- rep(Inf, time_slots)
     export_capacity <- rep(Inf, time_slots)
-    L_bounds <- get_bounds(
+    L_bounds <- get_bounds_old(
       time_slots,
       G,
       LF,
@@ -659,7 +659,7 @@ solve_optimization_window <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window <- function(
+minimize_net_power_window_old <- function(
   G,
   LF,
   LS,
@@ -677,7 +677,7 @@ minimize_net_power_window <- function(
   P <- 2 * identityMat * (1 + lambda)
   q <- 2 * (LS - G - lambda * LF)
 
-  O <- solve_optimization_window(
+  O <- solve_optimization_window_old(
     G,
     LF,
     LS,
@@ -713,7 +713,7 @@ minimize_net_power_window <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window <- function(
+minimize_cost_window_old <- function(
   G,
   LF,
   LS,
@@ -756,7 +756,7 @@ minimize_cost_window <- function(
     -PE
   )
 
-  O <- solve_optimization_window(
+  O <- solve_optimization_window_old(
     G,
     LF,
     LS,
@@ -793,7 +793,7 @@ minimize_cost_window <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_demand_window <- function(
+optimize_demand_window_old <- function(
   G,
   LF,
   LS,
@@ -837,7 +837,7 @@ optimize_demand_window <- function(
     -(1 - w) * PE
   )
 
-  O <- solve_optimization_window(
+  O <- solve_optimization_window_old(
     G,
     LF,
     LS,

@@ -936,7 +936,7 @@ optimize_demand_window <- function(
 #'       window_start_hour = 5
 #'     )
 #'
-add_battery_optimization <- function(
+add_battery_optimization_old <- function(
   opt_data,
   opt_objective = "grid",
   Bcap,
@@ -1022,7 +1022,7 @@ add_battery_optimization <- function(
   if (opt_objective == "grid") {
     B_windows <- map(
       windows_data,
-      ~ minimize_net_power_window_battery(
+      ~ minimize_net_power_window_battery_old(
         G = .x$production,
         L = .x$static,
         Bcap = Bcap * 60 / time_resolution,
@@ -1041,7 +1041,7 @@ add_battery_optimization <- function(
   } else if (opt_objective == "capacity") {
     B_windows <- map(
       windows_data,
-      ~ curtail_capacity_window_battery(
+      ~ curtail_capacity_window_battery_old(
         G = .x$production,
         L = .x$static,
         Bcap = Bcap * 60 / time_resolution,
@@ -1060,7 +1060,7 @@ add_battery_optimization <- function(
   } else if (opt_objective == "cost") {
     B_windows <- map(
       windows_data,
-      ~ minimize_cost_window_battery(
+      ~ minimize_cost_window_battery_old(
         G = .x$production,
         L = .x$static,
         PI = .x$price_imported,
@@ -1083,7 +1083,7 @@ add_battery_optimization <- function(
   } else if (is.numeric(opt_objective)) {
     B_windows <- map(
       windows_data,
-      ~ optimize_battery_window(
+      ~ optimize_battery_window_old(
         G = .x$production,
         L = .x$static,
         PI = .x$price_imported,
@@ -1162,7 +1162,7 @@ add_battery_optimization <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-curtail_capacity_window_battery <- function(
+curtail_capacity_window_battery_old <- function(
   G,
   L,
   Bcap,
@@ -1198,7 +1198,7 @@ curtail_capacity_window_battery <- function(
   if (Bcap_curtail == 0) {
     return(rep(0, length(G)))
   } else {
-    minimize_net_power_window_battery(
+    minimize_net_power_window_battery_old(
       G,
       L,
       Bcap_curtail,
@@ -1237,7 +1237,7 @@ curtail_capacity_window_battery <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-solve_optimization_battery_window <- function(
+solve_optimization_battery_window_old <- function(
   P,
   q,
   G,
@@ -1525,7 +1525,7 @@ solve_optimization_battery_window <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window_battery <- function(
+minimize_net_power_window_battery_old <- function(
   G,
   L,
   Bcap,
@@ -1555,7 +1555,7 @@ minimize_net_power_window_battery <- function(
   q_block <- 2 * (L - G)
   q <- c(q_block, -q_block)
 
-  B <- solve_optimization_battery_window(
+  B <- solve_optimization_battery_window_old(
     P,
     q,
     G,
@@ -1599,7 +1599,7 @@ minimize_net_power_window_battery <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window_battery <- function(
+minimize_cost_window_battery_old <- function(
   G,
   L,
   PE,
@@ -1655,7 +1655,7 @@ minimize_cost_window_battery <- function(
     -PE
   )
 
-  B <- solve_optimization_battery_window(
+  B <- solve_optimization_battery_window_old(
     P,
     q,
     G,
@@ -1700,7 +1700,7 @@ minimize_cost_window_battery <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_battery_window <- function(
+optimize_battery_window_old <- function(
   G,
   L,
   PE,
@@ -1758,7 +1758,7 @@ optimize_battery_window <- function(
     -(1 - w) * PE
   )
 
-  B <- solve_optimization_battery_window(
+  B <- solve_optimization_battery_window_old(
     P,
     q,
     G,

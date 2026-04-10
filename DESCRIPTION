@@ -24,6 +24,7 @@ Imports:
     rlang,
     purrr,
     cli,
+    highs,
     osqp,
     Matrix,
     evsim,

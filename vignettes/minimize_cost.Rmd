@@ -3,7 +3,7 @@ title: "Energy cost optimization"
 output: html_document
 ---
 
-Function `optimize_demand()` and `add_battery_optimization()` makes use of Quadratic programming in order to obtain the optimal power load given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, `flextools` package allows to optimize a time-series power load considering two different goals:
+Function `optimize_demand()` and `add_battery_optimization()` make use of the `HiGHS` optimization backend in order to obtain the optimal power load given certain conditions. Depending on the objective and the variables involved, the problem is solved as a quadratic program (QP), mixed-integer linear program (MILP) or mixed-integer quadratic program (MIQP). Currently, `flextools` package allows to optimize a time-series power load considering two different goals:
 
 * Minimize the power exchanged with the grid (net power)
 * Minimize the energy cost
@@ -34,6 +34,7 @@ The objective function and constraints of this optimization problem are represen
 - $O_t$ : Optimal flexible load time-series vector
 - $I_t$ : imported energy
 - $E_t$ : exported energy
+- $y_t$ : binary grid mode (1 = importing, 0 = exporting)
 - $PI_t$ : imported energy price
 - $PE_t$ : exported energy price
 - $PTU_t$ : balancing price for turn-up power
@@ -68,6 +69,14 @@ $$
 $$
 0 \le E_t \le EC_t \Delta t \quad t \in T
 $$
+
+* Imported and exported energy can not be positive at the same time. This is enforced with one binary grid mode variable per time slot:
+
+$$
+0 \le I_t \le M^I_t y_t \qquad 0 \le E_t \le M^E_t (1-y_t) \qquad y_t \in \{0,1\} \quad t \in T
+$$
+
+Where $M^I_t$ and $M^E_t$ are finite upper bounds derived from the feasible import/export ranges at each time slot.
 
 * Energy balance behind-the-meter:
 
@@ -131,6 +140,8 @@ Where:
 - $B_t = C_t - D_t$ : Net battery exchange with the grid (positive = charging)
 - $I_t$ : imported energy
 - $E_t$ : exported energy
+- $z_t$ : binary battery mode (1 = charging, 0 = discharging)
+- $y_t$ : binary grid mode (1 = importing, 0 = exporting)
 - $PI_t$ : imported energy price
 - $PE_t$ : exported energy price
 - $PTU_t$ : balancing price for turn-up power
@@ -154,7 +165,7 @@ Optimization constraints:
 * Battery charging and discharging limits:
 
 $$
-0 \le C_t \le B_c \quad t \in T \qquad 0 \le D_t \le B_d \quad t \in T
+0 \le C_t \le B_c z_t \qquad 0 \le D_t \le B_d (1-z_t) \qquad z_t \in \{0,1\} \quad t \in T
 $$
 
 * State of charge limits, considering charging and discharging efficiencies:
@@ -181,12 +192,19 @@ $$
 0 \le E_t \le EC_t \Delta t \quad t \in T
 $$
 
+* Imported and exported energy can not be positive at the same time:
+
+$$
+0 \le I_t \le M^I_t y_t \qquad 0 \le E_t \le M^E_t (1-y_t) \qquad y_t \in \{0,1\} \quad t \in T
+$$
+
+Where $M^I_t$ and $M^E_t$ are finite upper bounds derived from the feasible site import/export ranges at each time slot.
+
 * Energy balance behind-the-meter:
 
 $$
 I_t - E_t = C_t - D_t + L_t - G_t
 $$
-
 
 
 

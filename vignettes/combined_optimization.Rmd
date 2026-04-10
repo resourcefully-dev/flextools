@@ -3,7 +3,7 @@ title: "Combined optimization"
 output: html_document
 ---
 
-Function `optimize_demand()` and `add_battery_optimization()` makes use of Quadratic programming in order to obtain the optimal power load given certain conditions. The Quadratic programming problem can be formulated according to multiple objectives. Currently, `flextools` package allows to optimize a time-series power load considering two different goals:
+Function `optimize_demand()` and `add_battery_optimization()` make use of the `HiGHS` optimization backend in order to obtain the optimal power load given certain conditions. Depending on the objective and the variables involved, the problem is solved as a quadratic program (QP), mixed-integer linear program (MILP) or mixed-integer quadratic program (MIQP). Currently, `flextools` package allows to optimize a time-series power load considering two different goals:
 
 * [Minimize the power exchanged with the grid (net power)](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html)
 * [Minimize the energy cost](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html)
@@ -42,7 +42,7 @@ The objective function and constraints of this optimization problem are represen
 - $PTD_t$ : balancing price for turn-down power
 - $\lambda$ : penalty on change for the flexible load
 
-Moreover, this optimization problem has the constraints described in [Energy cost optimization article (demand section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#demand-optimization).
+Moreover, this optimization problem has the constraints described in [Energy cost optimization article (demand section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#demand-optimization), including the binary grid mode that prevents importing and exporting energy in the same time slot.
 
 
 # Battery optimization
@@ -70,5 +70,4 @@ Where:
 - $PTD_t$ : balancing price for turn-down power
 - $\lambda$ : penalty on change for the flexible load
 
-Moreover, this optimization problem has the constraints described in [Energy cost optimization article (battery section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization), including the charging and discharging efficiencies ($\eta_c$, $\eta_d$).
-
+Moreover, this optimization problem has the constraints described in [Energy cost optimization article (battery section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization), including the charging and discharging efficiencies ($\eta_c$, $\eta_d$), the binary battery mode that prevents simultaneous charging and discharging, and the binary grid mode that prevents simultaneous import and export.

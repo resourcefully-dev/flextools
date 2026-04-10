@@ -323,6 +323,315 @@ demand_solve_highs_problem <- function(P, q, Amat, lb, ub) {
 }
 
 
+demand_attach_profile <- function(optimized_load, imported = NULL, exported = NULL) {
+  if (!is.null(imported)) {
+    attr(optimized_load, "import") <- as.numeric(imported)
+  }
+  if (!is.null(exported)) {
+    attr(optimized_load, "export") <- as.numeric(exported)
+  }
+
+  optimized_load
+}
+
+
+demand_solution_tolerance <- function() {
+  1e-5
+}
+
+
+demand_build_mode_constraints <- function(solver_data, bounds) {
+  time_slots <- solver_data$time_slots
+  total_variables <- solver_data$n_variables + time_slots
+
+  # Import is allowed only when the grid mode is "import".
+  A_import_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
+  A_import_mode[cbind(seq_len(time_slots), solver_data$import_idx)] <- 1
+  A_import_mode[cbind(seq_len(time_slots), solver_data$grid_mode_idx)] <-
+    -bounds$import_mode_ub
+
+  # Export is allowed only when the grid mode is "export".
+  A_export_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
+  A_export_mode[cbind(seq_len(time_slots), solver_data$export_idx)] <- 1
+  A_export_mode[cbind(seq_len(time_slots), solver_data$grid_mode_idx)] <-
+    bounds$export_mode_ub
+
+  list(
+    A = rbind(A_import_mode, A_export_mode),
+    lhs = c(rep(-Inf, time_slots), rep(-Inf, time_slots)),
+    rhs = c(rep(0, time_slots), bounds$export_mode_ub)
+  )
+}
+
+
+demand_build_highs_problem <- function(
+  solver_data,
+  bounds,
+  relax_binaries = TRUE,
+  mode_lower = NULL,
+  mode_upper = NULL
+) {
+  time_slots <- solver_data$time_slots
+  total_variables <- solver_data$n_variables + time_slots
+
+  if (is.null(mode_lower)) {
+    mode_lower <- rep(0, time_slots)
+  }
+  if (is.null(mode_upper)) {
+    mode_upper <- rep(1, time_slots)
+  }
+
+  mode_constraints <- demand_build_mode_constraints(solver_data, bounds)
+  A_base <- cbind(
+    solver_data$A,
+    matrix(0, nrow = nrow(solver_data$A), ncol = time_slots)
+  )
+  Q <- NULL
+  if (!is.null(solver_data$P)) {
+    Q <- matrix(0, nrow = total_variables, ncol = total_variables)
+    Q[
+      seq_len(solver_data$n_variables),
+      seq_len(solver_data$n_variables)
+    ] <- solver_data$P
+  }
+
+  list(
+    Q = Q,
+    L = c(solver_data$q, rep(0, time_slots)),
+    lower = c(rep(-Inf, solver_data$n_variables), mode_lower),
+    upper = c(rep(Inf, solver_data$n_variables), mode_upper),
+    A = rbind(A_base, mode_constraints$A),
+    lhs = c(bounds$lb, mode_constraints$lhs),
+    rhs = c(bounds$ub, mode_constraints$rhs),
+    types = c(
+      rep(1L, solver_data$n_variables),
+      if (relax_binaries) rep(1L, time_slots) else rep(2L, time_slots)
+    )
+  )
+}
+
+
+demand_mode_values <- function(x_value, solver_data) {
+  x_value[solver_data$grid_mode_idx]
+}
+
+
+demand_round_mode_guess <- function(x_value, solver_data) {
+  import <- x_value[solver_data$import_idx]
+  export <- x_value[solver_data$export_idx]
+
+  as.numeric(import >= export)
+}
+
+
+demand_branch_index <- function(x_value, solver_data, tolerance = 1e-6) {
+  import <- x_value[solver_data$import_idx]
+  export <- x_value[solver_data$export_idx]
+  simultaneous <- which(import > tolerance & export > tolerance)
+
+  if (length(simultaneous) > 0) {
+    scores <- pmin(import[simultaneous], export[simultaneous])
+    return(simultaneous[which.max(scores)])
+  }
+
+  z_value <- demand_mode_values(x_value, solver_data)
+  fractional <- which(z_value > tolerance & z_value < 1 - tolerance)
+  if (length(fractional) == 0) {
+    return(NA_integer_)
+  }
+
+  scores <- pmin(z_value[fractional], 1 - z_value[fractional])
+  fractional[which.max(scores)]
+}
+
+
+demand_extract_solution <- function(x_value, solver_data) {
+  optimized_load <- round(x_value[solver_data$optimized_idx], 2)
+
+  if (!solver_data$has_grid_flows) {
+    return(demand_attach_profile(optimized_load))
+  }
+
+  imported <- pmax(x_value[solver_data$import_idx], 0)
+  exported <- pmax(x_value[solver_data$export_idx], 0)
+  tolerance <- demand_solution_tolerance()
+  imported[imported < tolerance] <- 0
+  exported[exported < tolerance] <- 0
+
+  demand_attach_profile(optimized_load, imported, exported)
+}
+
+
+demand_solve_milp_window <- function(solver_data, bounds) {
+  problem <- demand_build_highs_problem(
+    solver_data = solver_data,
+    bounds = bounds,
+    relax_binaries = FALSE
+  )
+  result <- highs::highs_solve(
+    Q = problem$Q,
+    L = problem$L,
+    lower = problem$lower,
+    upper = problem$upper,
+    A = problem$A,
+    lhs = problem$lhs,
+    rhs = problem$rhs,
+    types = problem$types,
+    control = demand_highs_options()
+  )
+
+  list(result = result, x = result$primal_solution)
+}
+
+
+demand_solve_qp_relaxation <- function(
+  solver_data,
+  bounds,
+  mode_lower,
+  mode_upper
+) {
+  problem <- demand_build_highs_problem(
+    solver_data = solver_data,
+    bounds = bounds,
+    relax_binaries = TRUE,
+    mode_lower = mode_lower,
+    mode_upper = mode_upper
+  )
+  result <- highs::highs_solve(
+    Q = problem$Q,
+    L = problem$L,
+    lower = problem$lower,
+    upper = problem$upper,
+    A = problem$A,
+    lhs = problem$lhs,
+    rhs = problem$rhs,
+    types = problem$types,
+    control = demand_highs_options()
+  )
+
+  list(result = result, x = result$primal_solution)
+}
+
+
+demand_solve_miqp_window <- function(solver_data, bounds) {
+  time_slots <- solver_data$time_slots
+  objective_tolerance <- 1e-8
+  best_objective <- Inf
+  best_x <- NULL
+  stack <- list(list(
+    mode_lower = rep(0, time_slots),
+    mode_upper = rep(1, time_slots)
+  ))
+
+  update_incumbent <- function(mode_fixed) {
+    heuristic <- demand_solve_qp_relaxation(
+      solver_data = solver_data,
+      bounds = bounds,
+      mode_lower = mode_fixed,
+      mode_upper = mode_fixed
+    )
+
+    if (!demand_highs_is_optimal(heuristic$result)) {
+      return()
+    }
+
+    if (heuristic$result$objective_value + objective_tolerance < best_objective) {
+      best_objective <<- heuristic$result$objective_value
+      best_x <<- heuristic$x
+    }
+  }
+
+  while (length(stack) > 0) {
+    node <- stack[[length(stack)]]
+    stack <- stack[-length(stack)]
+
+    relaxation <- demand_solve_qp_relaxation(
+      solver_data = solver_data,
+      bounds = bounds,
+      mode_lower = node$mode_lower,
+      mode_upper = node$mode_upper
+    )
+    if (!demand_highs_is_optimal(relaxation$result)) {
+      next
+    }
+
+    if (relaxation$result$objective_value >= best_objective - objective_tolerance) {
+      next
+    }
+
+    branch_idx <- demand_branch_index(relaxation$x, solver_data)
+    if (is.na(branch_idx)) {
+      best_objective <- relaxation$result$objective_value
+      best_x <- relaxation$x
+      next
+    }
+
+    mode_guess <- demand_round_mode_guess(relaxation$x, solver_data)
+    mode_guess <- pmin(pmax(mode_guess, node$mode_lower), node$mode_upper)
+    update_incumbent(mode_guess)
+
+    left_node <- list(
+      mode_lower = node$mode_lower,
+      mode_upper = node$mode_upper
+    )
+    left_node$mode_lower[branch_idx] <- 0
+    left_node$mode_upper[branch_idx] <- 0
+
+    right_node <- list(
+      mode_lower = node$mode_lower,
+      mode_upper = node$mode_upper
+    )
+    right_node$mode_lower[branch_idx] <- 1
+    right_node$mode_upper[branch_idx] <- 1
+
+    mode_value <- demand_mode_values(relaxation$x, solver_data)[branch_idx]
+    if (mode_value >= 0.5) {
+      stack <- c(stack, list(left_node, right_node))
+    } else {
+      stack <- c(stack, list(right_node, left_node))
+    }
+  }
+
+  if (is.null(best_x)) {
+    return(list(
+      result = list(status_message = "Primal infeasible or unbounded"),
+      x = NULL
+    ))
+  }
+
+  list(
+    result = list(
+      status_message = "Optimal",
+      objective_value = best_objective
+    ),
+    x = best_x
+  )
+}
+
+
+demand_select_window_solver <- function(solver_data) {
+  if (!solver_data$has_grid_flows) {
+    return(function(solver_data, bounds) {
+      result <- demand_solve_highs_problem(
+        P = solver_data$P,
+        q = solver_data$q,
+        Amat = solver_data$A,
+        lb = bounds$lb,
+        ub = bounds$ub
+      )
+
+      list(result = result, x = result$primal_solution)
+    })
+  }
+
+  if (is.null(solver_data$P)) {
+    return(demand_solve_milp_window)
+  }
+
+  demand_solve_miqp_window
+}
+
+
 # Optimization of load ------------------------------------------------------------
 
 #' Optimize a vector of flexible demand
@@ -546,10 +855,13 @@ solve_optimization_window <- function(
     time_horizon <- time_slots
   }
   identityMat <- diag(time_slots)
+  has_grid_flows <- nrow(P) > time_slots
+  P_normalized <- demand_normalize_quadratic(P)
 
-  # Build the same physical bounds as before. Only the numerical solver below
-  # changes from OSQP to HiGHS.
-  L_bounds <- get_bounds(
+  # Build the same physical bounds as before. The continuous `grid` objective
+  # still solves directly, while cost/combined add a binary grid mode to avoid
+  # simultaneous import and export in the same timestep.
+  base_bounds <- get_bounds(
     time_slots,
     G,
     LF,
@@ -561,30 +873,24 @@ solve_optimization_window <- function(
     export_capacity
   )
 
-  if (nrow(P) > time_slots) {
+  if (has_grid_flows) {
     # Unknown variable: X = [O, I, E]
     # `O` is optimized flexible load, `I` imported energy and `E` exported
     # energy. The block structure is left untouched to keep the original model
     # easy to compare with the previous OSQP version.
     Amat_O <- cbind(identityMat, identityMat * 0, identityMat * 0)
-    lb_O <- L_bounds$lb_O
-    ub_O <- L_bounds$ub_O
 
     Amat_I <- cbind(
       identityMat * 0,
       identityMat * 1,
       identityMat * 0
     )
-    lb_I <- rep(0, time_slots)
-    ub_I <- import_capacity
 
     Amat_E <- cbind(
       identityMat * 0,
       identityMat * 0,
       identityMat * 1
     )
-    lb_E <- rep(0, time_slots)
-    ub_E <- export_capacity
 
     # Grid balance ties optimized demand and grid flows to the net site power.
     Amat_balance <- cbind(
@@ -597,12 +903,12 @@ solve_optimization_window <- function(
 
     # Cumulative-shift constraints implement the forward/backward time horizon.
     Amat_cumsum <- cbind(
-      L_bounds$Amat_cumsum,
+      base_bounds$Amat_cumsum,
       identityMat * 0,
       identityMat * 0
     )
-    lb_cumsum <- L_bounds$lb_cumsum
-    ub_cumsum <- L_bounds$ub_cumsum
+    lb_cumsum <- base_bounds$lb_cumsum
+    ub_cumsum <- base_bounds$ub_cumsum
 
     # Total flexible energy must be preserved.
     Amat_energy <- cbind(
@@ -621,33 +927,133 @@ solve_optimization_window <- function(
       Amat_cumsum,
       Amat_energy
     )
-    lb <- round(c(lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy), 2)
-    ub <- round(c(ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy), 2)
+
+    bounds_with_capacities <- function(import_cap, export_cap) {
+      import_cap <- as.numeric(rep_len(import_cap, time_slots))
+      export_cap <- as.numeric(rep_len(export_cap, time_slots))
+      L_bounds <- get_bounds(
+        time_slots,
+        G,
+        LF,
+        LS,
+        direction,
+        time_horizon,
+        LFmax,
+        import_cap,
+        export_cap
+      )
+
+      # These are the tightest per-slot grid-flow bounds implied by the
+      # optimized-load bounds and the site balance equation.
+      import_mode_ub <- pmax(L_bounds$ub_O + LS - G, 0)
+      export_mode_ub <- pmax(G - LS - L_bounds$lb_O, 0)
+      import_mode_ub[is.finite(import_cap)] <- pmin(
+        import_mode_ub[is.finite(import_cap)],
+        import_cap[is.finite(import_cap)]
+      )
+      export_mode_ub[is.finite(export_cap)] <- pmin(
+        export_mode_ub[is.finite(export_cap)],
+        export_cap[is.finite(export_cap)]
+      )
+
+      list(
+        lb = round(
+          c(
+            L_bounds$lb_O,
+            rep(0, time_slots),
+            rep(0, time_slots),
+            lb_balance,
+            lb_cumsum,
+            lb_energy
+          ),
+          2
+        ),
+        ub = round(
+          c(
+            L_bounds$ub_O,
+            import_cap,
+            export_cap,
+            ub_balance,
+            ub_cumsum,
+            ub_energy
+          ),
+          2
+        ),
+        import_mode_ub = import_mode_ub,
+        export_mode_ub = export_mode_ub
+      )
+    }
+
+    solver_data <- list(
+      time_slots = time_slots,
+      n_variables = 3 * time_slots,
+      optimized_idx = seq_len(time_slots),
+      import_idx = seq_len(time_slots) + time_slots,
+      export_idx = seq_len(time_slots) + 2 * time_slots,
+      grid_mode_idx = 3 * time_slots + seq_len(time_slots),
+      A = Amat,
+      P = P_normalized,
+      q = q,
+      has_grid_flows = TRUE,
+      bounds_with_capacities = bounds_with_capacities
+    )
   } else {
     # Unknown variable: X = [O]
     # This smaller model is used when the objective does not require explicit
     # import/export variables.
-    Amat_O <- L_bounds$Amat_O
-    lb_O <- L_bounds$lb_O
-    ub_O <- L_bounds$ub_O
-
-    Amat_cumsum <- L_bounds$Amat_cumsum
-    lb_cumsum <- L_bounds$lb_cumsum
-    ub_cumsum <- L_bounds$ub_cumsum
+    Amat_O <- base_bounds$Amat_O
+    Amat_cumsum <- base_bounds$Amat_cumsum
+    lb_cumsum <- base_bounds$lb_cumsum
+    ub_cumsum <- base_bounds$ub_cumsum
 
     Amat_energy <- matrix(1, ncol = time_slots)
     lb_energy <- sum(LF)
     ub_energy <- sum(LF)
 
     Amat <- rbind(Amat_O, Amat_cumsum, Amat_energy)
-    lb <- round(c(lb_O, lb_cumsum, lb_energy), 2)
-    ub <- round(c(ub_O, ub_cumsum, ub_energy), 2)
+
+    bounds_with_capacities <- function(import_cap, export_cap) {
+      L_bounds <- get_bounds(
+        time_slots,
+        G,
+        LF,
+        LS,
+        direction,
+        time_horizon,
+        LFmax,
+        import_cap,
+        export_cap
+      )
+
+      list(
+        lb = round(c(L_bounds$lb_O, lb_cumsum, lb_energy), 2),
+        ub = round(c(L_bounds$ub_O, ub_cumsum, ub_energy), 2)
+      )
+    }
+
+    solver_data <- list(
+      time_slots = time_slots,
+      n_variables = time_slots,
+      optimized_idx = seq_len(time_slots),
+      A = Amat,
+      P = P_normalized,
+      q = q,
+      has_grid_flows = FALSE,
+      bounds_with_capacities = bounds_with_capacities
+    )
+  }
+
+  solve_window_problem <- demand_select_window_solver(solver_data)
+
+  solve_with_capacities <- function(import_cap, export_cap) {
+    bounds <- solver_data$bounds_with_capacities(import_cap, export_cap)
+    solve_window_problem(solver_data, bounds)
   }
 
   # First solve: keep the original grid limits.
-  O <- demand_solve_highs_problem(P, q, Amat, lb, ub)
-  if (demand_highs_is_optimal(O)) {
-    return(round(O$primal_solution[seq_len(time_slots)], 2))
+  O <- solve_with_capacities(import_capacity, export_capacity)
+  if (demand_highs_is_optimal(O$result)) {
+    return(demand_extract_solution(O$x, solver_data))
   }
 
   # Fallback solve: if the original grid limits make the problem infeasible,
@@ -656,44 +1062,14 @@ solve_optimization_window <- function(
   message_once(
     "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
   )
-  import_capacity <- rep(Inf, time_slots)
-  export_capacity <- rep(Inf, time_slots)
-  L_bounds <- get_bounds(
-    time_slots,
-    G,
-    LF,
-    LS,
-    direction,
-    time_horizon,
-    LFmax,
-    import_capacity,
-    export_capacity
-  )
-
-  if (nrow(P) > time_slots) {
-    ub_I <- import_capacity
-    ub_E <- export_capacity
-    lb <- round(
-      c(L_bounds$lb_O, lb_I, lb_E, lb_balance, lb_cumsum, lb_energy),
-      2
-    )
-    ub <- round(
-      c(L_bounds$ub_O, ub_I, ub_E, ub_balance, ub_cumsum, ub_energy),
-      2
-    )
-  } else {
-    lb <- round(c(L_bounds$lb_O, lb_cumsum, lb_energy), 2)
-    ub <- round(c(L_bounds$ub_O, ub_cumsum, ub_energy), 2)
-  }
-
-  O <- demand_solve_highs_problem(P, q, Amat, lb, ub)
-  if (demand_highs_is_optimal(O)) {
-    return(round(O$primal_solution[seq_len(time_slots)], 2))
+  O <- solve_with_capacities(rep(Inf, time_slots), rep(Inf, time_slots))
+  if (demand_highs_is_optimal(O$result)) {
+    return(demand_extract_solution(O$x, solver_data))
   }
 
   message_once(paste0(
     "\u26A0\uFE0F Optimization warning: ",
-    O$status_message,
+    O$result$status_message,
     ". No optimization provided."
   ))
   LF

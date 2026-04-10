@@ -1,7 +1,7 @@
 # Mixed-integer battery optimization backend built on HiGHS.
 # Linear objectives are solved directly as MILP problems. Quadratic objectives
 # are solved with continuous HiGHS QP relaxations inside a branch-and-bound
-# search over the binary battery operating mode.
+# search over the binary battery and grid operating modes.
 
 battery_attach_profile <- function(battery, charge, discharge) {
   attr(battery, "charge") <- as.numeric(charge)
@@ -62,53 +62,71 @@ battery_normalize_quadratic <- function(P, tolerance = 1e-8) {
 }
 
 
-battery_build_mode_constraints <- function(solver_data) {
+battery_build_mode_constraints <- function(solver_data, bounds) {
   time_slots <- solver_data$time_slots
-  total_variables <- solver_data$n_variables + time_slots
+  total_variables <- solver_data$n_variables + solver_data$total_mode_variables
 
   A_charge_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
   A_charge_mode[cbind(seq_len(time_slots), solver_data$charge_idx)] <- 1
-  A_charge_mode[cbind(
-    seq_len(time_slots),
-    solver_data$n_variables + seq_len(time_slots)
-  )] <- -solver_data$Bc
+  A_charge_mode[cbind(seq_len(time_slots), solver_data$battery_mode_idx)] <- -solver_data$Bc
 
   A_discharge_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
   A_discharge_mode[cbind(seq_len(time_slots), solver_data$discharge_idx)] <- 1
   A_discharge_mode[cbind(
     seq_len(time_slots),
-    solver_data$n_variables + seq_len(time_slots)
+    solver_data$battery_mode_idx
   )] <- solver_data$Bd
 
+  A <- rbind(A_charge_mode, A_discharge_mode)
+  lhs <- c(rep(-Inf, time_slots), rep(-Inf, time_slots))
+  rhs <- c(rep(0, time_slots), rep(solver_data$Bd, time_slots))
+
+  if (solver_data$has_grid_flows) {
+    # Grid-mode binaries use the existing import/export formulation and only
+    # remove the nonphysical degree of freedom where both can be positive.
+    A_import_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
+    A_import_mode[cbind(seq_len(time_slots), solver_data$import_idx)] <- 1
+    A_import_mode[cbind(seq_len(time_slots), solver_data$grid_mode_idx)] <-
+      -bounds$import_mode_ub
+
+    A_export_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
+    A_export_mode[cbind(seq_len(time_slots), solver_data$export_idx)] <- 1
+    A_export_mode[cbind(seq_len(time_slots), solver_data$grid_mode_idx)] <-
+      bounds$export_mode_ub
+
+    A <- rbind(A, A_import_mode, A_export_mode)
+    lhs <- c(lhs, rep(-Inf, time_slots), rep(-Inf, time_slots))
+    rhs <- c(rhs, rep(0, time_slots), bounds$export_mode_ub)
+  }
+
   list(
-    A = rbind(A_charge_mode, A_discharge_mode),
-    lhs = c(rep(-Inf, time_slots), rep(-Inf, time_slots)),
-    rhs = c(rep(0, time_slots), rep(solver_data$Bd, time_slots))
+    A = A,
+    lhs = lhs,
+    rhs = rhs
   )
 }
 
 
 battery_build_highs_problem <- function(
   solver_data,
-  lower_bounds,
-  upper_bounds,
+  bounds,
   relax_binaries = TRUE,
-  z_lower = NULL,
-  z_upper = NULL
+  mode_lower = NULL,
+  mode_upper = NULL
 ) {
-  time_slots <- solver_data$time_slots
-  total_variables <- solver_data$n_variables + time_slots
-  if (is.null(z_lower)) {
-    z_lower <- rep(0, time_slots)
+  total_mode_variables <- solver_data$total_mode_variables
+  total_variables <- solver_data$n_variables + total_mode_variables
+  if (is.null(mode_lower)) {
+    mode_lower <- rep(0, total_mode_variables)
   }
-  if (is.null(z_upper)) {
-    z_upper <- rep(1, time_slots)
+  if (is.null(mode_upper)) {
+    mode_upper <- rep(1, total_mode_variables)
   }
 
-  mode_constraints <- battery_build_mode_constraints(solver_data)
+  mode_constraints <- battery_build_mode_constraints(solver_data, bounds)
   A_base <- cbind(
     solver_data$A,
-    matrix(0, nrow = nrow(solver_data$A), ncol = time_slots)
+    matrix(0, nrow = nrow(solver_data$A), ncol = total_mode_variables)
   )
   Q <- NULL
   if (!is.null(solver_data$P)) {
@@ -121,15 +139,19 @@ battery_build_highs_problem <- function(
 
   list(
     Q = Q,
-    L = c(solver_data$q, rep(0, time_slots)),
-    lower = c(rep(0, solver_data$n_variables), z_lower),
-    upper = c(rep(Inf, solver_data$n_variables), z_upper),
+    L = c(solver_data$q, rep(0, total_mode_variables)),
+    lower = c(rep(0, solver_data$n_variables), mode_lower),
+    upper = c(rep(Inf, solver_data$n_variables), mode_upper),
     A = rbind(A_base, mode_constraints$A),
-    lhs = c(lower_bounds, mode_constraints$lhs),
-    rhs = c(upper_bounds, mode_constraints$rhs),
+    lhs = c(bounds$lb, mode_constraints$lhs),
+    rhs = c(bounds$ub, mode_constraints$rhs),
     types = c(
       rep(1L, solver_data$n_variables),
-      if (relax_binaries) rep(1L, time_slots) else rep(2L, time_slots)
+      if (relax_binaries) {
+        rep(1L, total_mode_variables)
+      } else {
+        rep(2L, total_mode_variables)
+      }
     )
   )
 }
@@ -151,17 +173,24 @@ battery_solve_highs_problem <- function(problem) {
 
 
 battery_mode_values <- function(x_value, solver_data) {
-  start_idx <- solver_data$n_variables + 1
-  end_idx <- solver_data$n_variables + solver_data$time_slots
-  x_value[start_idx:end_idx]
+  x_value[solver_data$mode_variable_idx]
 }
 
 
 battery_round_mode_guess <- function(x_value, solver_data) {
   charge <- x_value[solver_data$charge_idx]
   discharge <- x_value[solver_data$discharge_idx]
+  battery_mode <- as.numeric(charge >= discharge)
 
-  as.numeric(charge >= discharge)
+  if (!solver_data$has_grid_flows) {
+    return(battery_mode)
+  }
+
+  import <- x_value[solver_data$import_idx]
+  export <- x_value[solver_data$export_idx]
+  grid_mode <- as.numeric(import >= export)
+
+  c(battery_mode, grid_mode)
 }
 
 
@@ -173,6 +202,17 @@ battery_branch_index <- function(x_value, solver_data, tolerance = 1e-6) {
   if (length(simultaneous) > 0) {
     scores <- pmin(charge[simultaneous], discharge[simultaneous])
     return(simultaneous[which.max(scores)])
+  }
+
+  if (solver_data$has_grid_flows) {
+    import <- x_value[solver_data$import_idx]
+    export <- x_value[solver_data$export_idx]
+    simultaneous_grid <- which(import > tolerance & export > tolerance)
+
+    if (length(simultaneous_grid) > 0) {
+      scores <- pmin(import[simultaneous_grid], export[simultaneous_grid])
+      return(solver_data$time_slots + simultaneous_grid[which.max(scores)])
+    }
   }
 
   z_value <- battery_mode_values(x_value, solver_data)
@@ -200,8 +240,7 @@ battery_attach_solution <- function(x_value, time_slots) {
 battery_solve_milp_window <- function(solver_data, bounds) {
   problem <- battery_build_highs_problem(
     solver_data = solver_data,
-    lower_bounds = bounds$lb,
-    upper_bounds = bounds$ub,
+    bounds = bounds,
     relax_binaries = FALSE
   )
   result <- battery_solve_highs_problem(problem)
@@ -210,14 +249,18 @@ battery_solve_milp_window <- function(solver_data, bounds) {
 }
 
 
-battery_solve_qp_relaxation <- function(solver_data, bounds, z_lower, z_upper) {
+battery_solve_qp_relaxation <- function(
+  solver_data,
+  bounds,
+  mode_lower,
+  mode_upper
+) {
   problem <- battery_build_highs_problem(
     solver_data = solver_data,
-    lower_bounds = bounds$lb,
-    upper_bounds = bounds$ub,
+    bounds = bounds,
     relax_binaries = TRUE,
-    z_lower = z_lower,
-    z_upper = z_upper
+    mode_lower = mode_lower,
+    mode_upper = mode_upper
   )
   result <- battery_solve_highs_problem(problem)
 
@@ -226,21 +269,21 @@ battery_solve_qp_relaxation <- function(solver_data, bounds, z_lower, z_upper) {
 
 
 battery_solve_miqp_window <- function(solver_data, bounds) {
-  time_slots <- solver_data$time_slots
+  total_mode_variables <- solver_data$total_mode_variables
   objective_tolerance <- battery_objective_tolerance()
   best_objective <- Inf
   best_x <- NULL
   stack <- list(list(
-    z_lower = rep(0, time_slots),
-    z_upper = rep(1, time_slots)
+    mode_lower = rep(0, total_mode_variables),
+    mode_upper = rep(1, total_mode_variables)
   ))
 
-  update_incumbent <- function(z_fixed) {
+  update_incumbent <- function(mode_fixed) {
     heuristic <- battery_solve_qp_relaxation(
       solver_data = solver_data,
       bounds = bounds,
-      z_lower = z_fixed,
-      z_upper = z_fixed
+      mode_lower = mode_fixed,
+      mode_upper = mode_fixed
     )
 
     if (!battery_highs_is_optimal(heuristic$result)) {
@@ -262,8 +305,8 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
     relaxation <- battery_solve_qp_relaxation(
       solver_data = solver_data,
       bounds = bounds,
-      z_lower = node$z_lower,
-      z_upper = node$z_upper
+      mode_lower = node$mode_lower,
+      mode_upper = node$mode_upper
     )
     if (!battery_highs_is_optimal(relaxation$result)) {
       next
@@ -282,26 +325,26 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
       next
     }
 
-    z_guess <- battery_round_mode_guess(relaxation$x, solver_data)
-    z_guess <- pmin(pmax(z_guess, node$z_lower), node$z_upper)
-    update_incumbent(z_guess)
+    mode_guess <- battery_round_mode_guess(relaxation$x, solver_data)
+    mode_guess <- pmin(pmax(mode_guess, node$mode_lower), node$mode_upper)
+    update_incumbent(mode_guess)
 
     left_node <- list(
-      z_lower = node$z_lower,
-      z_upper = node$z_upper
+      mode_lower = node$mode_lower,
+      mode_upper = node$mode_upper
     )
-    left_node$z_lower[branch_idx] <- 0
-    left_node$z_upper[branch_idx] <- 0
+    left_node$mode_lower[branch_idx] <- 0
+    left_node$mode_upper[branch_idx] <- 0
 
     right_node <- list(
-      z_lower = node$z_lower,
-      z_upper = node$z_upper
+      mode_lower = node$mode_lower,
+      mode_upper = node$mode_upper
     )
-    right_node$z_lower[branch_idx] <- 1
-    right_node$z_upper[branch_idx] <- 1
+    right_node$mode_lower[branch_idx] <- 1
+    right_node$mode_upper[branch_idx] <- 1
 
-    z_value <- battery_mode_values(relaxation$x, solver_data)[branch_idx]
-    if (z_value >= 0.5) {
+    mode_value <- battery_mode_values(relaxation$x, solver_data)[branch_idx]
+    if (mode_value >= 0.5) {
       stack <- c(stack, list(left_node, right_node))
     } else {
       stack <- c(stack, list(right_node, left_node))
@@ -397,6 +440,19 @@ battery_build_solver_data <- function(
     )
 
     bounds_with_capacities <- function(import_cap, export_cap) {
+      import_cap <- as.numeric(rep_len(import_cap, time_slots))
+      export_cap <- as.numeric(rep_len(export_cap, time_slots))
+      import_mode_ub <- pmax(L - G + Bc, 0)
+      export_mode_ub <- pmax(G - L + Bd, 0)
+      import_mode_ub[is.finite(import_cap)] <- pmin(
+        import_mode_ub[is.finite(import_cap)],
+        import_cap[is.finite(import_cap)]
+      )
+      export_mode_ub[is.finite(export_cap)] <- pmin(
+        export_mode_ub[is.finite(export_cap)],
+        export_cap[is.finite(export_cap)]
+      )
+
       list(
         lb = c(
           rep(0, time_slots),
@@ -415,7 +471,9 @@ battery_build_solver_data <- function(
           eq_balance,
           ub_cumsum,
           0
-        )
+        ),
+        import_mode_ub = import_mode_ub,
+        export_mode_ub = export_mode_ub
       )
     }
 
@@ -452,6 +510,9 @@ battery_build_solver_data <- function(
     )
 
     bounds_with_capacities <- function(import_cap, export_cap) {
+      import_cap <- as.numeric(rep_len(import_cap, time_slots))
+      export_cap <- as.numeric(rep_len(export_cap, time_slots))
+
       list(
         lb = c(
           rep(0, time_slots),
@@ -478,12 +539,27 @@ battery_build_solver_data <- function(
     n_variables = n_variables,
     charge_idx = seq_len(time_slots),
     discharge_idx = seq_len(time_slots) + time_slots,
+    import_idx = if (has_grid_flows) seq_len(time_slots) + 2 * time_slots else NULL,
+    export_idx = if (has_grid_flows) seq_len(time_slots) + 3 * time_slots else NULL,
     A = Amat,
     bounds_with_capacities = bounds_with_capacities,
     P = battery_normalize_quadratic(P_symmetric),
     q = as.numeric(q),
     Bc = Bc,
-    Bd = Bd
+    Bd = Bd,
+    has_grid_flows = has_grid_flows,
+    total_mode_variables = if (has_grid_flows) 2 * time_slots else time_slots,
+    battery_mode_idx = n_variables + seq_len(time_slots),
+    grid_mode_idx = if (has_grid_flows) {
+      n_variables + time_slots + seq_len(time_slots)
+    } else {
+      integer()
+    },
+    mode_variable_idx = if (has_grid_flows) {
+      n_variables + seq_len(2 * time_slots)
+    } else {
+      n_variables + seq_len(time_slots)
+    }
   )
 }
 

@@ -39,11 +39,16 @@ check_optimization_data <- function(opt_data, opt_objective) {
       opt_data$export_capacity <- opt_data$grid_capacity
     }
   } else {
+    default_import_capacity <- max(opt_data$static + opt_data$flexible, na.rm = TRUE)
+    default_export_capacity <- max(opt_data$production, na.rm = TRUE)
+    default_import_capacity <- pmax(default_import_capacity, 0)
+    default_export_capacity <- pmax(default_export_capacity, 0)
+
     if (!("import_capacity" %in% names(opt_data))) {
-      opt_data$import_capacity <- Inf
+      opt_data$import_capacity <- default_import_capacity
     }
     if (!("export_capacity" %in% names(opt_data))) {
-      opt_data$export_capacity <- Inf
+      opt_data$export_capacity <- default_export_capacity
     }
   }
 

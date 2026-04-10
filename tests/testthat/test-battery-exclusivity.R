@@ -44,16 +44,18 @@ test_that("battery optimization works for cost objective", {
 
 
 test_that("battery optimization works for combined objective", {
-  opt_battery <- opt_data |>
-    add_battery_optimization(
-      opt_objective = 0.5,
-      Bcap = 50,
-      Bc = 4,
-      Bd = 4,
-      window_start_hour = 5,
-      charge_eff = 0.9,
-      discharge_eff = 0.9
-    )
+  opt_battery <- expect_no_message(
+    opt_data |>
+      add_battery_optimization(
+        opt_objective = 0.5,
+        Bcap = 50,
+        Bc = 4,
+        Bd = 4,
+        window_start_hour = 5,
+        charge_eff = 0.9,
+        discharge_eff = 0.9
+      )
+  )
 
   expect_type(opt_battery, "double")
 })

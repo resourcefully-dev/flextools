@@ -1,6 +1,6 @@
 Package: flextools
 Title: Tools For Demand-Response Simulations
-Version: 1.2.0
+Version: 1.3.0
 Authors@R: 
     person(given = "Marc", family = "Cañigueral", role = c("aut", "cre"),
            email = "marccanyigueral@gmail.com",

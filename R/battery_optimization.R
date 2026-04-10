@@ -113,7 +113,10 @@ battery_build_highs_problem <- function(
   Q <- NULL
   if (!is.null(solver_data$P)) {
     Q <- matrix(0, nrow = total_variables, ncol = total_variables)
-    Q[seq_len(solver_data$n_variables), seq_len(solver_data$n_variables)] <- solver_data$P
+    Q[
+      seq_len(solver_data$n_variables),
+      seq_len(solver_data$n_variables)
+    ] <- solver_data$P
   }
 
   list(
@@ -244,7 +247,9 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
       return()
     }
 
-    if (heuristic$result$objective_value + objective_tolerance < best_objective) {
+    if (
+      heuristic$result$objective_value + objective_tolerance < best_objective
+    ) {
       best_objective <<- heuristic$result$objective_value
       best_x <<- heuristic$x
     }
@@ -264,7 +269,9 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
       next
     }
 
-    if (relaxation$result$objective_value >= best_objective - objective_tolerance) {
+    if (
+      relaxation$result$objective_value >= best_objective - objective_tolerance
+    ) {
       next
     }
 
@@ -547,23 +554,81 @@ battery_solve_window <- function(
 
 #' Battery optimal charging/discharging profile
 #'
-#' @param opt_data tibble with optimization data
-#' @param opt_objective optimization objective
-#' @param Bcap numeric, battery capacity in kWh
-#' @param Bc numeric, max charging power
-#' @param Bd numeric, max discharging power
-#' @param SOCmin numeric, minimum state of charge in %
-#' @param SOCmax numeric, maximum state of charge in %
-#' @param SOCini numeric, initial state of charge in %
-#' @param window_days integer, optimization window size in days
-#' @param window_start_hour integer, hour when each window starts
-#' @param flex_window_hours integer, active optimization hours per window
-#' @param lambda numeric, smoothing penalty
-#' @param charge_eff numeric, charging efficiency
-#' @param discharge_eff numeric, discharging efficiency
+#' See the formulation of the optimization problems in the
+#' [documentation website](https://resourcefully-dev.github.io/flextools/).
+#'
+#' @param opt_data tibble, optimization contextual data.
+#' The first column must be named `datetime` (mandatory) containing the
+#' date time sequence where the optimization algorithm is applied.
+#' The other columns can be (optional):
+#'
+#' - `static`: static power demand (in kW) from other sectors like buildings,
+#' offices, etc.
+#'
+#' - `import_capacity`: maximum imported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
+#' - `export_capacity`: maximum exported power from the grid (in kW),
+#' for example the contracted power with the energy company.
+#'
+#' - `production`: local power generation (in kW).
+#' This is used when `opt_objective = "grid"`.
+#'
+#' - `price_imported`: price for imported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_exported`: price for exported energy (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_turn_down`: price for turn-down energy use (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' - `price_turn_up`: price for turn-up energy use (€/kWh).
+#' This is used when `opt_objective = "cost"`.
+#'
+#' @param opt_objective character or numeric.
+#' Optimization objective can be `"grid"` (default), `"cost"` or `"capacity"`, or
+#' a number between `0` and `1` to perform combined optimization
+#' where `0 == "cost"` and `1 == "grid"`.
+#' @param Bcap numeric, capacity of the battery (in kWh)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
+#' @param SOCmin numeric, minimum State-of-Charge of the battery
+#' @param SOCmax numeric, maximum State-of-Charge of the battery
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param window_days integer, number of days to consider as optimization window.
+#' @param window_start_hour integer, starting hour of the optimization window.
+#' @param flex_window_hours integer, flexibility window length, in hours.
+#' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
+#' It must be lower than `window_days*24` hours.
+#' @param lambda numeric, penalty on change for the battery compared to the previous time slot.
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1, default 1).
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1, default 1).
 #'
 #' @return numeric vector
 #' @export
+#'
+#' @importFrom dplyr tibble %>%
+#' @importFrom purrr map
+#' @importFrom timefully get_time_resolution
+#'
+#' @examples
+#' library(dplyr)
+#' opt_data <- flextools::energy_profiles %>%
+#'   filter(lubridate::isoweek(datetime) == 18) %>%
+#'   rename(
+#'     production = "solar",
+#'     static = "building",
+#'   ) %>%
+#'   select(any_of(c(
+#'     "datetime", "production", "static", "price_imported", "price_exported"
+#'   )))
+#'   opt_battery <- opt_data %>%
+#'     add_battery_optimization(
+#'       opt_objective = 0.5,
+#'       Bcap = 50, Bc = 4, Bd = 4,
+#'       window_start_hour = 5
+#'     )
 add_battery_optimization <- function(
   opt_data,
   opt_objective = "grid",
@@ -764,6 +829,27 @@ add_battery_optimization <- function(
 }
 
 
+#' Battery optimal charging/discharging profile to minimize grid interaction (just a window)
+#'
+#' @param G numeric vector, being the renewable generation profile
+#' @param L numeric vector, being the load profile
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
+#' @param SOCmin numeric, minimum State-of-Charge of the battery
+#' @param SOCmax numeric, maximum State-of-Charge of the battery
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param lambda numeric, penalty on change for the flexible load
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
+#'
+#' @importFrom dplyr  %>% tibble mutate summarise_all
+#'
+#' @return numeric vector
+#' @keywords internal
+#'
 curtail_capacity_window_battery <- function(
   G,
   L,
@@ -819,6 +905,26 @@ curtail_capacity_window_battery <- function(
 }
 
 
+#' Perform battery optimization (just a window)
+#'
+#' @param P numeric matrix, optimization objective parameter
+#' @param q numeric vector, optimization objective parameter
+#' @param G numeric vector, being the renewable generation profile
+#' @param L numeric vector, being the load profile
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
+#' @param SOCmin numeric, minimum State-of-Charge of the battery
+#' @param SOCmax numeric, maximum State-of-Charge of the battery
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
+#'
+#' @return numeric vector
+#' @keywords internal
+#'
 solve_optimization_battery_window <- function(
   P,
   q,
@@ -854,6 +960,25 @@ solve_optimization_battery_window <- function(
 }
 
 
+#' Battery optimal charging/discharging profile to minimize grid interaction (just a window)
+#'
+#' @param G numeric vector, being the renewable generation profile
+#' @param L numeric vector, being the load profile
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
+#' @param SOCmin numeric, minimum State-of-Charge of the battery
+#' @param SOCmax numeric, maximum State-of-Charge of the battery
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param lambda numeric, penalty on change for the flexible load.
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
+#'
+#' @return numeric vector
+#' @keywords internal
+#'
 minimize_net_power_window_battery <- function(
   G,
   L,
@@ -901,6 +1026,29 @@ minimize_net_power_window_battery <- function(
 }
 
 
+#' Battery optimal charging/discharging profile to minimize cost (just a window)
+#'
+#' @param G numeric vector, being the renewable generation profile
+#' @param L numeric vector, being the load profile
+#' @param PI numeric vector, electricity prices for imported energy
+#' @param PE numeric vector, electricity prices for exported energy
+#' @param PTD numeric vector, prices for turn-down energy use
+#' @param PTU numeric vector, prices for turn-up energy use
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
+#' @param SOCmin numeric, minimum State-of-Charge of the battery
+#' @param SOCmax numeric, maximum State-of-Charge of the battery
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param lambda numeric, penalty on change for the flexible load
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
+#'
+#' @return numeric vector
+#' @keywords internal
+#'
 minimize_cost_window_battery <- function(
   G,
   L,
@@ -973,6 +1121,30 @@ minimize_cost_window_battery <- function(
 }
 
 
+#' Battery optimal charging/discharging profile to minimize net power and cost (just a window)
+#'
+#' @param G numeric vector, being the renewable generation profile
+#' @param L numeric vector, being the load profile
+#' @param PI numeric vector, electricity prices for imported energy
+#' @param PE numeric vector, electricity prices for exported energy
+#' @param PTD numeric vector, prices for turn-down energy use
+#' @param PTU numeric vector, prices for turn-up energy use
+#' @param Bcap numeric, capacity of the battery (NOT in kWh but in energy units according to time resolution)
+#' @param Bc numeric, maximum charging power (in kW)
+#' @param Bd numeric, maximum discharging power (in kW)
+#' @param SOCmin numeric, minimum State-of-Charge of the battery
+#' @param SOCmax numeric, maximum State-of-Charge of the battery
+#' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
+#' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
+#' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
+#' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost)
+#' @param lambda numeric, penalty on change for the flexible load
+#' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
+#' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
+#'
+#' @return numeric vector
+#' @keywords internal
+#'
 optimize_battery_window <- function(
   G,
   L,

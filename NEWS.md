@@ -1,3 +1,8 @@
+# flextools 1.3.0
+
+* Changed optimization backend from OSQP to HiGHS solver [https://highs.dev/](https://highs.dev/)
+
+
 # flextools 1.2.0
 
 * Added V2G functions

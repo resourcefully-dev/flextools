@@ -2042,6 +2042,12 @@ view_smart_charging_logs <- function(smart_charging) {
     stop("Error: no log messages to visualise.")
   }
 
+  # The viewer launches a Shiny gadget, so it must not run during
+  # non-interactive workflows such as package checks or coverage jobs.
+  if (!interactive()) {
+    stop("Error: `view_smart_charging_logs()` is only available in interactive sessions.")
+  }
+
   # Check for required packages
   if (!requireNamespace("shiny", quietly = TRUE)) {
     stop(

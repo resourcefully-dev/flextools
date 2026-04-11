@@ -56,6 +56,52 @@ test_that("optimization for v2g works and negative import capacity is achieved",
     expect_true(any(v2g_results$demand$Worktime[neg_idx] < 0))
 })
 
+test_that("v2g grid optimization also works with explicit export capacity", {
+    opt_data_explicit_export <- opt_data %>%
+        mutate(export_capacity = 100)
+
+    v2g_results <- smart_v2g(
+        sessions = sessions,
+        opt_data_explicit_export,
+        opt_objective = "grid",
+        window_days = 1,
+        window_start_hour = 0
+    )
+
+    expect_true(
+        all(
+            v2g_results$setpoints$Worktime <=
+                opt_data_explicit_export$import_capacity + 1e-6
+        )
+    )
+
+    neg_idx <- which(opt_data_explicit_export$import_capacity < 0)
+    expect_true(any(v2g_results$demand$Worktime[neg_idx] < 0))
+})
+
+test_that("profile setpoints in opt_data are used directly in v2g", {
+    opt_data_profile <- tibble(
+        datetime = sessions_demand$datetime,
+        production = 0,
+        Worktime = round(sessions_demand$Worktime * 0.5, 2)
+    )
+
+    v2g_results <- smart_v2g(
+        sessions = sessions,
+        opt_data_profile,
+        opt_objective = "none",
+        window_days = 1,
+        window_start_hour = 0,
+        energy_min = 0
+    )
+
+    expect_equal(
+        v2g_results$setpoints$Worktime,
+        opt_data_profile$Worktime,
+        tolerance = 1e-6
+    )
+})
+
 test_that("energy_min controls capacity compliance vs energy charged in v2g", {
     opt_data_capacity <- tibble(
         datetime = sessions_demand$datetime,
@@ -188,5 +234,83 @@ test_that("charging_power_min enforces minimum absolute power in v2g", {
     expect_gt(nrow(exploited_filtered), 0)
     expect_true(
         all(abs(exploited_filtered$Power) >= charging_power_min - 1e-6)
+    )
+})
+
+test_that("cost objective currently reuses grid objective in v2g", {
+    opt_data_prices <- opt_data %>%
+        mutate(
+            price_imported = 1,
+            price_exported = 0
+        )
+
+    grid_results <- smart_v2g(
+        sessions = sessions,
+        opt_data_prices,
+        opt_objective = "grid",
+        window_days = 1,
+        window_start_hour = 0
+    )
+
+    cost_results <- NULL
+    expect_message(
+        cost_results <- smart_v2g(
+            sessions = sessions,
+            opt_data_prices,
+            opt_objective = "cost",
+            window_days = 1,
+            window_start_hour = 0
+        ),
+        "reusing grid objective"
+    )
+
+    expect_equal(
+        cost_results$setpoints$Worktime,
+        grid_results$setpoints$Worktime,
+        tolerance = 1e-6
+    )
+    expect_equal(
+        cost_results$demand$Worktime,
+        grid_results$demand$Worktime,
+        tolerance = 1e-6
+    )
+})
+
+test_that("combined objective currently reuses grid objective in v2g", {
+    opt_data_prices <- opt_data %>%
+        mutate(
+            price_imported = 1,
+            price_exported = 0
+        )
+
+    grid_results <- smart_v2g(
+        sessions = sessions,
+        opt_data_prices,
+        opt_objective = "grid",
+        window_days = 1,
+        window_start_hour = 0
+    )
+
+    combined_results <- NULL
+    expect_message(
+        combined_results <- smart_v2g(
+            sessions = sessions,
+            opt_data_prices,
+            opt_objective = 0.5,
+            window_days = 1,
+            window_start_hour = 0
+        ),
+        "reusing grid objective"
+    )
+
+    expect_equal(
+        combined_results$setpoints$Worktime,
+        grid_results$setpoints$Worktime,
+        tolerance = 1e-6
+    )
+    expect_equal(
+        combined_results$demand$Worktime,
+        grid_results$demand$Worktime,
+        tolerance = 1e-6
     )
 })

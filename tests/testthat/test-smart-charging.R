@@ -221,6 +221,46 @@ test_that("using responsiveness for specific user profiles", {
   expect_type(sc_results, "list")
 })
 
+test_that("invalid responsive names emit warnings but smart charging still runs", {
+  expect_message(
+    sc_results <- smart_charging(
+      sessions,
+      opt_data,
+      opt_objective = "grid",
+      method = "curtail",
+      window_days = 1,
+      window_start_hour = 6,
+      responsive = list(Weekday = list(UnknownProfile = 1))
+    ),
+    "not found in `sessions`"
+  )
+
+  expect_type(sc_results, "list")
+})
+
+test_that("smart charging uses profile setpoints directly when opt_objective is none", {
+  opt_data_profile <- tibble(
+    datetime = sessions_demand$datetime,
+    production = 0,
+    Worktime = round(sessions_demand$Worktime * 0.5, 2),
+    Visit = round(sessions_demand$Visit * 0.5, 2)
+  )
+
+  sc_results <- smart_charging(
+    sessions,
+    opt_data_profile,
+    opt_objective = "none",
+    method = "none",
+    window_days = 1,
+    window_start_hour = 6
+  )
+
+  expect_true(all(c("datetime", "Worktime", "Visit") %in% names(sc_results$setpoints)))
+  expect_equal(length(unique(sc_results$sessions$Session)), length(unique(sessions$Session)))
+  expect_equal(sum(sc_results$sessions$Energy), sum(sessions$Energy), tolerance = 0.1)
+  expect_equal(length(sc_results$log), 0)
+})
+
 test_that("using energy_min=NULL all sessions charge 100% for curtail", {
   sc_results <- smart_charging(
     sessions,
@@ -314,6 +354,12 @@ test_that("smart charging sessions are summarised", {
   expect_true(nrow(ss_summary) > 0)
 })
 
+test_that("smart charging sessions can be summarised by timecycle", {
+  timecycle_summary <- summarise_timecycle_smart_charging_sessions(sc_results$sessions)
+  expect_true(nrow(timecycle_summary) > 0)
+  expect_true(all(c("profile", "group", "subgroup", "n_sessions", "pct") %in% names(timecycle_summary)))
+})
+
 
 # Plots -------------------------------------------------------------------
 
@@ -330,4 +376,11 @@ test_that("smart charging results are plotted with native `plot` function, witho
 test_that("smart charging results are plotted by `FlexType`", {
   plot <- plot_smart_charging(sc_results, sessions = sessions, by = "FlexType")
   expect_equal(class(plot), c("dygraphs", "htmlwidget"))
+})
+
+test_that("view_smart_charging_logs errors when there are no log messages", {
+  expect_error(
+    view_smart_charging_logs(list(log = list())),
+    "no log messages"
+  )
 })

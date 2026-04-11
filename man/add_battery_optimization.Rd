@@ -88,14 +88,12 @@ library(dplyr)
 opt_data <- flextools::energy_profiles \%>\%
   filter(lubridate::isoweek(datetime) == 18) \%>\%
   rename(
-    production = "solar"
+    production = "solar",
+    static = "building",
   ) \%>\%
   select(any_of(c(
-    "datetime", "production", "building", "price_imported", "price_exported"
-  ))) \%>\%
-  mutate(
-    static = .data$building
-  )
+    "datetime", "production", "static", "price_imported", "price_exported"
+  )))
   opt_battery <- opt_data \%>\%
     add_battery_optimization(
       opt_objective = 0.5,

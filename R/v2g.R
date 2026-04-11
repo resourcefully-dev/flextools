@@ -100,8 +100,21 @@ smart_v2g <- function(
     )
   }
 
+  has_explicit_export_capacity <- any(c("grid_capacity", "export_capacity") %in% names(opt_data))
+
   opt_data$flexible <- 0
   opt_data <- check_optimization_data(opt_data, opt_objective)
+
+  # V2G still uses a signed net-power formulation for the grid objective. In
+  # that formulation a negative `import_capacity` means that the site is forced
+  # to export power. If the user did not provide an explicit export capacity,
+  # the shared optimisation defaults would set `export_capacity = 0`, which
+  # makes the V2G bounds contradictory (`lb > ub`) as soon as a negative import
+  # limit appears. To preserve the original V2G semantics, missing export
+  # capacity remains unconstrained in those signed-capacity windows.
+  if (!has_explicit_export_capacity && any(opt_data$import_capacity < 0, na.rm = TRUE)) {
+    opt_data$export_capacity <- Inf
+  }
 
   if (show_progress) {
     cli::cli_progress_step("Defining optimisation windows")
@@ -654,27 +667,20 @@ solve_optimization_window_v2g <- function(
   l_vec <- c(bounds$lb_O, bounds$lb_cumsum, bounds$lb_energy)
   u_vec <- c(bounds$ub_O, bounds$ub_cumsum, bounds$ub_energy)
 
-  solver <- osqp::osqp(
-    P = Matrix::forceSymmetric(Matrix::Matrix(P)),
+  O <- demand_solve_highs_problem(
+    P = P,
     q = q,
-    A = A,
-    l = l_vec,
-    u = u_vec,
-    pars = list(
-      verbose = FALSE,
-      eps_abs = 1e-6,
-      eps_rel = 1e-6,
-      polish = TRUE
-    )
+    Amat = A,
+    lb = l_vec,
+    ub = u_vec
   )
-  O <- solver$Solve()
 
-  if (O$info$status_val %in% c(1, 2)) {
-    round(O$x, 2)
+  if (demand_highs_is_optimal(O)) {
+    round(O$primal_solution, 2)
   } else {
     message_once(paste0(
       "\u26A0\uFE0F V2G optimisation warning: ",
-      O$info$status,
+      O$status_message,
       ". No optimisation provided."
     ))
     LF

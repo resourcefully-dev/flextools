@@ -11,15 +11,12 @@ battery_attach_profile <- function(battery, charge, discharge) {
 
 
 battery_solution_tolerance <- function() {
-  1e-5
+  optimization_solution_tolerance()
 }
 
 
 battery_highs_options <- function() {
-  highs::highs_control(
-    threads = 1L,
-    log_to_console = FALSE
-  )
+  optimization_highs_options(include_mip_gap = TRUE)
 }
 
 
@@ -29,7 +26,17 @@ battery_highs_is_optimal <- function(result) {
 
 
 battery_objective_tolerance <- function() {
-  1e-8
+  optimization_objective_tolerance()
+}
+
+
+battery_relative_gap_tolerance <- function() {
+  optimization_relative_gap_tolerance()
+}
+
+
+battery_objective_gap <- function(lower_bound, incumbent) {
+  optimization_objective_gap(lower_bound, incumbent)
 }
 
 
@@ -43,22 +50,11 @@ battery_solver_status_message <- function(result) {
 
 
 battery_normalize_quadratic <- function(P, tolerance = 1e-8) {
-  if (is.null(P) || !is.matrix(P)) {
-    return(NULL)
-  }
-
-  P_symmetric <- (P + t(P)) / 2
-  if (max(abs(P_symmetric)) <= tolerance) {
-    return(NULL)
-  }
-
-  eig <- eigen(P_symmetric, symmetric = TRUE, only.values = TRUE)
-
-  if (any(eig$values < -tolerance)) {
-    stop("Error: battery optimization objective must be convex")
-  }
-
-  P_symmetric
+  optimization_normalize_quadratic(
+    P = P,
+    tolerance = tolerance,
+    problem_name = "battery optimization"
+  )
 }
 
 
@@ -226,6 +222,28 @@ battery_branch_index <- function(x_value, solver_data, tolerance = 1e-6) {
 }
 
 
+battery_has_simultaneous_flows <- function(
+  x_value,
+  solver_data,
+  tolerance = 1e-6
+) {
+  charge <- x_value[solver_data$charge_idx]
+  discharge <- x_value[solver_data$discharge_idx]
+
+  if (any(charge > tolerance & discharge > tolerance)) {
+    return(TRUE)
+  }
+
+  if (!solver_data$has_grid_flows) {
+    return(FALSE)
+  }
+
+  import <- x_value[solver_data$import_idx]
+  export <- x_value[solver_data$export_idx]
+  any(import > tolerance & export > tolerance)
+}
+
+
 battery_attach_solution <- function(x_value, time_slots) {
   charge <- pmax(x_value[seq_len(time_slots)], 0)
   discharge <- pmax(x_value[seq_len(time_slots) + time_slots], 0)
@@ -271,6 +289,29 @@ battery_solve_qp_relaxation <- function(
 battery_solve_miqp_window <- function(solver_data, bounds) {
   total_mode_variables <- solver_data$total_mode_variables
   objective_tolerance <- battery_objective_tolerance()
+  relative_gap_tolerance <- battery_relative_gap_tolerance()
+
+  root_relaxation <- battery_solve_qp_relaxation(
+    solver_data = solver_data,
+    bounds = bounds,
+    mode_lower = rep(0, total_mode_variables),
+    mode_upper = rep(1, total_mode_variables)
+  )
+
+  if (!battery_highs_is_optimal(root_relaxation$result)) {
+    return(list(
+      result = root_relaxation$result,
+      x = root_relaxation$x
+    ))
+  }
+
+  # Most practical windows already satisfy the exact operating modes in the
+  # continuous QP relaxation. In those cases we can accept the relaxation
+  # directly and avoid the much slower custom branch-and-bound search.
+  if (!battery_has_simultaneous_flows(root_relaxation$x, solver_data)) {
+    return(root_relaxation)
+  }
+
   best_objective <- Inf
   best_x <- NULL
   stack <- list(list(
@@ -298,22 +339,58 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
     }
   }
 
+  root_mode_guess <- battery_round_mode_guess(root_relaxation$x, solver_data)
+  update_incumbent(root_mode_guess)
+
+  if (
+    !is.null(best_x) &&
+      battery_objective_gap(
+        lower_bound = root_relaxation$result$objective_value,
+        incumbent = best_objective
+      ) <= relative_gap_tolerance
+  ) {
+    return(list(
+      result = list(
+        status_message = "Optimal",
+        objective_value = best_objective
+      ),
+      x = best_x
+    ))
+  }
+
   while (length(stack) > 0) {
     node <- stack[[length(stack)]]
     stack <- stack[-length(stack)]
 
-    relaxation <- battery_solve_qp_relaxation(
-      solver_data = solver_data,
-      bounds = bounds,
-      mode_lower = node$mode_lower,
-      mode_upper = node$mode_upper
-    )
+    if (
+      identical(node$mode_lower, rep(0, total_mode_variables)) &&
+        identical(node$mode_upper, rep(1, total_mode_variables))
+    ) {
+      relaxation <- root_relaxation
+    } else {
+      relaxation <- battery_solve_qp_relaxation(
+        solver_data = solver_data,
+        bounds = bounds,
+        mode_lower = node$mode_lower,
+        mode_upper = node$mode_upper
+      )
+    }
     if (!battery_highs_is_optimal(relaxation$result)) {
       next
     }
 
     if (
       relaxation$result$objective_value >= best_objective - objective_tolerance
+    ) {
+      next
+    }
+
+    if (
+      !is.null(best_x) &&
+        battery_objective_gap(
+          lower_bound = relaxation$result$objective_value,
+          incumbent = best_objective
+        ) <= relative_gap_tolerance
     ) {
       next
     }
@@ -784,6 +861,17 @@ add_battery_optimization <- function(
   }
 
   reset_message_once()
+
+  if (is.numeric(opt_objective)) {
+    # The combined formulation should only be used strictly inside (0, 1).
+    # At the endpoints it degenerates to the dedicated pure-objective models,
+    # which are smaller, faster and numerically more robust.
+    if (opt_objective <= 0) {
+      opt_objective <- "cost"
+    } else if (opt_objective >= 1) {
+      opt_objective <- "grid"
+    }
+  }
 
   if (opt_objective == "grid") {
     B_windows <- map(

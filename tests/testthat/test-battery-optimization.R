@@ -26,6 +26,30 @@ test_that("battery optimization works for grid objective", {
   expect_type(opt_battery, "double")
 })
 
+test_that("battery optimization works for grid objective and a whole year", {
+  timefully::tic()
+  opt_battery <- flextools::energy_profiles |>
+    select(
+      datetime,
+      production = solar,
+      static = building,
+      price_exported,
+      price_imported
+    ) |>
+    add_battery_optimization(
+      opt_objective = 1,
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5,
+      charge_eff = 0.9,
+      discharge_eff = 0.9
+    )
+  timefully::toc()
+
+  expect_type(opt_battery, "double")
+})
+
 test_that("battery optimization works for cost objective", {
   opt_battery <- opt_data |>
     add_battery_optimization(
@@ -58,6 +82,69 @@ test_that("battery optimization works for combined objective", {
   )
 
   expect_type(opt_battery, "double")
+})
+
+test_that("numeric battery objective endpoints reuse pure objective formulations", {
+  opt_grid_chr <- opt_data |>
+    add_battery_optimization(
+      opt_objective = "grid",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5,
+      charge_eff = 0.9,
+      discharge_eff = 0.9
+    )
+
+  opt_grid_num <- expect_no_message(
+    opt_data |>
+      add_battery_optimization(
+        opt_objective = 1,
+        Bcap = 50,
+        Bc = 4,
+        Bd = 4,
+        window_start_hour = 5,
+        charge_eff = 0.9,
+        discharge_eff = 0.9
+      )
+  )
+
+  opt_cost_chr <- opt_data |>
+    add_battery_optimization(
+      opt_objective = "cost",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5,
+      charge_eff = 0.9,
+      discharge_eff = 0.9,
+      lambda = 0
+    )
+
+  opt_cost_num <- expect_no_message(
+    opt_data |>
+      add_battery_optimization(
+        opt_objective = 0,
+        Bcap = 50,
+        Bc = 4,
+        Bd = 4,
+        window_start_hour = 5,
+        charge_eff = 0.9,
+        discharge_eff = 0.9,
+        lambda = 0
+      )
+  )
+
+  expect_equal(
+    as.numeric(opt_grid_num),
+    as.numeric(opt_grid_chr),
+    tolerance = 1e-6
+  )
+  expect_equal(
+    as.numeric(opt_cost_num),
+    as.numeric(opt_cost_chr),
+    tolerance = 1e-6
+  )
 })
 
 test_that("error when `opt_objective` is wrong in battery optimization", {

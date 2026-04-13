@@ -1,186 +1,8 @@
 # General functions -------------------------------------------------------
 
-# These helpers were moved out of `optimization.R` so demand and battery
-# optimization can live in separate files without changing the public API.
-# The logic is intentionally kept very close to the original implementation.
-
-check_optimization_data <- function(opt_data, opt_objective) {
-  # The optimization code relies on a `datetime` index to build windows.
-  if (!("datetime" %in% names(opt_data))) {
-    stop("Error: `datetime` variable must exist in `opt_data`")
-  }
-
-  # The demand optimization path always expects an explicit flexible profile.
-  if (!("flexible" %in% names(opt_data))) {
-    stop("Error: variable `flexible` must exist in `opt_data`")
-  }
-
-  # Static demand is optional, but the solver always works with a value.
-  if (!("static" %in% names(opt_data))) {
-    opt_data$static <- 0
-  }
-
-  # Local production is optional. When it is not present we keep the
-  # optimization logic unchanged by substituting a zero-production profile.
-  if (!("production" %in% names(opt_data))) {
-    warning(
-      "`production` variable not found in `opt_data`. No local energy production will be considered."
-    )
-    opt_data$production <- 0
-  }
-
-  # `grid_capacity` is still accepted for backward compatibility and mapped to
-  # import/export capacities exactly as before.
-  if ("grid_capacity" %in% names(opt_data)) {
-    if (!("import_capacity" %in% names(opt_data))) {
-      opt_data$import_capacity <- opt_data$grid_capacity
-    }
-    if (!("export_capacity" %in% names(opt_data))) {
-      opt_data$export_capacity <- opt_data$grid_capacity
-    }
-  } else {
-    if (!("import_capacity" %in% names(opt_data))) {
-      opt_data$import_capacity <- Inf
-    }
-    if (!("export_capacity" %in% names(opt_data))) {
-      opt_data$export_capacity <- Inf
-    }
-  }
-
-  # Flexible demand upper limits are optional at the API level, but the
-  # solver uses an explicit bound vector internally.
-  if (!("load_capacity" %in% names(opt_data))) {
-    opt_data$load_capacity <- Inf
-  }
-
-  # The public objective contract is unchanged.
-  if (
-    !(opt_objective %in% c("grid", "cost", "none", "capacity")) &&
-      !is.numeric(opt_objective)
-  ) {
-    stop("Error: `opt_objective` not valid")
-  }
-
-  # Cost-based objectives need price vectors. Missing columns are still filled
-  # with the same defaults used by the original implementation.
-  if (opt_objective == "cost" || is.numeric(opt_objective)) {
-    if (!("price_imported" %in% names(opt_data))) {
-      warning("`price_imported` variable not found in `opt_data`.")
-      opt_data$price_imported <- 1
-    }
-    if (!("price_exported" %in% names(opt_data))) {
-      message("`price_exported` variable not found in `opt_data`.")
-      opt_data$price_exported <- 0
-    }
-    if (!("price_turn_up" %in% names(opt_data))) {
-      opt_data$price_turn_up <- 0
-    }
-    if (!("price_turn_down" %in% names(opt_data))) {
-      opt_data$price_turn_down <- 0
-    }
-  }
-
-  opt_data
-}
-
-
-triangulate_matrix <- function(mat, direction = c("l", "u"), k = 0) {
-  # This helper is reused in multiple optimization formulations to build the
-  # triangular cumulative-sum operators that implement shifting constraints.
-  if (direction == "l") {
-    return(as.matrix(Matrix::tril(mat, k = k)))
-  } else if (direction == "u") {
-    return(as.matrix(Matrix::triu(mat, k = k)))
-  }
-}
-
-
-get_lambda_matrix <- function(time_slots) {
-  # The lambda matrix penalizes deviations between adjacent time slots. The
-  # original algebra is preserved because several objective formulations were
-  # derived directly from it.
-  identityMat <- diag(time_slots)
-  nextMat <- identityMat
-  nextMat[1, 1] <- 0
-  nextMat[time_slots, time_slots] <- 0
-  lambdaMat <- identityMat +
-    nextMat -
-    triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "u", 1),
-      "l",
-      1
-    ) -
-    triangulate_matrix(
-      triangulate_matrix(matrix(1, time_slots, time_slots), "l", -1),
-      "u",
-      -1
-    )
-
-  lambdaMat
-}
-
-
-get_flex_windows <- function(
-  dttm_seq,
-  window_days,
-  window_start_hour,
-  flex_window_hours = NULL
-) {
-  # Window starts are defined by the requested hour at exact hour boundaries.
-  start_hour_idx <- which(
-    (lubridate::hour(dttm_seq) == window_start_hour) &
-      (lubridate::minute(dttm_seq) == 0)
-  )
-  n_windows <- trunc(length(start_hour_idx) / window_days)
-
-  # Multi-day windows reuse the original grouping logic: consecutive daily
-  # starts are collapsed into one larger optimization window.
-  if (window_days > 1) {
-    window_days_idx <- rep(seq_len(n_windows), each = window_days)
-    start_windows_idx <- split(
-      start_hour_idx[seq_len(n_windows * window_days)],
-      window_days_idx
-    ) %>%
-      unname() %>%
-      purrr::map_int(~ .x[1])
-  } else {
-    start_windows_idx <- start_hour_idx
-  }
-
-  # Window length is the distance to the next start. The last window keeps the
-  # same length as the previous one to preserve the original behavior.
-  if (n_windows > 1) {
-    windows_length <- dplyr::lead(start_windows_idx) - start_windows_idx
-    windows_length[is.na(windows_length)] <- windows_length[1]
-  } else {
-    windows_length <- length(dttm_seq)
-  }
-
-  # Optional flexibility windows simply clip the optimization range inside each
-  # larger window.
-  resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = "mins")
-  if (is.null(flex_window_hours)) {
-    flex_windows_length <- windows_length
-  } else {
-    if (flex_window_hours > 24 * window_days) {
-      message("`flex_window_hours` must be lower than `window_days` hours.")
-      flex_window_hours <- 24 * window_days
-    }
-    flex_window_length <- flex_window_hours * 60 / resolution
-    flex_windows_length <- purrr::map_dbl(
-      windows_length,
-      ~ ifelse(.x < flex_window_length, .x, flex_window_length)
-    )
-  }
-
-  dplyr::tibble(
-    start = start_windows_idx,
-    end = start_windows_idx + windows_length - 1,
-    flex_end = start_windows_idx + flex_windows_length - 1,
-    flex_idx = purrr::map2(.data$start, .data$flex_end, ~ seq(.x, .y))
-  ) %>%
-    dplyr::filter(.data$end <= length(dttm_seq))
-}
+# Active shared helpers now live in `optimization.R`. Demand keeps only the
+# demand-specific wrappers and formulations here so the common backend logic is
+# defined once for demand, battery and V2G.
 
 
 get_bounds <- function(
@@ -264,12 +86,7 @@ get_bounds <- function(
 
 
 demand_highs_options <- function() {
-  # The demand optimization problems are continuous LP/QP problems, so the
-  # default single-thread HiGHS solve is enough and keeps runs deterministic.
-  highs::highs_control(
-    threads = 1L,
-    log_to_console = FALSE
-  )
+  optimization_highs_options(include_mip_gap = FALSE)
 }
 
 
@@ -279,24 +96,11 @@ demand_highs_is_optimal <- function(result) {
 
 
 demand_normalize_quadratic <- function(P, tolerance = 1e-8) {
-  # HiGHS expects a proper QP Hessian. When the matrix is numerically zero we
-  # pass `NULL` so the problem is solved as a plain LP, which is faster and
-  # matches the original OSQP formulation with a zero quadratic term.
-  if (is.null(P) || !is.matrix(P)) {
-    return(NULL)
-  }
-
-  P_symmetric <- (P + t(P)) / 2
-  if (max(abs(P_symmetric)) <= tolerance) {
-    return(NULL)
-  }
-
-  eig <- eigen(P_symmetric, symmetric = TRUE, only.values = TRUE)
-  if (any(eig$values < -tolerance)) {
-    stop("Error: demand optimization objective must be convex")
-  }
-
-  P_symmetric
+  optimization_normalize_quadratic(
+    P = P,
+    tolerance = tolerance,
+    problem_name = "demand optimization"
+  )
 }
 
 
@@ -331,7 +135,22 @@ demand_attach_profile <- function(optimized_load, imported = NULL, exported = NU
 
 
 demand_solution_tolerance <- function() {
-  1e-5
+  optimization_solution_tolerance()
+}
+
+
+demand_objective_tolerance <- function() {
+  optimization_objective_tolerance()
+}
+
+
+demand_relative_gap_tolerance <- function() {
+  optimization_relative_gap_tolerance()
+}
+
+
+demand_objective_gap <- function(lower_bound, incumbent) {
+  optimization_objective_gap(lower_bound, incumbent)
 }
 
 
@@ -440,6 +259,18 @@ demand_branch_index <- function(x_value, solver_data, tolerance = 1e-6) {
 }
 
 
+demand_has_simultaneous_flows <- function(
+  x_value,
+  solver_data,
+  tolerance = 1e-6
+) {
+  import <- x_value[solver_data$import_idx]
+  export <- x_value[solver_data$export_idx]
+
+  any(import > tolerance & export > tolerance)
+}
+
+
 demand_extract_solution <- function(x_value, solver_data) {
   optimized_load <- round(x_value[solver_data$optimized_idx], 2)
 
@@ -510,7 +341,30 @@ demand_solve_qp_relaxation <- function(
 
 demand_solve_miqp_window <- function(solver_data, bounds) {
   time_slots <- solver_data$time_slots
-  objective_tolerance <- 1e-8
+  objective_tolerance <- demand_objective_tolerance()
+  relative_gap_tolerance <- demand_relative_gap_tolerance()
+
+  root_relaxation <- demand_solve_qp_relaxation(
+    solver_data = solver_data,
+    bounds = bounds,
+    mode_lower = rep(0, time_slots),
+    mode_upper = rep(1, time_slots)
+  )
+
+  if (!demand_highs_is_optimal(root_relaxation$result)) {
+    return(list(
+      result = root_relaxation$result,
+      x = root_relaxation$x
+    ))
+  }
+
+  # Most quadratic demand windows already satisfy import/export exclusivity in
+  # the continuous relaxation. Accepting those windows directly avoids the
+  # expensive custom branch-and-bound search with no change in feasibility.
+  if (!demand_has_simultaneous_flows(root_relaxation$x, solver_data)) {
+    return(root_relaxation)
+  }
+
   best_objective <- Inf
   best_x <- NULL
   stack <- list(list(
@@ -536,21 +390,57 @@ demand_solve_miqp_window <- function(solver_data, bounds) {
     }
   }
 
+  root_mode_guess <- demand_round_mode_guess(root_relaxation$x, solver_data)
+  update_incumbent(root_mode_guess)
+
+  if (
+    !is.null(best_x) &&
+      demand_objective_gap(
+        lower_bound = root_relaxation$result$objective_value,
+        incumbent = best_objective
+      ) <= relative_gap_tolerance
+  ) {
+    return(list(
+      result = list(
+        status_message = "Optimal",
+        objective_value = best_objective
+      ),
+      x = best_x
+    ))
+  }
+
   while (length(stack) > 0) {
     node <- stack[[length(stack)]]
     stack <- stack[-length(stack)]
 
-    relaxation <- demand_solve_qp_relaxation(
-      solver_data = solver_data,
-      bounds = bounds,
-      mode_lower = node$mode_lower,
-      mode_upper = node$mode_upper
-    )
+    if (
+      identical(node$mode_lower, rep(0, time_slots)) &&
+        identical(node$mode_upper, rep(1, time_slots))
+    ) {
+      relaxation <- root_relaxation
+    } else {
+      relaxation <- demand_solve_qp_relaxation(
+        solver_data = solver_data,
+        bounds = bounds,
+        mode_lower = node$mode_lower,
+        mode_upper = node$mode_upper
+      )
+    }
     if (!demand_highs_is_optimal(relaxation$result)) {
       next
     }
 
     if (relaxation$result$objective_value >= best_objective - objective_tolerance) {
+      next
+    }
+
+    if (
+      !is.null(best_x) &&
+        demand_objective_gap(
+          lower_bound = relaxation$result$objective_value,
+          incumbent = best_objective
+        ) <= relative_gap_tolerance
+    ) {
       next
     }
 
@@ -730,6 +620,17 @@ optimize_demand <- function(
   # Solve each window independently with the same objective-specific formulas
   # used in the original implementation.
   reset_message_once()
+
+  if (is.numeric(opt_objective)) {
+    # The combined demand formulation is only needed strictly inside (0, 1).
+    # Endpoint weights are aliases of the pure formulations and are routed
+    # directly to those smaller, more stable models.
+    if (opt_objective <= 0) {
+      opt_objective <- "cost"
+    } else if (opt_objective >= 1) {
+      opt_objective <- "grid"
+    }
+  }
 
   if (opt_objective == "grid") {
     O_windows <- map(

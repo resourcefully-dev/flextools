@@ -110,6 +110,59 @@ test_that("optimization of demand works for combined objective and forward direc
   expect_type(opt_building, "double")
 })
 
+test_that("numeric demand objective endpoints reuse pure objective formulations", {
+  opt_grid_chr <- opt_data %>%
+    mutate(
+      flexible = building
+    ) %>%
+    optimize_demand(
+      opt_objective = "grid",
+      direction = "forward",
+      flex_window_hours = 6,
+      time_horizon = 12
+    )
+
+  opt_grid_num <- expect_no_message(
+    opt_data %>%
+      mutate(
+        flexible = building
+      ) %>%
+      optimize_demand(
+        opt_objective = 1,
+        direction = "forward",
+        flex_window_hours = 6,
+        time_horizon = 12
+      )
+  )
+
+  opt_cost_chr <- opt_data %>%
+    mutate(
+      flexible = building
+    ) %>%
+    optimize_demand(
+      opt_objective = "cost",
+      direction = "forward",
+      flex_window_hours = 6,
+      time_horizon = 12
+    )
+
+  opt_cost_num <- expect_no_message(
+    opt_data %>%
+      mutate(
+        flexible = building
+      ) %>%
+      optimize_demand(
+        opt_objective = 0,
+        direction = "forward",
+        flex_window_hours = 6,
+        time_horizon = 12
+      )
+  )
+
+  expect_equal(as.numeric(opt_grid_num), as.numeric(opt_grid_chr), tolerance = 1e-6)
+  expect_equal(as.numeric(opt_cost_num), as.numeric(opt_cost_chr), tolerance = 1e-6)
+})
+
 test_that("optimization of demand works for grid objective and backward direction and a window of 2 days", {
   opt_building <- opt_data %>%
     mutate(

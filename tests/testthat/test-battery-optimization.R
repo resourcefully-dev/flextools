@@ -331,3 +331,44 @@ test_that("battery optimization does not use simultaneous cycling as an energy s
     expect_equal(storage, rep(0, length(storage)), tolerance = 1e-5)
   })
 })
+
+test_that("battery branch-and-bound limit returns a feasible incumbent", {
+  hard_window <- flextools::energy_profiles |>
+    select(
+      datetime,
+      production = solar,
+      static = building,
+      price_exported,
+      price_imported
+    ) |>
+    filter(
+      .data$datetime >= as.POSIXct("2023-06-04 05:00:00", tz = "UTC"),
+      .data$datetime < as.POSIXct("2023-06-05 05:00:00", tz = "UTC")
+    )
+
+  testthat::local_mocked_bindings(
+    battery_branch_and_bound_node_limit = function() 1L
+  )
+
+  profile <- NULL
+  expect_message(
+    profile <- minimize_net_power_window_battery(
+        G = hard_window$production,
+        L = hard_window$static,
+        Bcap = 50 * 60 / 15,
+        Bc = 4,
+        Bd = 4,
+        SOCmin = 0,
+        SOCmax = 100,
+        SOCini = 0,
+        import_capacity = rep(Inf, nrow(hard_window)),
+        export_capacity = rep(Inf, nrow(hard_window)),
+        lambda = 0,
+        charge_eff = 0.9,
+        discharge_eff = 0.9
+      ),
+    "branch-and-bound limit reached"
+  )
+
+  expect_no_simultaneous_battery_flows(profile)
+})

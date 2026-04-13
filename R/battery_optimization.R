@@ -35,6 +35,16 @@ battery_relative_gap_tolerance <- function() {
 }
 
 
+battery_branch_and_bound_node_limit <- function() {
+  1000L
+}
+
+
+battery_branch_and_bound_time_limit_seconds <- function() {
+  1
+}
+
+
 battery_objective_gap <- function(lower_bound, incumbent) {
   optimization_objective_gap(lower_bound, incumbent)
 }
@@ -46,6 +56,15 @@ battery_solver_status_message <- function(result) {
   }
 
   result$status
+}
+
+
+battery_solution_is_acceptable <- function(result) {
+  battery_solver_status_message(result) %in% c(
+    "Optimal",
+    "Node limit reached",
+    "Time limit reached"
+  )
 }
 
 
@@ -290,6 +309,10 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
   total_mode_variables <- solver_data$total_mode_variables
   objective_tolerance <- battery_objective_tolerance()
   relative_gap_tolerance <- battery_relative_gap_tolerance()
+  node_limit <- battery_branch_and_bound_node_limit()
+  time_limit <- battery_branch_and_bound_time_limit_seconds()
+  start_elapsed <- proc.time()[["elapsed"]]
+  nodes_visited <- 0L
 
   root_relaxation <- battery_solve_qp_relaxation(
     solver_data = solver_data,
@@ -359,6 +382,31 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
   }
 
   while (length(stack) > 0) {
+    nodes_visited <- nodes_visited + 1L
+    elapsed <- proc.time()[["elapsed"]] - start_elapsed
+    if (!is.null(best_x) && nodes_visited > node_limit) {
+      return(list(
+        result = list(
+          status_message = "Node limit reached",
+          objective_value = best_objective,
+          nodes_visited = nodes_visited,
+          elapsed = elapsed
+        ),
+        x = best_x
+      ))
+    }
+    if (!is.null(best_x) && elapsed > time_limit) {
+      return(list(
+        result = list(
+          status_message = "Time limit reached",
+          objective_value = best_objective,
+          nodes_visited = nodes_visited,
+          elapsed = elapsed
+        ),
+        x = best_x
+      ))
+    }
+
     node <- stack[[length(stack)]]
     stack <- stack[-length(stack)]
 
@@ -679,7 +727,12 @@ battery_solve_window <- function(
   }
 
   solution <- solve_with_capacities(import_capacity, export_capacity)
-  if (battery_highs_is_optimal(solution$result)) {
+  if (battery_solution_is_acceptable(solution$result)) {
+    if (!battery_highs_is_optimal(solution$result)) {
+      message_once(
+        "\u26A0\uFE0F Optimization warning: battery branch-and-bound limit reached in some windows. Returning best feasible incumbent."
+      )
+    }
     return(battery_attach_solution(solution$x, solver_data$time_slots))
   }
 
@@ -691,7 +744,12 @@ battery_solve_window <- function(
     rep(Inf, solver_data$time_slots),
     rep(Inf, solver_data$time_slots)
   )
-  if (battery_highs_is_optimal(solution$result)) {
+  if (battery_solution_is_acceptable(solution$result)) {
+    if (!battery_highs_is_optimal(solution$result)) {
+      message_once(
+        "\u26A0\uFE0F Optimization warning: battery branch-and-bound limit reached in some windows. Returning best feasible incumbent."
+      )
+    }
     return(battery_attach_solution(solution$x, solver_data$time_slots))
   }
 

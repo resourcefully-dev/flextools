@@ -1,7 +1,8 @@
 # Mixed-integer battery optimization backend built on HiGHS.
-# Linear objectives are solved directly as MILP problems. Quadratic objectives
-# are solved with continuous HiGHS QP relaxations inside a branch-and-bound
-# search over the binary battery and grid operating modes.
+# The active formulation uses one signed battery power variable per timestep:
+# positive values charge the battery and negative values discharge it. Exact
+# charging/discharging efficiencies are enforced with one auxiliary energy
+# change variable and, when needed, one battery-mode binary per timestep.
 
 battery_attach_profile <- function(battery, charge, discharge) {
   attr(battery, "charge") <- as.numeric(charge)
@@ -60,15 +61,21 @@ battery_solver_status_message <- function(result) {
 
 
 battery_solution_is_acceptable <- function(result) {
-  battery_solver_status_message(result) %in% c(
-    "Optimal",
-    "Node limit reached",
-    "Time limit reached"
-  )
+  battery_solver_status_message(result) %in%
+    c(
+      "Optimal",
+      "Heuristic",
+      "Node limit reached",
+      "Time limit reached"
+    )
 }
 
 
 battery_normalize_quadratic <- function(P, tolerance = 1e-8) {
+  if (is.null(P)) {
+    return(NULL)
+  }
+
   optimization_normalize_quadratic(
     P = P,
     tolerance = tolerance,
@@ -80,25 +87,108 @@ battery_normalize_quadratic <- function(P, tolerance = 1e-8) {
 battery_build_mode_constraints <- function(solver_data, bounds) {
   time_slots <- solver_data$time_slots
   total_variables <- solver_data$n_variables + solver_data$total_mode_variables
+  A_list <- list()
+  lhs <- numeric()
+  rhs <- numeric()
 
-  A_charge_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
-  A_charge_mode[cbind(seq_len(time_slots), solver_data$charge_idx)] <- 1
-  A_charge_mode[cbind(seq_len(time_slots), solver_data$battery_mode_idx)] <- -solver_data$Bc
+  if (solver_data$has_battery_mode) {
+    A_charge <- matrix(0, nrow = time_slots, ncol = total_variables)
+    A_charge[cbind(seq_len(time_slots), solver_data$power_idx)] <- 1
+    A_charge[cbind(
+      seq_len(time_slots),
+      solver_data$battery_mode_idx
+    )] <- -solver_data$Bc
 
-  A_discharge_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
-  A_discharge_mode[cbind(seq_len(time_slots), solver_data$discharge_idx)] <- 1
-  A_discharge_mode[cbind(
-    seq_len(time_slots),
-    solver_data$battery_mode_idx
-  )] <- solver_data$Bd
+    A_discharge <- matrix(0, nrow = time_slots, ncol = total_variables)
+    A_discharge[cbind(seq_len(time_slots), solver_data$power_idx)] <- -1
+    A_discharge[cbind(
+      seq_len(time_slots),
+      solver_data$battery_mode_idx
+    )] <- solver_data$Bd
 
-  A <- rbind(A_charge_mode, A_discharge_mode)
-  lhs <- c(rep(-Inf, time_slots), rep(-Inf, time_slots))
-  rhs <- c(rep(0, time_slots), rep(solver_data$Bd, time_slots))
+    A_charge_delta <- matrix(0, nrow = time_slots, ncol = total_variables)
+    A_charge_delta[cbind(seq_len(time_slots), solver_data$delta_idx)] <- 1
+    A_charge_delta[cbind(
+      seq_len(time_slots),
+      solver_data$power_idx
+    )] <- -solver_data$charge_eff
+    A_charge_delta[cbind(
+      seq_len(time_slots),
+      solver_data$battery_mode_idx
+    )] <- solver_data$charge_branch_M
 
-  if (solver_data$has_grid_flows) {
-    # Grid-mode binaries use the existing import/export formulation and only
-    # remove the nonphysical degree of freedom where both can be positive.
+    A_charge_delta_neg <- matrix(0, nrow = time_slots, ncol = total_variables)
+    A_charge_delta_neg[cbind(seq_len(time_slots), solver_data$delta_idx)] <- -1
+    A_charge_delta_neg[cbind(
+      seq_len(time_slots),
+      solver_data$power_idx
+    )] <- solver_data$charge_eff
+    A_charge_delta_neg[cbind(
+      seq_len(time_slots),
+      solver_data$battery_mode_idx
+    )] <- solver_data$charge_branch_M
+
+    A_discharge_delta <- matrix(0, nrow = time_slots, ncol = total_variables)
+    A_discharge_delta[cbind(seq_len(time_slots), solver_data$delta_idx)] <- 1
+    A_discharge_delta[cbind(
+      seq_len(time_slots),
+      solver_data$power_idx
+    )] <- -(1 / solver_data$discharge_eff)
+    A_discharge_delta[cbind(
+      seq_len(time_slots),
+      solver_data$battery_mode_idx
+    )] <- -solver_data$discharge_branch_M
+
+    A_discharge_delta_neg <- matrix(
+      0,
+      nrow = time_slots,
+      ncol = total_variables
+    )
+    A_discharge_delta_neg[cbind(
+      seq_len(time_slots),
+      solver_data$delta_idx
+    )] <- -1
+    A_discharge_delta_neg[cbind(
+      seq_len(time_slots),
+      solver_data$power_idx
+    )] <- 1 / solver_data$discharge_eff
+    A_discharge_delta_neg[cbind(
+      seq_len(time_slots),
+      solver_data$battery_mode_idx
+    )] <- -solver_data$discharge_branch_M
+
+    A_list <- c(
+      A_list,
+      list(
+        A_charge,
+        A_discharge,
+        A_charge_delta,
+        A_charge_delta_neg,
+        A_discharge_delta,
+        A_discharge_delta_neg
+      )
+    )
+    lhs <- c(
+      lhs,
+      rep(-Inf, time_slots),
+      rep(-Inf, time_slots),
+      rep(-Inf, time_slots),
+      rep(-Inf, time_slots),
+      rep(-Inf, time_slots),
+      rep(-Inf, time_slots)
+    )
+    rhs <- c(
+      rhs,
+      rep(0, time_slots),
+      rep(solver_data$Bd, time_slots),
+      rep(solver_data$charge_branch_M, time_slots),
+      rep(solver_data$charge_branch_M, time_slots),
+      rep(0, time_slots),
+      rep(0, time_slots)
+    )
+  }
+
+  if (solver_data$has_grid_mode) {
     A_import_mode <- matrix(0, nrow = time_slots, ncol = total_variables)
     A_import_mode[cbind(seq_len(time_slots), solver_data$import_idx)] <- 1
     A_import_mode[cbind(seq_len(time_slots), solver_data$grid_mode_idx)] <-
@@ -109,13 +199,21 @@ battery_build_mode_constraints <- function(solver_data, bounds) {
     A_export_mode[cbind(seq_len(time_slots), solver_data$grid_mode_idx)] <-
       bounds$export_mode_ub
 
-    A <- rbind(A, A_import_mode, A_export_mode)
+    A_list <- c(A_list, list(A_import_mode, A_export_mode))
     lhs <- c(lhs, rep(-Inf, time_slots), rep(-Inf, time_slots))
     rhs <- c(rhs, rep(0, time_slots), bounds$export_mode_ub)
   }
 
+  if (length(A_list) == 0) {
+    return(list(
+      A = matrix(0, nrow = 0, ncol = total_variables),
+      lhs = numeric(),
+      rhs = numeric()
+    ))
+  }
+
   list(
-    A = A,
+    A = do.call(rbind, A_list),
     lhs = lhs,
     rhs = rhs
   )
@@ -131,6 +229,7 @@ battery_build_highs_problem <- function(
 ) {
   total_mode_variables <- solver_data$total_mode_variables
   total_variables <- solver_data$n_variables + total_mode_variables
+
   if (is.null(mode_lower)) {
     mode_lower <- rep(0, total_mode_variables)
   }
@@ -143,6 +242,7 @@ battery_build_highs_problem <- function(
     solver_data$A,
     matrix(0, nrow = nrow(solver_data$A), ncol = total_mode_variables)
   )
+
   Q <- NULL
   if (!is.null(solver_data$P)) {
     Q <- matrix(0, nrow = total_variables, ncol = total_variables)
@@ -155,8 +255,8 @@ battery_build_highs_problem <- function(
   list(
     Q = Q,
     L = c(solver_data$q, rep(0, total_mode_variables)),
-    lower = c(rep(0, solver_data$n_variables), mode_lower),
-    upper = c(rep(Inf, solver_data$n_variables), mode_upper),
+    lower = c(solver_data$continuous_lower, mode_lower),
+    upper = c(solver_data$continuous_upper, mode_upper),
     A = rbind(A_base, mode_constraints$A),
     lhs = c(bounds$lb, mode_constraints$lhs),
     rhs = c(bounds$ub, mode_constraints$rhs),
@@ -188,93 +288,160 @@ battery_solve_highs_problem <- function(problem) {
 
 
 battery_mode_values <- function(x_value, solver_data) {
+  if (solver_data$total_mode_variables == 0) {
+    return(numeric())
+  }
+
   x_value[solver_data$mode_variable_idx]
 }
 
 
 battery_round_mode_guess <- function(x_value, solver_data) {
-  charge <- x_value[solver_data$charge_idx]
-  discharge <- x_value[solver_data$discharge_idx]
-  battery_mode <- as.numeric(charge >= discharge)
+  mode_guess <- numeric()
 
-  if (!solver_data$has_grid_flows) {
-    return(battery_mode)
+  if (solver_data$has_battery_mode) {
+    power <- x_value[solver_data$power_idx]
+    delta <- x_value[solver_data$delta_idx]
+    charge_residual <- abs(delta - solver_data$charge_eff * power)
+    discharge_residual <- abs(delta - power / solver_data$discharge_eff)
+    battery_mode <- as.numeric(charge_residual <= discharge_residual)
+    battery_mode[abs(power) <= battery_solution_tolerance()] <- 1
+    mode_guess <- c(mode_guess, battery_mode)
+  }
+
+  if (solver_data$has_grid_mode) {
+    net_exchange <- solver_data$L -
+      solver_data$G +
+      x_value[solver_data$power_idx]
+    grid_mode <- as.numeric(net_exchange >= 0)
+    near_zero <- abs(net_exchange) <= battery_solution_tolerance()
+    if (any(near_zero)) {
+      import <- x_value[solver_data$import_idx]
+      export <- x_value[solver_data$export_idx]
+      grid_mode[near_zero] <- as.numeric(import[near_zero] >= export[near_zero])
+    }
+    mode_guess <- c(mode_guess, grid_mode)
+  }
+
+  mode_guess
+}
+
+
+battery_solution_is_physically_valid <- function(
+  x_value,
+  solver_data,
+  tolerance = 1e-6
+) {
+  power <- x_value[solver_data$power_idx]
+  delta <- x_value[solver_data$delta_idx]
+
+  if (solver_data$has_battery_mode) {
+    charge_ok <- (power >= -tolerance) &
+      (abs(delta - solver_data$charge_eff * power) <= tolerance)
+    discharge_ok <- (power <= tolerance) &
+      (abs(delta - power / solver_data$discharge_eff) <= tolerance)
+
+    if (any(!(charge_ok | discharge_ok))) {
+      return(FALSE)
+    }
+  } else {
+    if (any(abs(delta - power) > tolerance)) {
+      return(FALSE)
+    }
+  }
+
+  if (!solver_data$has_grid_mode) {
+    return(TRUE)
   }
 
   import <- x_value[solver_data$import_idx]
   export <- x_value[solver_data$export_idx]
-  grid_mode <- as.numeric(import >= export)
-
-  c(battery_mode, grid_mode)
+  !any(import > tolerance & export > tolerance)
 }
 
 
 battery_branch_index <- function(x_value, solver_data, tolerance = 1e-6) {
-  charge <- x_value[solver_data$charge_idx]
-  discharge <- x_value[solver_data$discharge_idx]
-  simultaneous <- which(charge > tolerance & discharge > tolerance)
-
-  if (length(simultaneous) > 0) {
-    scores <- pmin(charge[simultaneous], discharge[simultaneous])
-    return(simultaneous[which.max(scores)])
-  }
-
-  if (solver_data$has_grid_flows) {
+  if (solver_data$has_grid_mode) {
     import <- x_value[solver_data$import_idx]
     export <- x_value[solver_data$export_idx]
     simultaneous_grid <- which(import > tolerance & export > tolerance)
 
     if (length(simultaneous_grid) > 0) {
       scores <- pmin(import[simultaneous_grid], export[simultaneous_grid])
-      return(solver_data$time_slots + simultaneous_grid[which.max(scores)])
+      return(
+        length(solver_data$battery_mode_idx) +
+          simultaneous_grid[which.max(scores)]
+      )
     }
   }
 
-  z_value <- battery_mode_values(x_value, solver_data)
-  fractional <- which(z_value > tolerance & z_value < 1 - tolerance)
-  if (length(fractional) == 0) {
+  if (!solver_data$has_battery_mode) {
     return(NA_integer_)
   }
 
-  scores <- pmin(z_value[fractional], 1 - z_value[fractional])
-  fractional[which.max(scores)]
+  power <- x_value[solver_data$power_idx]
+  delta <- x_value[solver_data$delta_idx]
+  charge_residual <- abs(delta - solver_data$charge_eff * power)
+  discharge_residual <- abs(delta - power / solver_data$discharge_eff)
+  valid <- ((power >= -tolerance) & (charge_residual <= tolerance)) |
+    ((power <= tolerance) & (discharge_residual <= tolerance))
+
+  invalid_idx <- which(!valid)
+  if (length(invalid_idx) == 0) {
+    return(NA_integer_)
+  }
+
+  scores <- pmin(charge_residual[invalid_idx], discharge_residual[invalid_idx])
+  invalid_idx[which.max(scores)]
 }
 
 
-battery_has_simultaneous_flows <- function(
-  x_value,
-  solver_data,
-  tolerance = 1e-6
-) {
-  charge <- x_value[solver_data$charge_idx]
-  discharge <- x_value[solver_data$discharge_idx]
-
-  if (any(charge > tolerance & discharge > tolerance)) {
-    return(TRUE)
-  }
-
-  if (!solver_data$has_grid_flows) {
-    return(FALSE)
-  }
-
-  import <- x_value[solver_data$import_idx]
-  export <- x_value[solver_data$export_idx]
-  any(import > tolerance & export > tolerance)
-}
-
-
-battery_attach_solution <- function(x_value, time_slots) {
-  charge <- pmax(x_value[seq_len(time_slots)], 0)
-  discharge <- pmax(x_value[seq_len(time_slots) + time_slots], 0)
+battery_attach_solution <- function(x_value, solver_data) {
+  power <- x_value[solver_data$power_idx]
+  charge <- pmax(power, 0)
+  discharge <- pmax(-power, 0)
   tolerance <- battery_solution_tolerance()
   charge[charge < tolerance] <- 0
   discharge[discharge < tolerance] <- 0
+  battery <- charge - discharge
 
-  battery_attach_profile(charge - discharge, charge, discharge)
+  battery_attach_profile(battery, charge, discharge)
 }
 
 
 battery_solve_milp_window <- function(solver_data, bounds) {
+  if (solver_data$total_mode_variables == 0) {
+    return(battery_solve_qp_relaxation(
+      solver_data = solver_data,
+      bounds = bounds,
+      mode_lower = numeric(),
+      mode_upper = numeric()
+    ))
+  }
+
+  root_relaxation <- battery_solve_qp_relaxation(
+    solver_data = solver_data,
+    bounds = bounds,
+    mode_lower = rep(0, solver_data$total_mode_variables),
+    mode_upper = rep(1, solver_data$total_mode_variables)
+  )
+
+  if (
+    battery_highs_is_optimal(root_relaxation$result) &&
+      battery_solution_is_physically_valid(root_relaxation$x, solver_data)
+  ) {
+    return(root_relaxation)
+  }
+
+  heuristic <- battery_try_mode_heuristic(
+    solver_data = solver_data,
+    bounds = bounds,
+    root_relaxation = root_relaxation
+  )
+  if (!is.null(heuristic)) {
+    return(heuristic)
+  }
+
   problem <- battery_build_highs_problem(
     solver_data = solver_data,
     bounds = bounds,
@@ -305,7 +472,213 @@ battery_solve_qp_relaxation <- function(
 }
 
 
+battery_solve_fixed_battery_modes <- function(
+  solver_data,
+  bounds,
+  battery_mode
+) {
+  if (solver_data$has_grid_flows || !solver_data$has_battery_mode) {
+    stop(
+      "Error: fixed battery mode solver only supports battery-only mode problems"
+    )
+  }
+
+  time_slots <- solver_data$time_slots
+  lower <- solver_data$continuous_lower
+  upper <- solver_data$continuous_upper
+  lower[solver_data$power_idx] <- ifelse(battery_mode > 0.5, 0, -solver_data$Bd)
+  upper[solver_data$power_idx] <- ifelse(battery_mode > 0.5, solver_data$Bc, 0)
+
+  A_delta <- cbind(
+    diag(ifelse(
+      battery_mode > 0.5,
+      -solver_data$charge_eff,
+      -(1 / solver_data$discharge_eff)
+    )),
+    diag(time_slots)
+  )
+
+  problem <- list(
+    Q = solver_data$P,
+    L = solver_data$q,
+    lower = lower,
+    upper = upper,
+    A = rbind(solver_data$A, A_delta),
+    lhs = c(bounds$lb, rep(0, time_slots)),
+    rhs = c(bounds$ub, rep(0, time_slots)),
+    types = rep(1L, solver_data$n_variables)
+  )
+  result <- battery_solve_highs_problem(problem)
+
+  list(result = result, x = result$primal_solution)
+}
+
+
+battery_solve_fixed_modes <- function(solver_data, bounds, mode_values) {
+  if (length(mode_values) != solver_data$total_mode_variables) {
+    stop("Error: fixed mode vector has invalid length")
+  }
+
+  if (solver_data$has_battery_mode && !solver_data$has_grid_flows) {
+    return(battery_solve_fixed_battery_modes(
+      solver_data = solver_data,
+      bounds = bounds,
+      battery_mode = mode_values[seq_along(solver_data$battery_mode_idx)]
+    ))
+  }
+
+  battery_solve_qp_relaxation(
+    solver_data = solver_data,
+    bounds = bounds,
+    mode_lower = mode_values,
+    mode_upper = mode_values
+  )
+}
+
+
+battery_guess_modes_fast <- function(solver_data, bounds) {
+  if (!solver_data$has_battery_mode || solver_data$has_grid_flows) {
+    return(NULL)
+  }
+
+  approx_solver_data <- battery_build_solver_data(
+    P = solver_data$P,
+    q = solver_data$q,
+    G = solver_data$G,
+    L = solver_data$L,
+    Bcap = solver_data$Bcap,
+    Bc = solver_data$Bc,
+    Bd = solver_data$Bd,
+    SOCmin = solver_data$SOCmin,
+    SOCmax = solver_data$SOCmax,
+    SOCini = solver_data$SOCini,
+    charge_eff = 1,
+    discharge_eff = 1
+  )
+  approx_bounds <- approx_solver_data$bounds_with_capacities(
+    bounds$import_cap,
+    bounds$export_cap
+  )
+  approx_solution <- battery_solve_qp_relaxation(
+    solver_data = approx_solver_data,
+    bounds = approx_bounds,
+    mode_lower = numeric(),
+    mode_upper = numeric()
+  )
+
+  if (!battery_highs_is_optimal(approx_solution$result)) {
+    return(NULL)
+  }
+
+  as.numeric(approx_solution$x[approx_solver_data$power_idx] >= 0)
+}
+
+
+battery_build_mode_guess <- function(
+  solver_data,
+  bounds,
+  root_relaxation = NULL
+) {
+  if (solver_data$total_mode_variables == 0) {
+    return(numeric())
+  }
+
+  if (is.null(root_relaxation)) {
+    root_relaxation <- battery_solve_qp_relaxation(
+      solver_data = solver_data,
+      bounds = bounds,
+      mode_lower = rep(0, solver_data$total_mode_variables),
+      mode_upper = rep(1, solver_data$total_mode_variables)
+    )
+  }
+
+  if (!battery_highs_is_optimal(root_relaxation$result)) {
+    return(NULL)
+  }
+
+  mode_guess <- battery_round_mode_guess(root_relaxation$x, solver_data)
+
+  if (!solver_data$has_grid_flows) {
+    fast_battery_mode <- battery_guess_modes_fast(solver_data, bounds)
+    if (!is.null(fast_battery_mode)) {
+      mode_guess[seq_along(fast_battery_mode)] <- fast_battery_mode
+    }
+  }
+
+  mode_guess
+}
+
+
+battery_try_mode_heuristic <- function(
+  solver_data,
+  bounds,
+  root_relaxation = NULL
+) {
+  mode_guess <- battery_build_mode_guess(
+    solver_data = solver_data,
+    bounds = bounds,
+    root_relaxation = root_relaxation
+  )
+
+  if (is.null(mode_guess)) {
+    return(NULL)
+  }
+
+  if (solver_data$has_battery_mode && solver_data$has_grid_mode) {
+    partial_mode_lower <- c(
+      mode_guess[seq_along(solver_data$battery_mode_idx)],
+      rep(0, length(solver_data$grid_mode_idx))
+    )
+    partial_mode_upper <- c(
+      mode_guess[seq_along(solver_data$battery_mode_idx)],
+      rep(1, length(solver_data$grid_mode_idx))
+    )
+    partial_solution <- battery_solve_qp_relaxation(
+      solver_data = solver_data,
+      bounds = bounds,
+      mode_lower = partial_mode_lower,
+      mode_upper = partial_mode_upper
+    )
+
+    if (battery_highs_is_optimal(partial_solution$result)) {
+      mode_guess <- battery_round_mode_guess(partial_solution$x, solver_data)
+    }
+  }
+
+  heuristic <- battery_solve_fixed_modes(
+    solver_data = solver_data,
+    bounds = bounds,
+    mode_values = mode_guess
+  )
+
+  if (!battery_highs_is_optimal(heuristic$result)) {
+    return(NULL)
+  }
+
+  if (!battery_solution_is_physically_valid(heuristic$x, solver_data)) {
+    return(NULL)
+  }
+
+  list(
+    result = list(
+      status_message = "Heuristic",
+      objective_value = heuristic$result$objective_value
+    ),
+    x = heuristic$x
+  )
+}
+
+
 battery_solve_miqp_window <- function(solver_data, bounds) {
+  if (solver_data$total_mode_variables == 0) {
+    return(battery_solve_qp_relaxation(
+      solver_data = solver_data,
+      bounds = bounds,
+      mode_lower = numeric(),
+      mode_upper = numeric()
+    ))
+  }
+
   total_mode_variables <- solver_data$total_mode_variables
   objective_tolerance <- battery_objective_tolerance()
   relative_gap_tolerance <- battery_relative_gap_tolerance()
@@ -313,6 +686,30 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
   time_limit <- battery_branch_and_bound_time_limit_seconds()
   start_elapsed <- proc.time()[["elapsed"]]
   nodes_visited <- 0L
+
+  if (!solver_data$has_grid_flows && solver_data$has_battery_mode) {
+    fast_mode_guess <- battery_guess_modes_fast(solver_data, bounds)
+    if (!is.null(fast_mode_guess)) {
+      heuristic <- battery_solve_fixed_battery_modes(
+        solver_data = solver_data,
+        bounds = bounds,
+        battery_mode = fast_mode_guess
+      )
+
+      if (
+        battery_highs_is_optimal(heuristic$result) &&
+          battery_solution_is_physically_valid(heuristic$x, solver_data)
+      ) {
+        return(list(
+          result = list(
+            status_message = "Heuristic",
+            objective_value = heuristic$result$objective_value
+          ),
+          x = heuristic$x
+        ))
+      }
+    }
+  }
 
   root_relaxation <- battery_solve_qp_relaxation(
     solver_data = solver_data,
@@ -328,11 +725,17 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
     ))
   }
 
-  # Most practical windows already satisfy the exact operating modes in the
-  # continuous QP relaxation. In those cases we can accept the relaxation
-  # directly and avoid the much slower custom branch-and-bound search.
-  if (!battery_has_simultaneous_flows(root_relaxation$x, solver_data)) {
+  if (battery_solution_is_physically_valid(root_relaxation$x, solver_data)) {
     return(root_relaxation)
+  }
+
+  heuristic <- battery_try_mode_heuristic(
+    solver_data = solver_data,
+    bounds = bounds,
+    root_relaxation = root_relaxation
+  )
+  if (!is.null(heuristic)) {
+    return(heuristic)
   }
 
   best_objective <- Inf
@@ -343,6 +746,10 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
   ))
 
   update_incumbent <- function(mode_fixed) {
+    if (is.null(mode_fixed)) {
+      return()
+    }
+
     heuristic <- battery_solve_qp_relaxation(
       solver_data = solver_data,
       bounds = bounds,
@@ -354,6 +761,10 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
       return()
     }
 
+    if (!battery_solution_is_physically_valid(heuristic$x, solver_data)) {
+      return()
+    }
+
     if (
       heuristic$result$objective_value + objective_tolerance < best_objective
     ) {
@@ -362,7 +773,11 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
     }
   }
 
-  root_mode_guess <- battery_round_mode_guess(root_relaxation$x, solver_data)
+  root_mode_guess <- battery_build_mode_guess(
+    solver_data = solver_data,
+    bounds = bounds,
+    root_relaxation = root_relaxation
+  )
   update_incumbent(root_mode_guess)
 
   if (
@@ -370,7 +785,8 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
       battery_objective_gap(
         lower_bound = root_relaxation$result$objective_value,
         incumbent = best_objective
-      ) <= relative_gap_tolerance
+      ) <=
+        relative_gap_tolerance
   ) {
     return(list(
       result = list(
@@ -423,6 +839,7 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
         mode_upper = node$mode_upper
       )
     }
+
     if (!battery_highs_is_optimal(relaxation$result)) {
       next
     }
@@ -438,15 +855,20 @@ battery_solve_miqp_window <- function(solver_data, bounds) {
         battery_objective_gap(
           lower_bound = relaxation$result$objective_value,
           incumbent = best_objective
-        ) <= relative_gap_tolerance
+        ) <=
+          relative_gap_tolerance
     ) {
+      next
+    }
+
+    if (battery_solution_is_physically_valid(relaxation$x, solver_data)) {
+      best_objective <- relaxation$result$objective_value
+      best_x <- relaxation$x
       next
     }
 
     branch_idx <- battery_branch_index(relaxation$x, solver_data)
     if (is.na(branch_idx)) {
-      best_objective <- relaxation$result$objective_value
-      best_x <- relaxation$x
       next
     }
 
@@ -521,45 +943,66 @@ battery_build_solver_data <- function(
   charge_eff,
   discharge_eff
 ) {
-  P_symmetric <- (P + t(P)) / 2
+  P_symmetric <- if (is.null(P)) {
+    NULL
+  } else {
+    battery_normalize_quadratic((P + t(P)) / 2)
+  }
   time_slots <- length(G)
-  identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
 
   if (charge_eff <= 0 || discharge_eff <= 0) {
     stop("Error: charge and discharge efficiencies must be positive")
   }
 
-  n_variables <- length(q)
-  has_grid_flows <- n_variables > 2 * time_slots
+  has_grid_flows <- length(q) > 2 * time_slots
+  has_battery_mode <- !(abs(charge_eff - 1) <= 1e-12 &&
+    abs(discharge_eff - 1) <= 1e-12)
+  n_grid_variables <- if (has_grid_flows) 2 * time_slots else 0L
+  n_variables <- 2 * time_slots + n_grid_variables
+
+  power_idx <- seq_len(time_slots)
+  delta_idx <- seq_len(time_slots) + time_slots
+  import_idx <- if (has_grid_flows) {
+    seq_len(time_slots) + 2 * time_slots
+  } else {
+    integer()
+  }
+  export_idx <- if (has_grid_flows) {
+    seq_len(time_slots) + 3 * time_slots
+  } else {
+    integer()
+  }
+
+  continuous_lower <- c(
+    rep(-Bd, time_slots),
+    rep(-Bd / discharge_eff, time_slots),
+    if (has_grid_flows) rep(0, 2 * time_slots) else numeric()
+  )
+  continuous_upper <- c(
+    rep(Bc, time_slots),
+    rep(charge_eff * Bc, time_slots),
+    if (has_grid_flows) rep(Inf, 2 * time_slots) else numeric()
+  )
+
+  lb_cumsum <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
+  ub_cumsum <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
 
   if (has_grid_flows) {
-    zeroMat <- identityMat * 0
+    zeroMat <- matrix(0, nrow = time_slots, ncol = time_slots)
 
-    Amat_C <- cbind(identityMat, zeroMat, zeroMat, zeroMat)
-    ub_C <- rep(Bc, time_slots)
-
-    Amat_D <- cbind(zeroMat, identityMat, zeroMat, zeroMat)
-    ub_D <- rep(Bd, time_slots)
-
-    Amat_I <- cbind(zeroMat, zeroMat, identityMat, zeroMat)
-    Amat_E <- cbind(zeroMat, zeroMat, zeroMat, identityMat)
-
-    Amat_balance <- cbind(identityMat, -identityMat, -identityMat, identityMat)
-    eq_balance <- G - L
-
-    Amat_cumsum <- cbind(
-      charge_eff * cumsumMat,
-      -(1 / discharge_eff) * cumsumMat,
+    A_import <- cbind(zeroMat, zeroMat, diag(time_slots), zeroMat)
+    A_export <- cbind(zeroMat, zeroMat, zeroMat, diag(time_slots))
+    A_balance <- cbind(
+      diag(time_slots),
       zeroMat,
-      zeroMat
+      -diag(time_slots),
+      diag(time_slots)
     )
-    lb_cumsum <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
-    ub_cumsum <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
-
-    Amat_energy <- cbind(
-      matrix(charge_eff, nrow = 1, ncol = time_slots),
-      matrix(-1 / discharge_eff, nrow = 1, ncol = time_slots),
+    A_soc <- cbind(zeroMat, cumsumMat, zeroMat, zeroMat)
+    A_energy <- cbind(
+      matrix(0, nrow = 1, ncol = time_slots),
+      matrix(1, nrow = 1, ncol = time_slots),
       matrix(0, nrow = 1, ncol = time_slots),
       matrix(0, nrow = 1, ncol = time_slots)
     )
@@ -582,56 +1025,32 @@ battery_build_solver_data <- function(
         lb = c(
           rep(0, time_slots),
           rep(0, time_slots),
-          rep(0, time_slots),
-          rep(0, time_slots),
-          eq_balance,
+          G - L,
           lb_cumsum,
           0
         ),
         ub = c(
-          ub_C,
-          ub_D,
           import_cap,
           export_cap,
-          eq_balance,
+          G - L,
           ub_cumsum,
           0
         ),
+        import_cap = import_cap,
+        export_cap = export_cap,
         import_mode_ub = import_mode_ub,
         export_mode_ub = export_mode_ub
       )
     }
 
-    Amat <- rbind(
-      Amat_C,
-      Amat_D,
-      Amat_I,
-      Amat_E,
-      Amat_balance,
-      Amat_cumsum,
-      Amat_energy
-    )
+    A <- rbind(A_import, A_export, A_balance, A_soc, A_energy)
   } else {
-    zeroMat <- identityMat * 0
-
-    Amat_C <- cbind(identityMat, zeroMat)
-    ub_C <- rep(Bc, time_slots)
-
-    Amat_D <- cbind(zeroMat, identityMat)
-    ub_D <- rep(Bd, time_slots)
-
-    Amat_grid <- cbind(identityMat, -identityMat)
-
-    Amat_cumsum <- cbind(
-      charge_eff * cumsumMat,
-      -(1 / discharge_eff) * cumsumMat
-    )
-    lb_cumsum <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
-    ub_cumsum <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
-
-    Amat_energy <- cbind(
-      matrix(charge_eff, nrow = 1, ncol = time_slots),
-      matrix(-1 / discharge_eff, nrow = 1, ncol = time_slots)
+    zeroMat <- matrix(0, nrow = time_slots, ncol = time_slots)
+    A_grid <- cbind(diag(time_slots), zeroMat)
+    A_soc <- cbind(zeroMat, cumsumMat)
+    A_energy <- cbind(
+      matrix(0, nrow = 1, ncol = time_slots),
+      matrix(1, nrow = 1, ncol = time_slots)
     )
 
     bounds_with_capacities <- function(import_cap, export_cap) {
@@ -640,51 +1059,71 @@ battery_build_solver_data <- function(
 
       list(
         lb = c(
-          rep(0, time_slots),
-          rep(0, time_slots),
           G - L - export_cap,
           lb_cumsum,
           0
         ),
         ub = c(
-          ub_C,
-          ub_D,
           G - L + import_cap,
           ub_cumsum,
           0
-        )
+        ),
+        import_cap = import_cap,
+        export_cap = export_cap
       )
     }
 
-    Amat <- rbind(Amat_C, Amat_D, Amat_grid, Amat_cumsum, Amat_energy)
+    A <- rbind(A_grid, A_soc, A_energy)
   }
+
+  mode_offset <- n_variables
+  battery_mode_idx <- if (has_battery_mode) {
+    mode_offset + seq_len(time_slots)
+  } else {
+    integer()
+  }
+  grid_mode_idx <- if (has_grid_flows) {
+    mode_offset + length(battery_mode_idx) + seq_len(time_slots)
+  } else {
+    integer()
+  }
+  total_mode_variables <- length(battery_mode_idx) + length(grid_mode_idx)
+  mode_variable_idx <- c(battery_mode_idx, grid_mode_idx)
+
+  branch_factor <- (1 / discharge_eff) - charge_eff
 
   list(
     time_slots = time_slots,
     n_variables = n_variables,
-    charge_idx = seq_len(time_slots),
-    discharge_idx = seq_len(time_slots) + time_slots,
-    import_idx = if (has_grid_flows) seq_len(time_slots) + 2 * time_slots else NULL,
-    export_idx = if (has_grid_flows) seq_len(time_slots) + 3 * time_slots else NULL,
-    A = Amat,
+    power_idx = power_idx,
+    delta_idx = delta_idx,
+    import_idx = import_idx,
+    export_idx = export_idx,
+    A = A,
     bounds_with_capacities = bounds_with_capacities,
-    P = battery_normalize_quadratic(P_symmetric),
+    P = P_symmetric,
     q = as.numeric(q),
+    continuous_lower = continuous_lower,
+    continuous_upper = continuous_upper,
     Bc = Bc,
     Bd = Bd,
+    G = G,
+    L = L,
+    Bcap = Bcap,
+    SOCmin = SOCmin,
+    SOCmax = SOCmax,
+    SOCini = SOCini,
+    charge_eff = charge_eff,
+    discharge_eff = discharge_eff,
     has_grid_flows = has_grid_flows,
-    total_mode_variables = if (has_grid_flows) 2 * time_slots else time_slots,
-    battery_mode_idx = n_variables + seq_len(time_slots),
-    grid_mode_idx = if (has_grid_flows) {
-      n_variables + time_slots + seq_len(time_slots)
-    } else {
-      integer()
-    },
-    mode_variable_idx = if (has_grid_flows) {
-      n_variables + seq_len(2 * time_slots)
-    } else {
-      n_variables + seq_len(time_slots)
-    }
+    has_battery_mode = has_battery_mode,
+    has_grid_mode = has_grid_flows,
+    charge_branch_M = Bd * branch_factor,
+    discharge_branch_M = Bc * branch_factor,
+    total_mode_variables = total_mode_variables,
+    battery_mode_idx = battery_mode_idx,
+    grid_mode_idx = grid_mode_idx,
+    mode_variable_idx = mode_variable_idx
   )
 }
 
@@ -728,12 +1167,7 @@ battery_solve_window <- function(
 
   solution <- solve_with_capacities(import_capacity, export_capacity)
   if (battery_solution_is_acceptable(solution$result)) {
-    if (!battery_highs_is_optimal(solution$result)) {
-      message_once(
-        "\u26A0\uFE0F Optimization warning: battery branch-and-bound limit reached in some windows. Returning best feasible incumbent."
-      )
-    }
-    return(battery_attach_solution(solution$x, solver_data$time_slots))
+    return(battery_attach_solution(solution$x, solver_data))
   }
 
   message_once(
@@ -745,12 +1179,7 @@ battery_solve_window <- function(
     rep(Inf, solver_data$time_slots)
   )
   if (battery_solution_is_acceptable(solution$result)) {
-    if (!battery_highs_is_optimal(solution$result)) {
-      message_once(
-        "\u26A0\uFE0F Optimization warning: battery branch-and-bound limit reached in some windows. Returning best feasible incumbent."
-      )
-    }
-    return(battery_attach_solution(solution$x, solver_data$time_slots))
+    return(battery_attach_solution(solution$x, solver_data))
   }
 
   message_once(paste0(
@@ -812,7 +1241,6 @@ battery_solve_window <- function(
 #' @param flex_window_hours integer, flexibility window length, in hours.
 #' This optional feature lets you apply flexibility only during few hours from the `window_start_hour`.
 #' It must be lower than `window_days*24` hours.
-#' @param lambda numeric, penalty on change for the battery compared to the previous time slot.
 #' @param charge_eff numeric, battery charging efficiency (from 0 to 1, default 1).
 #' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1, default 1).
 #'
@@ -852,7 +1280,6 @@ add_battery_optimization <- function(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = 24,
-  lambda = 0,
   charge_eff = 1,
   discharge_eff = 1
 ) {
@@ -945,7 +1372,6 @@ add_battery_optimization <- function(
         SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        lambda = lambda,
         charge_eff = charge_eff,
         discharge_eff = discharge_eff
       )
@@ -964,7 +1390,6 @@ add_battery_optimization <- function(
         SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        lambda = lambda,
         charge_eff = charge_eff,
         discharge_eff = discharge_eff
       )
@@ -987,7 +1412,6 @@ add_battery_optimization <- function(
         SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
-        lambda = lambda,
         charge_eff = charge_eff,
         discharge_eff = discharge_eff
       )
@@ -1011,7 +1435,6 @@ add_battery_optimization <- function(
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         w = opt_objective,
-        lambda = lambda,
         charge_eff = charge_eff,
         discharge_eff = discharge_eff
       )
@@ -1063,7 +1486,6 @@ add_battery_optimization <- function(
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric or numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric or numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param lambda numeric, penalty on change for the flexible load
 #' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
 #' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
@@ -1083,7 +1505,6 @@ curtail_capacity_window_battery <- function(
   SOCini,
   import_capacity,
   export_capacity,
-  lambda,
   charge_eff,
   discharge_eff
 ) {
@@ -1120,7 +1541,6 @@ curtail_capacity_window_battery <- function(
     SOCini = SOCini,
     import_capacity = import_capacity,
     export_capacity = export_capacity,
-    lambda = lambda,
     charge_eff = charge_eff,
     discharge_eff = discharge_eff
   )
@@ -1194,7 +1614,6 @@ solve_optimization_battery_window <- function(
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param lambda numeric, penalty on change for the flexible load.
 #' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
 #' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
@@ -1212,22 +1631,16 @@ minimize_net_power_window_battery <- function(
   SOCini,
   import_capacity,
   export_capacity,
-  lambda,
   charge_eff,
   discharge_eff
 ) {
   time_slots <- length(G)
-  identityMat <- diag(time_slots)
-  lambdaMat <- get_lambda_matrix(time_slots)
-
-  penaltyMat <- identityMat + lambda * lambdaMat
-  P_block <- 2 * penaltyMat
+  zero_square <- matrix(0, nrow = time_slots, ncol = time_slots)
   P <- rbind(
-    cbind(P_block, -P_block),
-    cbind(-P_block, P_block)
+    cbind(2 * diag(time_slots), zero_square),
+    cbind(zero_square, zero_square)
   )
-  q_block <- 2 * (L - G)
-  q <- c(q_block, -q_block)
+  q <- c(2 * (L - G), rep(0, time_slots))
 
   solve_optimization_battery_window(
     P = P,
@@ -1264,7 +1677,6 @@ minimize_net_power_window_battery <- function(
 #' @param SOCini numeric, required State-of-Charge at the beginning/end of optimization window
 #' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
-#' @param lambda numeric, penalty on change for the flexible load
 #' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
 #' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
@@ -1286,46 +1698,20 @@ minimize_cost_window_battery <- function(
   SOCini,
   import_capacity,
   export_capacity,
-  lambda,
   charge_eff,
   discharge_eff
 ) {
   time_slots <- length(G)
-  lambdaMat <- get_lambda_matrix(time_slots)
-
-  smoothing <- 2 * lambda * lambdaMat
-  zero_block <- matrix(0, nrow = 2 * time_slots, ncol = time_slots)
-  zero_square <- matrix(0, nrow = time_slots, ncol = time_slots)
-  P <- rbind(
-    cbind(
-      rbind(
-        cbind(smoothing, -smoothing),
-        cbind(-smoothing, smoothing)
-      ),
-      zero_block,
-      zero_block
-    ),
-    cbind(
-      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
-      zero_square,
-      zero_square
-    ),
-    cbind(
-      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
-      zero_square,
-      zero_square
-    )
-  )
   q_block <- PTD - PTU
   q <- c(
     q_block,
-    -q_block,
+    rep(0, time_slots),
     PI,
     -PE
   )
 
   solve_optimization_battery_window(
-    P = P,
+    P = NULL,
     q = q,
     G = G,
     L = L,
@@ -1360,7 +1746,6 @@ minimize_cost_window_battery <- function(
 #' @param import_capacity numeric vector, grid maximum import power capacity that will limit the maximum charging power
 #' @param export_capacity numeric vector, grid maximum export power capacity that will limit the maximum discharging power
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost)
-#' @param lambda numeric, penalty on change for the flexible load
 #' @param charge_eff numeric, battery charging efficiency (from 0 to 1)
 #' @param discharge_eff numeric, battery discharging efficiency (from 0 to 1)
 #'
@@ -1383,41 +1768,17 @@ optimize_battery_window <- function(
   import_capacity,
   export_capacity,
   w,
-  lambda,
   charge_eff,
   discharge_eff
 ) {
   time_slots <- length(G)
-  identityMat <- diag(time_slots)
-  lambdaMat <- get_lambda_matrix(time_slots)
-
-  penaltyMat <- 2 * (lambda * lambdaMat + w * mean(PI)^2 * identityMat)
-  zero_block <- matrix(0, nrow = 2 * time_slots, ncol = time_slots)
-  zero_square <- matrix(0, nrow = time_slots, ncol = time_slots)
-  P <- rbind(
-    cbind(
-      rbind(
-        cbind(penaltyMat, -penaltyMat),
-        cbind(-penaltyMat, penaltyMat)
-      ),
-      zero_block,
-      zero_block
-    ),
-    cbind(
-      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
-      zero_square,
-      zero_square
-    ),
-    cbind(
-      matrix(0, nrow = time_slots, ncol = 2 * time_slots),
-      zero_square,
-      zero_square
-    )
-  )
-  q_block <- (1 - w) * (PTD - PTU) - 2 * w * mean(PI)^2 * (G - L)
+  P_net <- 2 * w * mean(PI)^2 * diag(time_slots)
+  P <- matrix(0, nrow = 4 * time_slots, ncol = 4 * time_slots)
+  P[seq_len(time_slots), seq_len(time_slots)] <- P_net
+  q_block <- (1 - w) * (PTD - PTU) + 2 * w * mean(PI)^2 * (L - G)
   q <- c(
     q_block,
-    -q_block,
+    rep(0, time_slots),
     (1 - w) * PI,
     -(1 - w) * PE
   )

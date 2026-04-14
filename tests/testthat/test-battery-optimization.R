@@ -37,7 +37,7 @@ test_that("battery optimization works for grid objective and a whole year", {
       price_imported
     ) |>
     add_battery_optimization(
-      opt_objective = 1,
+      opt_objective = "grid",
       Bcap = 50,
       Bc = 4,
       Bd = 4,
@@ -49,6 +49,7 @@ test_that("battery optimization works for grid objective and a whole year", {
 
   expect_type(opt_battery, "double")
 })
+
 
 test_that("battery optimization works for cost objective", {
   opt_battery <- opt_data |>
@@ -332,7 +333,7 @@ test_that("battery optimization does not use simultaneous cycling as an energy s
   })
 })
 
-test_that("battery branch-and-bound limit returns a feasible incumbent", {
+test_that("battery grid heuristic path returns feasible exclusive flows", {
   hard_window <- flextools::energy_profiles |>
     select(
       datetime,
@@ -346,28 +347,21 @@ test_that("battery branch-and-bound limit returns a feasible incumbent", {
       .data$datetime < as.POSIXct("2023-06-05 05:00:00", tz = "UTC")
     )
 
-  testthat::local_mocked_bindings(
-    battery_branch_and_bound_node_limit = function() 1L
-  )
-
-  profile <- NULL
-  expect_message(
-    profile <- minimize_net_power_window_battery(
-        G = hard_window$production,
-        L = hard_window$static,
-        Bcap = 50 * 60 / 15,
-        Bc = 4,
-        Bd = 4,
-        SOCmin = 0,
-        SOCmax = 100,
-        SOCini = 0,
-        import_capacity = rep(Inf, nrow(hard_window)),
-        export_capacity = rep(Inf, nrow(hard_window)),
-        lambda = 0,
-        charge_eff = 0.9,
-        discharge_eff = 0.9
-      ),
-    "branch-and-bound limit reached"
+  profile <- expect_no_message(
+    minimize_net_power_window_battery(
+      G = hard_window$production,
+      L = hard_window$static,
+      Bcap = 50 * 60 / 15,
+      Bc = 4,
+      Bd = 4,
+      SOCmin = 0,
+      SOCmax = 100,
+      SOCini = 0,
+      import_capacity = rep(Inf, nrow(hard_window)),
+      export_capacity = rep(Inf, nrow(hard_window)),
+      charge_eff = 0.9,
+      discharge_eff = 0.9
+    )
   )
 
   expect_no_simultaneous_battery_flows(profile)

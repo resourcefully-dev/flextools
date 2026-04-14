@@ -20,7 +20,6 @@ optimize_battery_window(
   import_capacity,
   export_capacity,
   w,
-  lambda,
   charge_eff,
   discharge_eff
 )
@@ -55,8 +54,6 @@ optimize_battery_window(
 \item{export_capacity}{numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
 
 \item{w}{numeric, optimization objective weight (\code{w=1} minimizes net power while \code{w=0} minimizes cost)}
-
-\item{lambda}{numeric, penalty on change for the flexible load}
 
 \item{charge_eff}{numeric, battery charging efficiency (from 0 to 1)}
 

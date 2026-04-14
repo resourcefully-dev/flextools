@@ -19,7 +19,6 @@ minimize_cost_window_battery(
   SOCini,
   import_capacity,
   export_capacity,
-  lambda,
   charge_eff,
   discharge_eff
 )
@@ -52,8 +51,6 @@ minimize_cost_window_battery(
 \item{import_capacity}{numeric vector, grid maximum import power capacity that will limit the maximum charging power}
 
 \item{export_capacity}{numeric vector, grid maximum export power capacity that will limit the maximum discharging power}
-
-\item{lambda}{numeric, penalty on change for the flexible load}
 
 \item{charge_eff}{numeric, battery charging efficiency (from 0 to 1)}
 

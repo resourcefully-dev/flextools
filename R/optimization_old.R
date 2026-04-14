@@ -569,10 +569,10 @@ solve_optimization_window_old <- function(
       verbose = FALSE,
       eps_abs = 1e-6,
       eps_rel = 1e-6,
-      polish = TRUE
+      polishing = TRUE
     )
   )
-  O <- solver$Solve()
+  O <- solver@Solve()
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
@@ -623,10 +623,10 @@ solve_optimization_window_old <- function(
         verbose = FALSE,
         eps_abs = 1e-6,
         eps_rel = 1e-6,
-        polish = TRUE
+        polishing = TRUE
       )
     )
-    O <- solver$Solve()
+    O <- solver@Solve()
 
     if (O$info$status_val %in% c(1, 2)) {
       return(round(O$x[seq_len(time_slots)], 2))
@@ -1431,10 +1431,10 @@ solve_optimization_battery_window_old <- function(
       verbose = FALSE,
       eps_abs = 1e-6,
       eps_rel = 1e-6,
-      polish = TRUE
+      polishing = TRUE
     )
   )
-  B <- solver$Solve()
+  B <- solver@Solve()
 
   # Status values: https://osqp.org/docs/interfaces/status_values.html
   # Admit "solved" (1) and "solved inaccurate" (2)
@@ -1477,10 +1477,10 @@ solve_optimization_battery_window_old <- function(
         verbose = FALSE,
         eps_abs = 1e-6,
         eps_rel = 1e-6,
-        polish = TRUE
+        polishing = TRUE
       )
     )
-    B <- solver$Solve()
+    B <- solver@Solve()
 
     if (B$info$status_val %in% c(1, 2)) {
       charge_solution <- B$x[seq_len(time_slots)]

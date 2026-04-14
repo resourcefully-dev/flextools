@@ -73,6 +73,47 @@ test_that("battery optimization qp returns zero profile when bounds are infeasib
 })
 
 
+test_that("battery optimization qp falls back to a heuristic profile on solver failure", {
+  testthat::local_mocked_bindings(
+    battery_qp_solve_osqp = function(P, q, A, lower, upper, time_slots) {
+      list(
+        result = list(
+          info = list(
+            status_val = 7L,
+            status = "mock solver failure"
+          )
+        ),
+        profile = NULL
+      )
+    },
+    .package = "flextools"
+  )
+
+  profile <- flextools:::solve_optimization_battery_window_qp(
+    G = c(8, 8, 0, 0),
+    L = c(0, 0, 8, 8),
+    Bcap = 8,
+    Bc = 4,
+    Bd = 4,
+    SOCmin = 0,
+    SOCmax = 100,
+    SOCini = 0,
+    import_capacity = Inf,
+    export_capacity = Inf,
+    P = 2 * diag(4),
+    q = 2 * c(-8, -8, 8, 8)
+  )
+
+  storage <- cumsum(profile)
+
+  expect_equal(profile, c(4, 4, -4, -4))
+  expect_true(any(abs(profile) > 1e-9))
+  expect_gte(min(storage), -1e-8)
+  expect_lte(max(storage), 8 + 1e-8)
+  expect_equal(sum(profile), 0, tolerance = 1e-8)
+})
+
+
 test_that("error when `opt_objective` is wrong in battery optimization", {
   expect_error(
     opt_data |>

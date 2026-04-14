@@ -115,6 +115,8 @@ add_battery_optimization_qp <- function(
         ~ opt_data[.x, ]
     )
 
+    reset_message_once()
+
     # Optimization
     if (opt_objective == "grid") {
         B_windows <- map(
@@ -257,6 +259,77 @@ battery_qp_infeasible_bounds <- function(lower, upper, tolerance = 1e-8) {
 }
 
 
+battery_qp_clip <- function(x, lower, upper) {
+    pmin(pmax(x, lower), upper)
+}
+
+
+battery_qp_try_heuristic <- function(
+    target,
+    lower,
+    upper,
+    Bcap,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini
+) {
+    time_slots <- length(target)
+    storage <- 0
+    profile <- numeric(time_slots)
+    lower_storage <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
+    upper_storage <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
+
+    for (i in seq_len(time_slots)) {
+        remaining_slots <- time_slots - i
+        future_storage_lower <- -remaining_slots * Bc
+        future_storage_upper <- remaining_slots * Bd
+        storage_lower <- max(lower_storage[i], future_storage_lower)
+        storage_upper <- min(upper_storage[i], future_storage_upper)
+        step_lower <- max(lower[i], storage_lower - storage)
+        step_upper <- min(upper[i], storage_upper - storage)
+
+        if (step_lower > step_upper + 1e-8) {
+            return(NULL)
+        }
+
+        profile[i] <- battery_qp_clip(target[i], step_lower, step_upper)
+        storage <- storage + profile[i]
+    }
+
+    profile
+}
+
+
+battery_qp_solve_osqp <- function(P, q, A, lower, upper, time_slots) {
+    solver <- osqp::osqp(
+        P = P,
+        q = q,
+        A = A,
+        l = lower,
+        u = upper,
+        pars = osqp::osqpSettings(
+            verbose = FALSE,
+            eps_abs = 1e-6,
+            eps_rel = 1e-6,
+            polishing = TRUE,
+            max_iter = 50000
+        )
+    )
+    result <- solver@Solve()
+
+    list(
+        result = result,
+        profile = if (result$info$status_val %in% c(1, 2)) {
+            as.numeric(result$x[seq_len(time_slots)])
+        } else {
+            NULL
+        }
+    )
+}
+
+
 #' Perform battery optimization (just a window)
 #'
 #' @param G numeric vector, being the renewable generation profile
@@ -298,6 +371,7 @@ solve_optimization_battery_window_qp <- function(
     export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
     identityMat <- diag(time_slots)
     cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
+    target <- G - L
 
     # Lower and upper bounds
     ## General bounds
@@ -309,6 +383,7 @@ solve_optimization_battery_window_qp <- function(
     ##    - UB: B <= Bc
     lb_B <- pmax(-Bd, G - L - export_capacity)
     ub_B <- pmin(Bc, G - L + import_capacity)
+    relaxed_bounds <- FALSE
 
     if (battery_qp_infeasible_bounds(lb_B, ub_B)) {
         message_once(
@@ -316,6 +391,7 @@ solve_optimization_battery_window_qp <- function(
         )
         lb_B <- rep(-Bd, time_slots)
         ub_B <- rep(Bc, time_slots)
+        relaxed_bounds <- TRUE
     }
 
     ## SOC limits
@@ -333,31 +409,74 @@ solve_optimization_battery_window_qp <- function(
         cumsumMat,
         Amat_energy
     )
-    lb <- round(c(lb_B, lb_cumsum, lb_energy), 2)
-    ub <- round(c(ub_B, ub_cumsum, ub_energy), 2)
 
-    solver <- osqp::osqp(
-        P = P,
-        q = q,
-        A = Amat,
-        l = lb,
-        u = ub,
-        pars = osqp::osqpSettings(
-            verbose = FALSE,
-            eps_abs = 1e-6,
-            eps_rel = 1e-6,
-            polishing = TRUE
-        )
+    solve_once <- function(lower_B, upper_B) {
+        lower <- round(c(lower_B, lb_cumsum, lb_energy), 2)
+        upper <- round(c(upper_B, ub_cumsum, ub_energy), 2)
+        battery_qp_solve_osqp(P, q, Amat, lower, upper, time_slots)
+    }
+
+    solution <- solve_once(lb_B, ub_B)
+    if (!is.null(solution$profile)) {
+        return(solution$profile)
+    }
+
+    heuristic <- battery_qp_try_heuristic(
+        target = target,
+        lower = lb_B,
+        upper = ub_B,
+        Bcap = Bcap,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini
     )
-    result <- solver@Solve()
+    if (!is.null(heuristic)) {
+        message_once(paste0(
+            "\u26A0\uFE0F Optimization warning: ",
+            solution$result$info$status,
+            ". Using heuristic battery profile for this window."
+        ))
+        return(heuristic)
+    }
 
-    if (result$info$status_val %in% c(1, 2)) {
-        return(as.numeric(result$x[seq_len(time_slots)]))
+    if (!relaxed_bounds) {
+        message_once(
+            "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+        )
+        lb_B <- rep(-Bd, time_slots)
+        ub_B <- rep(Bc, time_slots)
+
+        solution <- solve_once(lb_B, ub_B)
+        if (!is.null(solution$profile)) {
+            return(solution$profile)
+        }
+
+        heuristic <- battery_qp_try_heuristic(
+            target = target,
+            lower = lb_B,
+            upper = ub_B,
+            Bcap = Bcap,
+            Bc = Bc,
+            Bd = Bd,
+            SOCmin = SOCmin,
+            SOCmax = SOCmax,
+            SOCini = SOCini
+        )
+        if (!is.null(heuristic)) {
+            message_once(paste0(
+                "\u26A0\uFE0F Optimization warning: ",
+                solution$result$info$status,
+                ". Using heuristic battery profile for this window."
+            ))
+            return(heuristic)
+        }
     }
 
     message_once(paste0(
         "\u26A0\uFE0F Optimization warning: ",
-        result$info$status,
+        solution$result$info$status,
         ". Disabling battery for this window."
     ))
     battery_qp_zero_profile(time_slots)

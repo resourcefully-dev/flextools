@@ -4,14 +4,14 @@
 \alias{get_conversion_losses}
 \title{Losses due to charging/discharging process}
 \usage{
-get_conversion_losses(power, loss_charge, loss_discharge)
+get_conversion_losses(power, charge_eff = 1, discharge_eff = 1)
 }
 \arguments{
 \item{power}{numeric vector, being positive when charging and negative when discharging}
 
-\item{loss_charge}{numeric, the charging loss in percentage (\%)}
+\item{charge_eff}{numeric, charging efficiency (from 0 to 1, default to 1)}
 
-\item{loss_discharge}{numeric, the discharging loss in percentage (\%)}
+\item{discharge_eff}{numeric, discharging efficiency (from 0 to 1, default to 1)}
 }
 \value{
 numeric vector

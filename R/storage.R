@@ -17,20 +17,22 @@ get_storage_losses <- function(power, loss, time_resolution = 60) {
 #' Losses due to charging/discharging process
 #'
 #' @param power numeric vector, being positive when charging and negative when discharging
-#' @param loss_charge numeric, the charging loss in percentage (%)
-#' @param loss_discharge numeric, the discharging loss in percentage (%)
+#' @param charge_eff numeric, charging efficiency (from 0 to 1, default to 1)
+#' @param discharge_eff numeric, discharging efficiency (from 0 to 1, default to 1)
 #'
 #' @return numeric vector
 #' @export
 #'
-get_conversion_losses <- function(power, loss_charge, loss_discharge) {
+get_conversion_losses <- function(power, charge_eff = 1, discharge_eff = 1) {
   losses <- rep(0, length(power))
-  losses[power > 0] <- power[power > 0] /
-    (1 - loss_charge / 100) -
-    power[power > 0]
-  losses[power < 0] <- abs(power[power < 0]) /
-    (1 - loss_discharge / 100) -
-    abs(power[power < 0])
+
+  # charging: final grid power = power / eta_c
+  losses[power > 0] <- power[power > 0] * (1 / charge_eff - 1)
+
+  # discharging: final grid power = power * eta_d
+  losses[power < 0] <- abs(power[power < 0]) * (1 - discharge_eff)
+
+  losses
   return(losses)
 }
 

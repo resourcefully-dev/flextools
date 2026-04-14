@@ -26,6 +26,61 @@ test_that("battery optimization works for grid objective", {
   expect_type(opt_battery, "double")
 })
 
+test_that("battery optimization qp helper returns a feasible battery profile", {
+  opt_battery_qp <- opt_data |>
+    add_battery_optimization_qp(
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5
+    )
+
+  expect_type(opt_battery_qp, "double")
+  expect_equal(length(opt_battery_qp), nrow(opt_data))
+  expect_null(attr(opt_battery_qp, "charge"))
+  expect_null(attr(opt_battery_qp, "discharge"))
+
+  storage <- get_storage_level(
+    opt_battery_qp,
+    time_resolution = 15,
+    init = 0
+  )
+
+  expect_lte(max(opt_battery_qp), 4 + 1e-6)
+  expect_gte(min(opt_battery_qp), -4 - 1e-6)
+  expect_lte(max(storage), 50 + 1e-6)
+  expect_gte(min(storage), -1e-6)
+  expect_equal(tail(storage, 1), 0, tolerance = 1e-6)
+})
+
+test_that("battery optimization qp returns zero profile when bounds are infeasible", {
+  opt_data_infeasible <- opt_data |>
+    mutate(
+      production = 0,
+      static = 10,
+      import_capacity = 0,
+      export_capacity = 0
+    )
+
+  opt_battery_qp <- expect_message(
+    opt_data_infeasible |>
+      add_battery_optimization_qp(
+        Bcap = 50,
+        Bc = 1,
+        Bd = 1,
+        window_start_hour = 5
+      ),
+    "infeasible battery QP bounds"
+  )
+
+  expect_equal(
+    as.numeric(opt_battery_qp),
+    rep(0, nrow(opt_data_infeasible))
+  )
+  expect_null(attr(opt_battery_qp, "charge"))
+  expect_null(attr(opt_battery_qp, "discharge"))
+})
+
 test_that("battery optimization works for grid objective and a whole year", {
   timefully::tic()
   opt_battery <- flextools::energy_profiles |>
@@ -44,6 +99,24 @@ test_that("battery optimization works for grid objective and a whole year", {
       window_start_hour = 5,
       charge_eff = 0.9,
       discharge_eff = 0.9
+    )
+  timefully::toc()
+
+  timefully::tic()
+  opt_battery <- flextools::energy_profiles |>
+    select(
+      datetime,
+      production = solar,
+      static = building,
+      price_exported,
+      price_imported
+    ) |>
+    add_battery_optimization_qp(
+      opt_objective = "grid",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5
     )
   timefully::toc()
 

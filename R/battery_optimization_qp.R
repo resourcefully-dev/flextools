@@ -310,6 +310,14 @@ solve_optimization_battery_window_qp <- function(
     lb_B <- pmax(-Bd, G - L - export_capacity)
     ub_B <- pmin(Bc, G - L + import_capacity)
 
+    if (battery_qp_infeasible_bounds(lb_B, ub_B)) {
+        message_once(
+            "\u26A0\uFE0F Optimization warning: infeasible battery QP bounds. Removing grid constraints."
+        )
+        lb_B <- rep(-Bd, time_slots)
+        ub_B <- rep(Bc, time_slots)
+    }
+
     ## SOC limits
     Amat_cumsum <- cumsumMat
     lb_cumsum <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
@@ -319,13 +327,6 @@ solve_optimization_battery_window_qp <- function(
     Amat_energy <- matrix(1, nrow = 1, ncol = time_slots)
     lb_energy <- 0
     ub_energy <- 0
-
-    if (battery_qp_infeasible_bounds(lb_B, ub_B)) {
-        message_once(
-            "\u26A0\uFE0F Optimization warning: infeasible battery QP bounds. Disabling battery for some windows."
-        )
-        return(battery_qp_zero_profile(time_slots))
-    }
 
     Amat <- rbind(
         identityMat,
@@ -354,46 +355,10 @@ solve_optimization_battery_window_qp <- function(
         return(as.numeric(result$x[seq_len(time_slots)]))
     }
 
-    # If it's not feasible, then remove grid constraints
-    message_once(
-        "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
-    )
-    lb_B <- rep(-Bd, time_slots)
-    ub_B <- rep(Bc, time_slots)
-
-    if (battery_qp_infeasible_bounds(lb_B, ub_B)) {
-        message_once(
-            "\u26A0\uFE0F Optimization warning: infeasible battery QP bounds. Disabling battery for some windows."
-        )
-        return(battery_qp_zero_profile(time_slots))
-    }
-
-    lb <- round(c(lb_B, lb_cumsum, lb_energy), 2)
-    ub <- round(c(ub_B, ub_cumsum, ub_energy), 2)
-
-    solver <- osqp::osqp(
-        P = P,
-        q = q,
-        A = Amat,
-        l = lb,
-        u = ub,
-        pars = osqp::osqpSettings(
-            verbose = FALSE,
-            eps_abs = 1e-6,
-            eps_rel = 1e-6,
-            polishing = TRUE
-        )
-    )
-    result <- solver@Solve()
-
-    if (result$info$status_val %in% c(1, 2)) {
-        return(as.numeric(result$x[seq_len(time_slots)]))
-    }
-
     message_once(paste0(
         "\u26A0\uFE0F Optimization warning: ",
         result$info$status,
-        ". Disabling battery for some windows."
+        ". Disabling battery for this window."
     ))
     battery_qp_zero_profile(time_slots)
 }

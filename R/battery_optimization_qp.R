@@ -257,33 +257,6 @@ battery_qp_infeasible_bounds <- function(lower, upper, tolerance = 1e-8) {
 }
 
 
-battery_qp_cumsum_matrix <- function(time_slots) {
-    Matrix::sparseMatrix(
-        i = sequence(time_slots:1, from = seq_len(time_slots)),
-        j = rep(seq_len(time_slots), times = time_slots:1),
-        x = 1,
-        dims = c(time_slots, time_slots)
-    )
-}
-
-
-battery_qp_lambda_matrix <- function(time_slots) {
-    if (time_slots == 1) {
-        return(Matrix::Matrix(1, nrow = 1, ncol = 1, sparse = TRUE))
-    }
-
-    Matrix::bandSparse(
-        time_slots,
-        k = c(-1, 0, 1),
-        diagonals = list(
-            rep(-1, time_slots - 1),
-            c(1, rep(2, time_slots - 2), 1),
-            rep(-1, time_slots - 1)
-        )
-    )
-}
-
-
 #' Perform battery optimization (just a window)
 #'
 #' @param G numeric vector, being the renewable generation profile
@@ -316,10 +289,15 @@ solve_optimization_battery_window_qp <- function(
     P,
     q
 ) {
+    # Round to 2 decimals to avoid problems with lower and upper bounds
+    G <- round(G, 2)
+    L <- round(L, 2)
+
     time_slots <- length(G)
     import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
     export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
-    cumsumMat <- battery_qp_cumsum_matrix(time_slots)
+    identityMat <- diag(time_slots)
+    cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
 
     # Lower and upper bounds
     ## General bounds
@@ -338,12 +316,7 @@ solve_optimization_battery_window_qp <- function(
     ub_cumsum <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
 
     ## Total sum of B == 0 (neutral balance)
-    Amat_energy <- Matrix::Matrix(
-        1,
-        nrow = 1,
-        ncol = time_slots,
-        sparse = TRUE
-    )
+    Amat_energy <- matrix(1, nrow = 1, ncol = time_slots)
     lb_energy <- 0
     ub_energy <- 0
 
@@ -355,12 +328,12 @@ solve_optimization_battery_window_qp <- function(
     }
 
     Amat <- rbind(
-        Matrix::Diagonal(time_slots),
+        identityMat,
         cumsumMat,
         Amat_energy
     )
-    lb <- c(lb_B, lb_cumsum, lb_energy)
-    ub <- c(ub_B, ub_cumsum, ub_energy)
+    lb <- round(c(lb_B, lb_cumsum, lb_energy), 2)
+    ub <- round(c(ub_B, ub_cumsum, ub_energy), 2)
 
     solver <- osqp::osqp(
         P = P,
@@ -395,8 +368,8 @@ solve_optimization_battery_window_qp <- function(
         return(battery_qp_zero_profile(time_slots))
     }
 
-    lb <- c(lb_B, lb_cumsum, lb_energy)
-    ub <- c(ub_B, ub_cumsum, ub_energy)
+    lb <- round(c(lb_B, lb_cumsum, lb_energy), 2)
+    ub <- round(c(ub_B, ub_cumsum, ub_energy), 2)
 
     solver <- osqp::osqp(
         P = P,
@@ -457,14 +430,11 @@ minimize_net_power_window_battery_qp <- function(
     lambda = 0
 ) {
     time_slots <- length(G)
-    lambdaMat <- battery_qp_lambda_matrix(time_slots)
+    identityMat <- diag(time_slots)
+    lambdaMat <- get_lambda_matrix(time_slots)
 
     # Objective function terms
-    P <- as(
-        Matrix::Diagonal(time_slots) + lambda * lambdaMat,
-        "dgCMatrix"
-    ) *
-        2
+    P <- 2 * (identityMat + lambda * lambdaMat)
     q <- 2 * (L - G)
 
     B <- solve_optimization_battery_window_qp(

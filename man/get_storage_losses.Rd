@@ -17,5 +17,5 @@ get_storage_losses(power, loss, time_resolution = 60)
 numeric vector
 }
 \description{
-Storage losses over time
+Standing loss proportional to stored energy each time step.
 }

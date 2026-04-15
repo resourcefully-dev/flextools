@@ -32,6 +32,24 @@ test_that("storage losses are added", {
   expect_true(sum(batt_loss) > 0)
 })
 
+test_that("storage losses scale with time resolution", {
+  profile <- c(10, 10, 0, 0)
+  loss_step <- 1 - (1 - 0.10)^(15 / 60)
+  expected <- c(2.5, 5, 5, 5) / (1 - loss_step) - c(2.5, 5, 5, 5)
+
+  expect_equal(
+    get_storage_losses(profile, loss = 10, time_resolution = 15),
+    expected
+  )
+})
+
+test_that("storage losses are never negative", {
+  expect_equal(
+    get_storage_losses(c(-10, -10, 5), loss = 10),
+    c(0, 0, 0)
+  )
+})
+
 test_that("storage level is inside bounds", {
   batt_level <- get_storage_level(df_batt$battery, time_resolution = 15)
   expect_true(min(batt_level) >= 0 & max(batt_level) <= 100)

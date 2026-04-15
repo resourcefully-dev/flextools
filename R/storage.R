@@ -1,5 +1,7 @@
 #' Storage losses over time
 #'
+#' Standing loss proportional to stored energy each time step.
+#'
 #' @param power numeric vector, being positive when charging and negative when discharging
 #' @param loss numeric, the hourly storage loss in percentage (%/hour)
 #' @param time_resolution numeric, time resolution of the time-series (in minutes)
@@ -8,8 +10,21 @@
 #' @export
 #'
 get_storage_losses <- function(power, loss, time_resolution = 60) {
+  if (loss < 0 || loss >= 100) {
+    stop("Error: loss must be between 0 and 100 (%/hour)")
+  }
+  if (time_resolution <= 0) {
+    stop("Error: time_resolution must be greater than 0")
+  }
+
   storage <- cumsum(power * time_resolution / 60)
-  losses <- storage / (1 - loss / 100) - storage
+  storage <- pmax(storage, 0)
+
+  # standing loss proportional to stored energy each time step,
+  # per-step loss factor with 1 - (1 - loss/100)^(time_resolution/60)
+  loss_step <- 1 - (1 - loss / 100)^(time_resolution / 60)
+  losses <- storage / (1 - loss_step) - storage
+
   return(losses)
 }
 

@@ -207,7 +207,3 @@ optimization_normalize_quadratic <- function(
 
   P_symmetric
 }
-
-
-# General functions -------------------------------------------------------
-

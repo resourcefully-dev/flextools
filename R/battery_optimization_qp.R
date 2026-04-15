@@ -385,9 +385,14 @@ solve_optimization_battery_window_qp <- function(
     ub_B <- pmin(Bc, G - L + import_capacity)
     relaxed_bounds <- FALSE
 
+    # If the bounds are infeasible, relax the grid constraints and try to solve the optimization problem
+    # with only battery power limits. This can happen for example when the load is much higher than the
+    # generation and the export capacity is very low, which would require a very high negative battery
+    # power that cannot be reached due to the battery discharging power limit.
     if (battery_qp_infeasible_bounds(lb_B, ub_B)) {
         message_once(
-            "\u26A0\uFE0F Optimization warning: infeasible battery QP bounds. Removing grid constraints."
+            "\u26A0\uFE0F Optimization warning: infeasible battery QP bounds. 
+            Removing grid constraints."
         )
         lb_B <- rep(-Bd, time_slots)
         ub_B <- rep(Bc, time_slots)
@@ -410,17 +415,16 @@ solve_optimization_battery_window_qp <- function(
         Amat_energy
     )
 
-    solve_once <- function(lower_B, upper_B) {
-        lower <- round(c(lower_B, lb_cumsum, lb_energy), 2)
-        upper <- round(c(upper_B, ub_cumsum, ub_energy), 2)
-        battery_qp_solve_osqp(P, q, Amat, lower, upper, time_slots)
-    }
+    lower <- round(c(lb_B, lb_cumsum, lb_energy), 2)
+    upper <- round(c(ub_B, ub_cumsum, ub_energy), 2)
+    solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper, time_slots)
 
-    solution <- solve_once(lb_B, ub_B)
     if (!is.null(solution$profile)) {
         return(solution$profile)
     }
 
+    # If simulation is infeasible, try a heuristic approach before
+    # giving up and returning a zero profile
     heuristic <- battery_qp_try_heuristic(
         target = target,
         lower = lb_B,
@@ -436,23 +440,33 @@ solve_optimization_battery_window_qp <- function(
         message_once(paste0(
             "\u26A0\uFE0F Optimization warning: ",
             solution$result$info$status,
-            ". Using heuristic battery profile for this window."
+            ". Using heuristic battery profile for some windows."
         ))
         return(heuristic)
     }
 
+    # If the heuristic is also infeasible and the bounds were not relaxed yet,
+    # relax the bounds and try to solve the optimization problem again.
+    # This can help in some cases where the optimization problem is infeasible
+    # due to the grid constraints, but a solution that violates these constraints
+    # could still be interesting from a battery operation perspective.
     if (!relaxed_bounds) {
         message_once(
-            "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+            "\u26A0\uFE0F Optimization warning: optimization not feasible 
+            for some windows. Removing grid constraints."
         )
         lb_B <- rep(-Bd, time_slots)
         ub_B <- rep(Bc, time_slots)
+        lower <- round(c(lb_B, lb_cumsum, lb_energy), 2)
+        upper <- round(c(ub_B, ub_cumsum, ub_energy), 2)
+        solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper, time_slots)
 
-        solution <- solve_once(lb_B, ub_B)
         if (!is.null(solution$profile)) {
             return(solution$profile)
         }
 
+        # If still infeasible, try the heuristic approach again with the
+        # relaxed bounds before giving up and returning a zero profile
         heuristic <- battery_qp_try_heuristic(
             target = target,
             lower = lb_B,
@@ -468,16 +482,18 @@ solve_optimization_battery_window_qp <- function(
             message_once(paste0(
                 "\u26A0\uFE0F Optimization warning: ",
                 solution$result$info$status,
-                ". Using heuristic battery profile for this window."
+                ". Using heuristic battery profile for some windows."
             ))
             return(heuristic)
         }
     }
 
+    # If still infeasible after relaxing the bounds and trying the heuristic,
+    # return a zero profile
     message_once(paste0(
         "\u26A0\uFE0F Optimization warning: ",
         solution$result$info$status,
-        ". Disabling battery for this window."
+        ". Disabling battery for some windows."
     ))
     battery_qp_zero_profile(time_slots)
 }

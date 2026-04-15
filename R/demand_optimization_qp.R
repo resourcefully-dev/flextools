@@ -104,7 +104,7 @@ get_bounds_qp <- function(
 #' can consume (in kW).
 #'
 #' - `production`: local power generation (in kW).
-#' This is used when `opt_objective = "grid"`.
+#' This is used when `opt_objective = "grid"` or `"capacity"`.
 #'
 #' - `price_imported`: price for imported energy (€/kWh).
 #' This is used when `opt_objective = "cost"`.
@@ -119,9 +119,15 @@ get_bounds_qp <- function(
 #' This is used when `opt_objective = "cost"`.
 #'
 #' @param opt_objective character or numeric.
-#' Optimization objective can be `"grid"` (default) or `"cost"`, or
+#' Optimization objective can be `"grid"` (default), `"cost"` or
+#' `"capacity"`, or
 #' a number between `0` and `1` to perform combined optimization
 #' where `0 == "cost"` and `1 == "grid"`.
+#' The `"capacity"` objective minimizes the amount of flexible demand that
+#' needs to be moved to respect `import_capacity` and `export_capacity`,
+#' then applies the grid-minimizing formulation only to that moved slice.
+#' If that constrained problem is infeasible, grid limits are removed for the
+#' affected optimization window.
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of time slots to shift energy from.
 #'  If `NULL`, the `time_horizon` will be the total optimization window length.
@@ -204,6 +210,21 @@ optimize_demand_qp <- function(
         lambda = lambda
       )
     )
+  } else if (opt_objective == "capacity") {
+    O_windows <- map(
+      windows_data,
+      ~ curtail_capacity_window_qp(
+        G = .x$production,
+        LF = .x$flexible,
+        LS = .x$static,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = .x$load_capacity,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        lambda = lambda
+      )
+    )
   } else if (opt_objective == "cost") {
     O_windows <- map(
       windows_data,
@@ -267,6 +288,241 @@ optimize_demand_qp <- function(
     O_flex$O[is.na(O_flex$O)] <- opt_data$flexible[is.na(O_flex$O)]
     return(O_flex$O)
   }
+}
+
+
+capacity_slice_problem_qp <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity
+) {
+  time_slots <- length(LF)
+  if (is.null(time_horizon)) {
+    time_horizon <- time_slots
+  }
+
+  identityMat <- diag(time_slots)
+  zeroMat <- matrix(0, nrow = time_slots, ncol = time_slots)
+  cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
+
+  if (direction == "forward") {
+    if (time_horizon == time_slots) {
+      horizonMat_cumsum <- matrix(0, nrow = time_slots, ncol = time_slots)
+    } else {
+      horizonMat_cumsum <- triangulate_matrix(
+        matrix(1, time_slots, time_slots),
+        "l",
+        -time_horizon
+      )
+    }
+    horizonMat_identity <- triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "l"),
+      "u",
+      -time_horizon
+    )
+
+    A_cumsum_lb <- cbind(-horizonMat_cumsum, cumsumMat)
+    lhs_cumsum_lb <- rep(0, time_slots)
+    rhs_cumsum_lb <- rep(Inf, time_slots)
+
+    A_cumsum_ub <- cbind(-cumsumMat, cumsumMat)
+    lhs_cumsum_ub <- rep(-Inf, time_slots)
+    rhs_cumsum_ub <- rep(0, time_slots)
+  } else {
+    horizonMat_cumsum <- triangulate_matrix(
+      matrix(1, time_slots, time_slots),
+      "l",
+      time_horizon
+    )
+    horizonMat_identity <- triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "u"),
+      "l",
+      time_horizon
+    )
+
+    A_cumsum_lb <- cbind(-cumsumMat, cumsumMat)
+    lhs_cumsum_lb <- rep(0, time_slots)
+    rhs_cumsum_lb <- rep(Inf, time_slots)
+
+    A_cumsum_ub <- cbind(-horizonMat_cumsum, cumsumMat)
+    lhs_cumsum_ub <- rep(-Inf, time_slots)
+    rhs_cumsum_ub <- rep(0, time_slots)
+  }
+
+  final_lb <- round(pmax(G - LS - export_capacity, 0), 2)
+  final_ub <- round(pmin(pmax(G - LS + import_capacity, 0), LFmax), 2)
+
+  A_slice_bounds <- cbind(identityMat, zeroMat)
+  A_final_bounds <- cbind(-identityMat, identityMat)
+  A_shift_identity <- cbind(-horizonMat_identity, identityMat)
+  A_energy <- matrix(0, nrow = 1, ncol = 2 * time_slots)
+  A_energy[1, seq_len(time_slots)] <- -1
+  A_energy[1, time_slots + seq_len(time_slots)] <- 1
+
+  list(
+    L = c(rep(1, time_slots), rep(0, time_slots)),
+    lower = c(rep(0, time_slots), rep(0, time_slots)),
+    upper = c(LF, rep(Inf, time_slots)),
+    A = rbind(
+      A_slice_bounds,
+      A_final_bounds,
+      A_cumsum_lb,
+      A_cumsum_ub,
+      A_shift_identity,
+      A_energy
+    ),
+    lhs = c(
+      rep(0, time_slots),
+      final_lb - LF,
+      lhs_cumsum_lb,
+      lhs_cumsum_ub,
+      rep(-Inf, time_slots),
+      0
+    ),
+    rhs = c(
+      LF,
+      final_ub - LF,
+      rhs_cumsum_lb,
+      rhs_cumsum_ub,
+      rep(0, time_slots),
+      0
+    )
+  )
+}
+
+
+select_capacity_slice_qp <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity
+) {
+  G <- round(as.numeric(G), 2)
+  LF <- round(as.numeric(LF), 2)
+  LS <- round(as.numeric(LS), 2)
+
+  time_slots <- length(LF)
+  LFmax <- as.numeric(rep_len(LFmax, time_slots))
+  import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
+  export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+
+  problem <- capacity_slice_problem_qp(
+    G = G,
+    LF = LF,
+    LS = LS,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = LFmax,
+    import_capacity = import_capacity,
+    export_capacity = export_capacity
+  )
+
+  result <- highs::highs_solve(
+    Q = NULL,
+    L = problem$L,
+    lower = problem$lower,
+    upper = problem$upper,
+    A = problem$A,
+    lhs = problem$lhs,
+    rhs = problem$rhs,
+    types = rep(1L, ncol(problem$A)),
+    control = demand_highs_options()
+  )
+
+  if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
+    return(NULL)
+  }
+
+  tolerance <- demand_solution_tolerance()
+  slice <- pmax(result$primal_solution[seq_len(time_slots)], 0)
+  slice[slice < tolerance] <- 0
+
+  list(
+    slice = round(slice, 2),
+    result = result
+  )
+}
+
+
+curtail_capacity_window_qp <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  lambda = 0
+) {
+  G <- round(as.numeric(G), 2)
+  LF <- round(as.numeric(LF), 2)
+  LS <- round(as.numeric(LS), 2)
+
+  time_slots <- length(LF)
+  LFmax <- as.numeric(rep_len(LFmax, time_slots))
+  import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
+  export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+
+  slice_solution <- select_capacity_slice_qp(
+    G = G,
+    LF = LF,
+    LS = LS,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = LFmax,
+    import_capacity = import_capacity,
+    export_capacity = export_capacity
+  )
+
+  if (is.null(slice_solution)) {
+    message_once(
+      "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+    )
+
+    return(
+      minimize_net_power_window_qp(
+        G = G,
+        LF = LF,
+        LS = LS,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = LFmax,
+        import_capacity = rep(Inf, time_slots),
+        export_capacity = rep(Inf, time_slots),
+        lambda = lambda
+      )
+    )
+  }
+
+  moved_slice <- slice_solution$slice
+  if (all(moved_slice == 0)) {
+    return(LF)
+  }
+
+  fixed_load <- round(LF - moved_slice, 2)
+  optimized_slice <- minimize_net_power_window_qp(
+    G = G,
+    LF = moved_slice,
+    LS = LS + fixed_load,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = round(pmax(LFmax - fixed_load, 0), 2),
+    import_capacity = import_capacity,
+    export_capacity = export_capacity,
+    lambda = lambda
+  )
+
+  round(fixed_load + optimized_slice, 2)
 }
 
 

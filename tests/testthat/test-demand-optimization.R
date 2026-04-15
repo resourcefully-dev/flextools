@@ -212,6 +212,51 @@ expect_no_simultaneous_demand_grid_flows <- function(
 }
 
 
+make_qp_opt_data <- function(
+  flexible,
+  production = 0,
+  static = 0,
+  import_capacity = Inf,
+  export_capacity = Inf,
+  load_capacity = Inf
+) {
+  slots <- length(flexible)
+
+  tibble(
+    datetime = seq.POSIXt(
+      as.POSIXct("2023-01-01 00:00:00", tz = "UTC"),
+      by = "15 min",
+      length.out = slots
+    ),
+    flexible = flexible,
+    production = rep_len(production, slots),
+    static = rep_len(static, slots),
+    import_capacity = rep_len(import_capacity, slots),
+    export_capacity = rep_len(export_capacity, slots),
+    load_capacity = rep_len(load_capacity, slots)
+  )
+}
+
+
+expect_demand_profile_within_capacity <- function(
+  profile,
+  opt_data,
+  tolerance = 1e-5
+) {
+  balance <- opt_data |>
+    mutate(consumption = static + profile) |>
+    get_energy_balance()
+
+  expect_true(all(balance$imported <= balance$import_capacity + tolerance))
+  expect_true(all(balance$exported <= balance$export_capacity + tolerance))
+}
+
+
+demand_moved_energy <- function(profile, original_profile) {
+  sum(abs(as.numeric(profile) - as.numeric(original_profile))) / 2
+}
+
+
 test_that("demand cost and combined windows do not import and export simultaneously", {
   week_data <- flextools::energy_profiles |>
     filter(lubridate::isoweek(datetime) == 18)
@@ -265,4 +310,125 @@ test_that("demand cost and combined windows do not import and export simultaneou
 
   expect_no_simultaneous_demand_grid_flows(cost_profile)
   expect_no_simultaneous_demand_grid_flows(combined_profile)
+})
+
+
+test_that("demand qp capacity objective is accepted and no-ops inside limits", {
+  opt_data_qp <- make_qp_opt_data(
+    flexible = c(1, 1, 1, 1),
+    import_capacity = 1,
+    export_capacity = 0
+  )
+
+  opt_profile <- opt_data_qp |>
+    optimize_demand_qp(
+      opt_objective = "capacity",
+      direction = "forward",
+      time_horizon = 4
+    )
+
+  expect_type(opt_profile, "double")
+  expect_equal(length(opt_profile), nrow(opt_data_qp))
+  expect_equal(as.numeric(opt_profile), opt_data_qp$flexible, tolerance = 1e-6)
+})
+
+
+test_that("demand qp capacity objective removes import overflow", {
+  opt_data_qp <- make_qp_opt_data(
+    flexible = c(2, 2, 0, 0),
+    import_capacity = 1,
+    export_capacity = Inf
+  )
+
+  opt_profile <- opt_data_qp |>
+    optimize_demand_qp(
+      opt_objective = "capacity",
+      direction = "forward",
+      time_horizon = 4
+    )
+
+  expect_demand_profile_within_capacity(opt_profile, opt_data_qp)
+})
+
+
+test_that("demand qp capacity objective can pull load into export-overflow periods", {
+  opt_data_qp <- make_qp_opt_data(
+    flexible = c(0, 0, 2, 2),
+    production = c(2, 2, 0, 0),
+    import_capacity = Inf,
+    export_capacity = 0
+  )
+
+  opt_profile <- opt_data_qp |>
+    optimize_demand_qp(
+      opt_objective = "capacity",
+      direction = "backward",
+      time_horizon = 4
+    )
+
+  expect_demand_profile_within_capacity(opt_profile, opt_data_qp)
+  expect_gt(sum(opt_profile[1:2]), 0)
+})
+
+
+test_that("demand qp capacity objective moves less energy than grid objective when feasible", {
+  opt_data_qp <- make_qp_opt_data(
+    flexible = c(2, 2, 0, 0, 0, 0),
+    import_capacity = 1,
+    export_capacity = Inf
+  )
+
+  capacity_profile <- opt_data_qp |>
+    optimize_demand_qp(
+      opt_objective = "capacity",
+      direction = "forward",
+      time_horizon = 6
+    )
+
+  grid_profile <- opt_data_qp |>
+    optimize_demand_qp(
+      opt_objective = "grid",
+      direction = "forward",
+      time_horizon = 6
+    )
+
+  expect_demand_profile_within_capacity(capacity_profile, opt_data_qp)
+  expect_lte(
+    demand_moved_energy(capacity_profile, opt_data_qp$flexible),
+    demand_moved_energy(grid_profile, opt_data_qp$flexible) + 1e-6
+  )
+})
+
+
+test_that("demand qp capacity objective falls back to unconstrained grid optimization when infeasible", {
+  opt_data_qp <- make_qp_opt_data(
+    flexible = c(3, 0, 0, 0),
+    import_capacity = 0,
+    export_capacity = 0
+  )
+
+  capacity_profile <- NULL
+  expect_message(
+    capacity_profile <- opt_data_qp |>
+      optimize_demand_qp(
+        opt_objective = "capacity",
+        direction = "forward",
+        time_horizon = 4
+      ),
+    "Removing grid constraints"
+  )
+
+  grid_profile_inf <- minimize_net_power_window_qp(
+    G = opt_data_qp$production,
+    LF = opt_data_qp$flexible,
+    LS = opt_data_qp$static,
+    direction = "forward",
+    time_horizon = 4,
+    LFmax = opt_data_qp$load_capacity,
+    import_capacity = rep(Inf, nrow(opt_data_qp)),
+    export_capacity = rep(Inf, nrow(opt_data_qp)),
+    lambda = 0
+  )
+
+  expect_equal(capacity_profile, grid_profile_inf, tolerance = 1e-6)
 })

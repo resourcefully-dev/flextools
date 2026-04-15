@@ -34,7 +34,7 @@ for example the contracted power with the energy company.
 \item \code{load_capacity}: maximum power that the \code{flexible} load
 can consume (in kW).
 \item \code{production}: local power generation (in kW).
-This is used when \code{opt_objective = "grid"}.
+This is used when \code{opt_objective = "grid"} or \code{"capacity"}.
 \item \code{price_imported}: price for imported energy (€/kWh).
 This is used when \code{opt_objective = "cost"}.
 \item \code{price_exported}: price for exported energy (€/kWh).
@@ -46,9 +46,15 @@ This is used when \code{opt_objective = "cost"}.
 }}
 
 \item{opt_objective}{character or numeric.
-Optimization objective can be \code{"grid"} (default) or \code{"cost"}, or
+Optimization objective can be \code{"grid"} (default), \code{"cost"} or
+\code{"capacity"}, or
 a number between \code{0} and \code{1} to perform combined optimization
-where \code{0 == "cost"} and \code{1 == "grid"}.}
+where \code{0 == "cost"} and \code{1 == "grid"}.
+The \code{"capacity"} objective minimizes the amount of flexible demand that
+needs to be moved to respect \code{import_capacity} and \code{export_capacity},
+then applies the grid-minimizing formulation only to that moved slice.
+If that constrained problem is infeasible, grid limits are removed for the
+affected optimization window.}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 

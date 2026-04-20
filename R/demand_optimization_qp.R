@@ -43,7 +43,7 @@ get_bounds_qp <- function(
     ub_O <- pmin(pmax(ub_shift, lb_O), LFmax_vct) # The maximum average power in every time slot is the maximum power of the load `LFmax`
   } else {
     if (time_horizon >= time_slots) {
-      horizonMat_cumsum <- matrix(0, time_slots, time_slots)
+      horizonMat_cumsum <- matrix(1, time_slots, time_slots)
     } else {
       horizonMat_cumsum <- triangulate_matrix(
         matrix(1, time_slots, time_slots),
@@ -565,7 +565,7 @@ solve_optimization_window_qp <- function(
 
   # Optimization parameters
   time_slots <- length(G)
-  if (is.null(time_horizon)) {
+  if (is.null(time_horizon) || time_horizon > time_slots) {
     time_horizon <- time_slots
   }
   identityMat <- diag(time_slots)

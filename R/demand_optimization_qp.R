@@ -19,7 +19,7 @@ get_bounds_qp <- function(
   ## Shifting bounds
   Amat_cumsum <- cumsumMat
   if (direction == 'forward') {
-    if (time_horizon == time_slots) {
+    if (time_horizon >= time_slots) {
       horizonMat_cumsum <- matrix(0, time_slots, time_slots)
     } else {
       horizonMat_cumsum <- triangulate_matrix(
@@ -42,11 +42,15 @@ get_bounds_qp <- function(
     ub_shift <- horizonMat_identity %*% LF
     ub_O <- pmin(pmax(ub_shift, lb_O), LFmax_vct) # The maximum average power in every time slot is the maximum power of the load `LFmax`
   } else {
-    horizonMat_cumsum <- triangulate_matrix(
-      matrix(1, time_slots, time_slots),
-      "l",
-      time_horizon
-    )
+    if (time_horizon >= time_slots) {
+      horizonMat_cumsum <- matrix(0, time_slots, time_slots)
+    } else {
+      horizonMat_cumsum <- triangulate_matrix(
+        matrix(1, time_slots, time_slots),
+        "l",
+        time_horizon
+      )
+    }
     horizonMat_identity <- triangulate_matrix(
       triangulate_matrix(matrix(1, time_slots, time_slots), "u"),
       "l",

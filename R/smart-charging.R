@@ -682,7 +682,7 @@ get_setpoints <- function(
       if (opt_objective != "none") {
         # Optimize the flexible profile's load according to `opt_objective`
         if (opt_objective == "grid") {
-          O <- minimize_net_power_window(
+          O <- minimize_net_power_window_qp(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
@@ -2045,7 +2045,9 @@ view_smart_charging_logs <- function(smart_charging) {
   # The viewer launches a Shiny gadget, so it must not run during
   # non-interactive workflows such as package checks or coverage jobs.
   if (!interactive()) {
-    stop("Error: `view_smart_charging_logs()` is only available in interactive sessions.")
+    stop(
+      "Error: `view_smart_charging_logs()` is only available in interactive sessions."
+    )
   }
 
   # Check for required packages

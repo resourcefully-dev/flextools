@@ -667,16 +667,16 @@ solve_optimization_window_v2g <- function(
   l_vec <- c(bounds$lb_O, bounds$lb_cumsum, bounds$lb_energy)
   u_vec <- c(bounds$ub_O, bounds$ub_cumsum, bounds$ub_energy)
 
-  O <- demand_solve_highs_problem(
+  O <- demand_solve_osqp(
     P = P,
     q = q,
-    Amat = A,
+    A = A,
     lb = l_vec,
     ub = u_vec
   )
 
-  if (demand_highs_is_optimal(O)) {
-    round(O$primal_solution, 2)
+  if (demand_highs_is_optimal(O$result)) {
+    round(O$x, 2)
   } else {
     message_once(paste0(
       "\u26A0\uFE0F V2G optimisation warning: ",

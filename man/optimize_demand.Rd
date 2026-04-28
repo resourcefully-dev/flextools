@@ -35,20 +35,25 @@ for example the contracted power with the energy company.
 can consume (in kW).
 \item \code{production}: local power generation (in kW).
 This is used when \code{opt_objective = "grid"}.
-\item \code{price_imported}: price for imported energy (€/kWh).
+\item \code{price_imported}: price for imported energy (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
-\item \code{price_exported}: price for exported energy (€/kWh).
+\item \code{price_exported}: price for exported energy (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
-\item \code{price_turn_down}: price for turn-down energy use (€/kWh).
+\item \code{price_turn_down}: price for turn-down energy use (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
-\item \code{price_turn_up}: price for turn-up energy use (€/kWh).
+\item \code{price_turn_up}: price for turn-up energy use (Euro/kWh).
 This is used when \code{opt_objective = "cost"}.
 }}
 
 \item{opt_objective}{character or numeric.
-Optimization objective can be \code{"grid"} (default) or \code{"cost"}, or
+Optimization objective can be \code{"grid"} (default), \code{"cost"} or \code{"capacity"}, or
 a number between \code{0} and \code{1} to perform combined optimization
-where \code{0 == "cost"} and \code{1 == "grid"}.}
+where \code{0 == "cost"} and \code{1 == "grid"}.
+The \code{"capacity"} objective minimizes the amount of flexible demand that
+needs to be moved to respect \code{import_capacity} and \code{export_capacity},
+then applies the grid-minimizing formulation only to that moved slice.
+If that constrained problem is infeasible, grid limits are removed for the
+affected optimization window.}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 

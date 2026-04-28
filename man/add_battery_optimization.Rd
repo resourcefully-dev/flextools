@@ -16,62 +16,46 @@ add_battery_optimization(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = 24,
-  charge_eff = 1,
-  discharge_eff = 1
+  lambda = 0
 )
 }
 \arguments{
 \item{opt_data}{tibble, optimization contextual data.
-The first column must be named \code{datetime} (mandatory) containing the
-date time sequence where the optimization algorithm is applied.
-The other columns can be (optional):
+The first column must be named \code{datetime} (mandatory).
+Optional columns:
 \itemize{
-\item \code{static}: static power demand (in kW) from other sectors like buildings,
-offices, etc.
-\item \code{import_capacity}: maximum imported power from the grid (in kW),
-for example the contracted power with the energy company.
-\item \code{export_capacity}: maximum exported power from the grid (in kW),
-for example the contracted power with the energy company.
-\item \code{production}: local power generation (in kW).
-This is used when \code{opt_objective = "grid"}.
-\item \code{price_imported}: price for imported energy (€/kWh).
-This is used when \code{opt_objective = "cost"}.
-\item \code{price_exported}: price for exported energy (€/kWh).
-This is used when \code{opt_objective = "cost"}.
-\item \code{price_turn_down}: price for turn-down energy use (€/kWh).
-This is used when \code{opt_objective = "cost"}.
-\item \code{price_turn_up}: price for turn-up energy use (€/kWh).
-This is used when \code{opt_objective = "cost"}.
+\item \code{static}: static power demand (kW)
+\item \code{production}: local generation (kW)
+\item \code{import_capacity}: max grid import (kW)
+\item \code{export_capacity}: max grid export (kW)
+\item \code{price_imported}: energy import price (required for cost/combined)
+\item \code{price_exported}: energy export price (required for cost/combined)
 }}
 
 \item{opt_objective}{character or numeric.
-Optimization objective can be \code{"grid"} (default), \code{"cost"} or \code{"capacity"}, or
-a number between \code{0} and \code{1} to perform combined optimization
-where \code{0 == "cost"} and \code{1 == "grid"}.}
+\code{"grid"} (default), \code{"capacity"}, \code{"cost"}, or a numeric weight \code{w}
+where \code{w=1} is pure grid and \code{w=0} is pure cost.}
 
-\item{Bcap}{numeric, capacity of the battery (in kWh)}
+\item{Bcap}{numeric, battery capacity (kWh)}
 
-\item{Bc}{numeric, maximum charging power (in kW)}
+\item{Bc}{numeric, maximum charging power (kW)}
 
-\item{Bd}{numeric, maximum discharging power (in kW)}
+\item{Bd}{numeric, maximum discharging power (kW)}
 
-\item{SOCmin}{numeric, minimum State-of-Charge of the battery}
+\item{SOCmin}{numeric, minimum State-of-Charge (\%)}
 
-\item{SOCmax}{numeric, maximum State-of-Charge of the battery}
+\item{SOCmax}{numeric, maximum State-of-Charge (\%)}
 
-\item{SOCini}{numeric, required State-of-Charge at the beginning/end of optimization window}
+\item{SOCini}{numeric, initial State-of-Charge (\%). Defaults to \code{SOCmin}.}
 
-\item{window_days}{integer, number of days to consider as optimization window.}
+\item{window_days}{integer, optimization window length in days.}
 
-\item{window_start_hour}{integer, starting hour of the optimization window.}
+\item{window_start_hour}{integer, start hour of each optimization window.}
 
-\item{flex_window_hours}{integer, flexibility window length, in hours.
-This optional feature lets you apply flexibility only during few hours from the \code{window_start_hour}.
-It must be lower than \code{window_days*24} hours.}
+\item{flex_window_hours}{numeric, flexibility window length (hours).}
 
-\item{charge_eff}{numeric, battery charging efficiency (from 0 to 1, default 1).}
-
-\item{discharge_eff}{numeric, battery discharging efficiency (from 0 to 1, default 1).}
+\item{lambda}{numeric, ramping penalty weight. Penalises rapid changes in
+battery power between consecutive time slots.}
 }
 \value{
 numeric vector
@@ -84,17 +68,15 @@ See the formulation of the optimization problems in the
 library(dplyr)
 opt_data <- flextools::energy_profiles \%>\%
   filter(lubridate::isoweek(datetime) == 18) \%>\%
-  rename(
-    production = "solar",
-    static = "building",
-  ) \%>\%
+  rename(production = "solar", static = "building") \%>\%
   select(any_of(c(
     "datetime", "production", "static", "price_imported", "price_exported"
   )))
-  opt_battery <- opt_data \%>\%
-    add_battery_optimization(
-      opt_objective = 0.5,
-      Bcap = 50, Bc = 4, Bd = 4,
-      window_start_hour = 5
-    )
+opt_battery <- opt_data \%>\%
+  add_battery_optimization(
+    opt_objective = "grid",
+    Bcap = 50, Bc = 4, Bd = 4,
+    window_start_hour = 5
+  )
+
 }

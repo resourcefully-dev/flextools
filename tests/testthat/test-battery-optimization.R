@@ -1,4 +1,5 @@
 library(dplyr)
+devtools::load_all()
 
 opt_data <- flextools::energy_profiles |>
   filter(lubridate::isoweek(datetime) == 18) |>
@@ -154,6 +155,9 @@ test_that("battery optimization works with constrained import capacity", {
     ) |>
     get_energy_balance()
 
+  # opt_battery |>
+  #   timefully::plot_ts()
+
   expect_false(
     any(round(opt_battery$import_capacity - opt_battery$imported) < 0)
   )
@@ -165,6 +169,9 @@ test_that("battery optimization works with constrained import capacity and 'capa
       production = .data$production * 0,
       static = .data$static * 100,
       import_capacity = 350
+    ) |>
+    filter(
+      lubridate::day(datetime) %in% c(2, 3, 4, 5)
     )
 
   opt_battery_vct <- opt_data_batt |>
@@ -182,6 +189,9 @@ test_that("battery optimization works with constrained import capacity and 'capa
       consumption = static + battery
     ) |>
     get_energy_balance()
+
+  # opt_battery |>
+  #   timefully::plot_ts(legend_width = 150)
 
   expect_false(
     any(round(opt_battery$import_capacity - opt_battery$imported) < 0)

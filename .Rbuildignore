@@ -15,3 +15,4 @@ tests
 ^cran-comments\.md$
 ^CRAN-SUBMISSION$
 ^codecov\.yml$
+.claude/

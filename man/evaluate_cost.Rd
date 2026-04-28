@@ -7,15 +7,15 @@
 evaluate_cost(opt_data, O)
 }
 \arguments{
-\item{opt_data}{tibble, same shape expected by \code{\link[=optimize_demand_qp]{optimize_demand_qp()}}.
+\item{opt_data}{tibble, same shape expected by \code{\link[=optimize_demand]{optimize_demand()}}.
 Must contain \code{datetime}. Optional columns \code{static}, \code{production},
 \code{price_imported} and \code{price_exported} default to \code{0}, \code{0}, \code{1} and \code{0}
 respectively when missing -- matching the defaults used by
-\code{\link[=optimize_demand_qp]{optimize_demand_qp()}}.}
+\code{\link[=optimize_demand]{optimize_demand()}}.}
 
 \item{O}{numeric vector of flexible demand (kW), same length as
 \code{opt_data$datetime}. Pass \code{opt_data$flexible} for the baseline cost,
-or the return value of \code{\link[=optimize_demand_qp]{optimize_demand_qp()}} for the optimized cost.}
+or the return value of \code{\link[=optimize_demand]{optimize_demand()}} for the optimized cost.}
 }
 \value{
 numeric scalar, the total grid cost in the currency units of
@@ -23,7 +23,7 @@ the price columns.
 }
 \description{
 Thin benchmarking helper that takes the optimization context \code{opt_data}
-(the same tibble passed to \code{\link[=optimize_demand_qp]{optimize_demand_qp()}}) and an optimized
+(the same tibble passed to \code{\link[=optimize_demand]{optimize_demand()}}) and an optimized
 flexible-demand vector \code{O}, and returns the total grid energy cost.
 Makes cost benchmarking a single call:
 }
@@ -32,7 +32,7 @@ Makes cost benchmarking a single call:
 evaluate_cost(opt_data, opt_data$flexible)
 
 # Cost after optimization
-O <- optimize_demand_qp(opt_data, opt_objective = "cost")
+O <- optimize_demand(opt_data, opt_objective = "cost")
 evaluate_cost(opt_data, O)
 }\if{html}{\out{</div>}}
 

@@ -682,7 +682,7 @@ get_setpoints <- function(
       if (opt_objective != "none") {
         # Optimize the flexible profile's load according to `opt_objective`
         if (opt_objective == "grid") {
-          O <- minimize_net_power_window_qp(
+          O <- demand_grid_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],

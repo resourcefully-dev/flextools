@@ -1,16 +1,15 @@
 # Battery optimization (OSQP / HiGHS) ----------------------------------------
 
-
 battery_qp_try_heuristic <- function(
-    target,
-    lower,
-    upper,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini
+  target,
+  lower,
+  upper,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini
 ) {
   time_slots <- length(target)
   storage <- 0
@@ -69,18 +68,18 @@ battery_solve_osqp <- function(P, q, A, lower, upper) {
 #' @keywords internal
 #'
 battery_solve_grid_window <- function(
-    G,
-    L,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity,
-    P,
-    q
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  P,
+  q
 ) {
   G <- round(G, 2)
   L <- round(L, 2)
@@ -119,9 +118,14 @@ battery_solve_grid_window <- function(
 
   heuristic <- battery_qp_try_heuristic(
     target = target,
-    lower = lb_B, upper = ub_B,
-    Bcap = Bcap, Bc = Bc, Bd = Bd,
-    SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini
+    lower = lb_B,
+    upper = ub_B,
+    Bcap = Bcap,
+    Bc = Bc,
+    Bd = Bd,
+    SOCmin = SOCmin,
+    SOCmax = SOCmax,
+    SOCini = SOCini
   )
   if (!is.null(heuristic)) {
     message_once(paste0(
@@ -148,9 +152,14 @@ battery_solve_grid_window <- function(
 
     heuristic <- battery_qp_try_heuristic(
       target = target,
-      lower = lb_B, upper = ub_B,
-      Bcap = Bcap, Bc = Bc, Bd = Bd,
-      SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini
+      lower = lb_B,
+      upper = ub_B,
+      Bcap = Bcap,
+      Bc = Bc,
+      Bd = Bd,
+      SOCmin = SOCmin,
+      SOCmax = SOCmax,
+      SOCini = SOCini
     )
     if (!is.null(heuristic)) {
       message_once(paste0(
@@ -173,17 +182,17 @@ battery_solve_grid_window <- function(
 
 #' @keywords internal
 battery_grid_window <- function(
-    G,
-    L,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity,
-    lambda = 0
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  lambda = 0
 ) {
   time_slots <- length(G)
   lambdaMat <- get_lambda_matrix(time_slots)
@@ -191,14 +200,6 @@ battery_grid_window <- function(
   q <- 2 * (L - G)
 
   battery_solve_grid_window(
-    G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-    import_capacity, export_capacity, P, q
-  )
-}
-
-
-#' @keywords internal
-battery_capacity_window <- function(
     G,
     L,
     Bcap,
@@ -209,7 +210,25 @@ battery_capacity_window <- function(
     SOCini,
     import_capacity,
     export_capacity,
-    lambda = 0
+    P,
+    q
+  )
+}
+
+
+#' @keywords internal
+battery_capacity_window <- function(
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  lambda = 0
 ) {
   balance_sum <- tibble(
     consumption = L,
@@ -234,8 +253,17 @@ battery_capacity_window <- function(
   }
 
   battery_grid_window(
-    G, L, Bcap_curtail, Bc, Bd, SOCmin, SOCmax, SOCini,
-    import_capacity, export_capacity, lambda
+    G,
+    L,
+    Bcap_curtail,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini,
+    import_capacity,
+    export_capacity,
+    lambda
   )
 }
 
@@ -243,16 +271,16 @@ battery_capacity_window <- function(
 # Cost/combined solvers: X = [B, I, E] ----------------------------------------
 
 battery_cost_build_constraints <- function(
-    G,
-    L,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity
 ) {
   n <- length(G)
   cumsumMat <- triangulate_matrix(matrix(1, n, n), "l")
@@ -306,12 +334,26 @@ battery_cost_build_constraints <- function(
 
 
 battery_solve_cost_milp_window <- function(
+  G,
+  L,
+  PI,
+  PE,
+  P_B,
+  q_B,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity
+) {
+  G <- round(G, 2)
+  L <- round(L, 2)
+  d <- battery_cost_build_constraints(
     G,
     L,
-    PI,
-    PE,
-    P_B,
-    q_B,
     Bcap,
     Bc,
     Bd,
@@ -320,12 +362,6 @@ battery_solve_cost_milp_window <- function(
     SOCini,
     import_capacity,
     export_capacity
-) {
-  G <- round(G, 2)
-  L <- round(L, 2)
-  d <- battery_cost_build_constraints(
-    G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-    import_capacity, export_capacity
   )
   n <- d$n
 
@@ -334,17 +370,17 @@ battery_solve_cost_milp_window <- function(
 
   # Import mode: I_t <= import_mode_ub_t * m_t
   A_import_mode <- cbind(
-    matrix(0, n, n),            # B
-    diag(n),                    # I
-    matrix(0, n, n),            # E
-    -diag(d$import_mode_ub)     # -M*m
+    matrix(0, n, n), # B
+    diag(n), # I
+    matrix(0, n, n), # E
+    -diag(d$import_mode_ub) # -M*m
   )
   # Export mode: E_t <= export_mode_ub_t * (1 - m_t)
   A_export_mode <- cbind(
-    matrix(0, n, n),            # B
-    matrix(0, n, n),            # I
-    diag(n),                    # E
-    diag(d$export_mode_ub)      # M*m
+    matrix(0, n, n), # B
+    matrix(0, n, n), # I
+    diag(n), # E
+    diag(d$export_mode_ub) # M*m
   )
 
   A_full <- rbind(A_base, A_import_mode, A_export_mode)
@@ -389,12 +425,26 @@ battery_solve_cost_milp_window <- function(
 
 
 battery_solve_cost_osqp_window <- function(
+  G,
+  L,
+  PI,
+  PE,
+  P_B,
+  q_B,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity
+) {
+  G <- round(G, 2)
+  L <- round(L, 2)
+  d <- battery_cost_build_constraints(
     G,
     L,
-    PI,
-    PE,
-    P_B,
-    q_B,
     Bcap,
     Bc,
     Bd,
@@ -403,12 +453,6 @@ battery_solve_cost_osqp_window <- function(
     SOCini,
     import_capacity,
     export_capacity
-) {
-  G <- round(G, 2)
-  L <- round(L, 2)
-  d <- battery_cost_build_constraints(
-    G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-    import_capacity, export_capacity
   )
   n <- d$n
 
@@ -421,7 +465,12 @@ battery_solve_cost_osqp_window <- function(
   }
 
   # Quadratic term for X = [B, I, E] (3n x 3n)
-  P_full <- Matrix::sparseMatrix(i = integer(), j = integer(), x = numeric(), dims = c(3 * n, 3 * n))
+  P_full <- Matrix::sparseMatrix(
+    i = integer(),
+    j = integer(),
+    x = numeric(),
+    dims = c(3 * n, 3 * n)
+  )
   if (!is.null(P_B)) {
     P_full[seq_len(n), seq_len(n)] <- P_B
   }
@@ -439,10 +488,10 @@ battery_solve_cost_osqp_window <- function(
 
   # OSQP constraint matrix: identity rows for variable bounds + problem constraints
   A_osqp <- rbind(
-    cbind(diag(n), matrix(0, n, 2 * n)),      # B identity
-    cbind(matrix(0, n, n), diag(n), matrix(0, n, n)),  # I identity
-    cbind(matrix(0, n, 2 * n), diag(n)),      # E identity
-    d$A                                        # balance + SOC + energy
+    cbind(diag(n), matrix(0, n, 2 * n)), # B identity
+    cbind(matrix(0, n, n), diag(n), matrix(0, n, n)), # I identity
+    cbind(matrix(0, n, 2 * n), diag(n)), # E identity
+    d$A # balance + SOC + energy
   )
   lower_osqp <- c(d$lb_B, d$lb_I, d$lb_E, d$lb)
   upper_osqp <- c(d$ub_B, ub_I, ub_E, d$ub)
@@ -458,19 +507,12 @@ battery_solve_cost_osqp_window <- function(
     "⚠️ Optimization warning: OSQP failed for cost/combined. Falling back to MILP."
   )
   battery_solve_cost_milp_window(
-    G, L, PI, PE, NULL, NULL,
-    Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-    import_capacity, export_capacity
-  )
-}
-
-
-#' @keywords internal
-battery_cost_window <- function(
     G,
     L,
     PI,
     PE,
+    NULL,
+    NULL,
     Bcap,
     Bc,
     Bd,
@@ -478,24 +520,64 @@ battery_cost_window <- function(
     SOCmax,
     SOCini,
     import_capacity,
-    export_capacity,
-    lambda = 0
+    export_capacity
+  )
+}
+
+
+#' @keywords internal
+battery_cost_window <- function(
+  G,
+  L,
+  PI,
+  PE,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  lambda = 0
 ) {
   n <- length(G)
 
   if (lambda == 0) {
     battery_solve_cost_milp_window(
-      G, L, PI, PE, NULL, NULL,
-      Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-      import_capacity, export_capacity
+      G,
+      L,
+      PI,
+      PE,
+      NULL,
+      NULL,
+      Bcap,
+      Bc,
+      Bd,
+      SOCmin,
+      SOCmax,
+      SOCini,
+      import_capacity,
+      export_capacity
     )
   } else {
     lambdaMat <- get_lambda_matrix(n)
     P_B <- 2 * lambda * (lambdaMat + 1e-6 * diag(n))
     battery_solve_cost_osqp_window(
-      G, L, PI, PE, P_B, rep(0, n),
-      Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-      import_capacity, export_capacity
+      G,
+      L,
+      PI,
+      PE,
+      P_B,
+      rep(0, n),
+      Bcap,
+      Bc,
+      Bd,
+      SOCmin,
+      SOCmax,
+      SOCini,
+      import_capacity,
+      export_capacity
     )
   }
 }
@@ -503,20 +585,20 @@ battery_cost_window <- function(
 
 #' @keywords internal
 battery_combined_window <- function(
-    G,
-    L,
-    PI,
-    PE,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity,
-    w,
-    lambda = 0
+  G,
+  L,
+  PI,
+  PE,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  w,
+  lambda = 0
 ) {
   n <- length(G)
   scale <- mean(PI)^2
@@ -535,19 +617,37 @@ battery_combined_window <- function(
   # Check if P_B is effectively zero → MILP path
   if (max(abs(P_B)) < 1e-8) {
     battery_solve_cost_milp_window(
-      G, L,
-      PI = (1 - w) * PI, PE = (1 - w) * PE,
-      P_B = NULL, q_B = NULL,
-      Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-      import_capacity, export_capacity
+      G,
+      L,
+      PI = (1 - w) * PI,
+      PE = (1 - w) * PE,
+      P_B = NULL,
+      q_B = NULL,
+      Bcap,
+      Bc,
+      Bd,
+      SOCmin,
+      SOCmax,
+      SOCini,
+      import_capacity,
+      export_capacity
     )
   } else {
     battery_solve_cost_osqp_window(
-      G, L,
-      PI = (1 - w) * PI, PE = (1 - w) * PE,
-      P_B = P_B, q_B = q_grid,
-      Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
-      import_capacity, export_capacity
+      G,
+      L,
+      PI = (1 - w) * PI,
+      PE = (1 - w) * PE,
+      P_B = P_B,
+      q_B = q_grid,
+      Bcap,
+      Bc,
+      Bd,
+      SOCmin,
+      SOCmax,
+      SOCini,
+      import_capacity,
+      export_capacity
     )
   }
 }
@@ -608,18 +708,18 @@ battery_combined_window <- function(
 #'   )
 #'
 add_battery_optimization <- function(
-    opt_data,
-    opt_objective = "grid",
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin = 0,
-    SOCmax = 100,
-    SOCini = NULL,
-    window_days = 1,
-    window_start_hour = 0,
-    flex_window_hours = 24,
-    lambda = 0
+  opt_data,
+  opt_objective = "grid",
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin = 0,
+  SOCmax = 100,
+  SOCini = NULL,
+  window_days = 1,
+  window_start_hour = 0,
+  flex_window_hours = 24,
+  lambda = 0
 ) {
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
@@ -637,8 +737,12 @@ add_battery_optimization <- function(
   if (is.null(SOCini)) {
     SOCini <- 0
   }
-  if (SOCini < SOCmin) SOCini <- SOCmin
-  if (SOCini > SOCmax) SOCini <- SOCmax
+  if (SOCini < SOCmin) {
+    SOCini <- SOCmin
+  }
+  if (SOCini > SOCmax) {
+    SOCini <- SOCmax
+  }
 
   # Collapse numeric endpoints to named objectives for simpler dispatch
   if (is.numeric(opt_objective)) {
@@ -667,9 +771,14 @@ add_battery_optimization <- function(
     B_windows <- map(
       windows_data,
       ~ battery_grid_window(
-        G = .x$production, L = .x$static,
-        Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        Bcap = Bcap_scaled,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         lambda = lambda
@@ -679,9 +788,14 @@ add_battery_optimization <- function(
     B_windows <- map(
       windows_data,
       ~ battery_capacity_window(
-        G = .x$production, L = .x$static,
-        Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        Bcap = Bcap_scaled,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         lambda = lambda
@@ -691,10 +805,16 @@ add_battery_optimization <- function(
     B_windows <- map(
       windows_data,
       ~ battery_cost_window(
-        G = .x$production, L = .x$static,
-        PI = .x$price_imported, PE = .x$price_exported,
-        Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        PI = .x$price_imported,
+        PE = .x$price_exported,
+        Bcap = Bcap_scaled,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         lambda = lambda
@@ -704,10 +824,16 @@ add_battery_optimization <- function(
     B_windows <- map(
       windows_data,
       ~ battery_combined_window(
-        G = .x$production, L = .x$static,
-        PI = .x$price_imported, PE = .x$price_exported,
-        Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,
-        SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
+        G = .x$production,
+        L = .x$static,
+        PI = .x$price_imported,
+        PE = .x$price_exported,
+        Bcap = Bcap_scaled,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         w = opt_objective,

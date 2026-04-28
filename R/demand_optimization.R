@@ -4,7 +4,6 @@
 # demand-specific wrappers and formulations here so the common backend logic is
 # defined once for demand, battery and V2G.
 
-
 get_bounds <- function(
   time_slots,
   G,
@@ -90,7 +89,11 @@ demand_highs_is_optimal <- function(result) {
 }
 
 
-demand_attach_profile <- function(optimized_load, imported = NULL, exported = NULL) {
+demand_attach_profile <- function(
+  optimized_load,
+  imported = NULL,
+  exported = NULL
+) {
   if (!is.null(imported)) {
     attr(optimized_load, "import") <- as.numeric(imported)
   }
@@ -230,7 +233,10 @@ demand_solve_qp_window <- function(solver_data, bounds) {
   # unbounded (both I and E can grow without limit). Clip export prices to
   # import prices to restore convexity. Physical import/export are re-derived
   # from O by callers, so the optimal O profile is unaffected.
-  export_q_clipped <- pmax(q[solver_data$export_idx], -q[solver_data$import_idx])
+  export_q_clipped <- pmax(
+    q[solver_data$export_idx],
+    -q[solver_data$import_idx]
+  )
   if (any(export_q_clipped != q[solver_data$export_idx])) {
     message_once(
       "⚠️ Optimization: export price exceeds import price in some slots; clipping for bounded QP."
@@ -245,7 +251,10 @@ demand_solve_qp_window <- function(solver_data, bounds) {
     ub[n + seq_len(n)] <- pmin(ub[n + seq_len(n)], bounds$import_mode_ub)
   }
   if (!is.null(bounds$export_mode_ub)) {
-    ub[2 * n + seq_len(n)] <- pmin(ub[2 * n + seq_len(n)], bounds$export_mode_ub)
+    ub[2 * n + seq_len(n)] <- pmin(
+      ub[2 * n + seq_len(n)],
+      bounds$export_mode_ub
+    )
   }
 
   solve_osqp(
@@ -546,16 +555,16 @@ demand_capacity_window <- function(
 #' - `production`: local power generation (in kW).
 #' This is used when `opt_objective = "grid"`.
 #'
-#' - `price_imported`: price for imported energy (€/kWh).
+#' - `price_imported`: price for imported energy (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' - `price_exported`: price for exported energy (€/kWh).
+#' - `price_exported`: price for exported energy (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' - `price_turn_down`: price for turn-down energy use (€/kWh).
+#' - `price_turn_down`: price for turn-down energy use (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
-#' - `price_turn_up`: price for turn-up energy use (€/kWh).
+#' - `price_turn_up`: price for turn-up energy use (Euro/kWh).
 #' This is used when `opt_objective = "cost"`.
 #'
 #' @param opt_objective character or numeric.
@@ -770,7 +779,10 @@ demand_solve_window <- function(
   }
   identityMat <- diag(time_slots)
   has_grid_flows <- nrow(P) > time_slots
-  P_normalized <- optimization_normalize_quadratic(P, problem_name = "demand optimization")
+  P_normalized <- optimization_normalize_quadratic(
+    P,
+    problem_name = "demand optimization"
+  )
 
   # Build the same physical bounds as before. The continuous `grid` objective
   # still solves directly, while cost/combined add a binary grid mode to avoid

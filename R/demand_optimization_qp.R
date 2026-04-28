@@ -439,14 +439,14 @@ select_capacity_slice_qp <- function(
     lhs = problem$lhs,
     rhs = problem$rhs,
     types = rep(1L, ncol(problem$A)),
-    control = demand_highs_options()
+    control = optimization_highs_options(include_mip_gap = FALSE)
   )
 
   if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
     return(NULL)
   }
 
-  tolerance <- demand_solution_tolerance()
+  tolerance <- optimization_solution_tolerance()
   slice <- pmax(result$primal_solution[seq_len(time_slots)], 0)
   slice[slice < tolerance] <- 0
 

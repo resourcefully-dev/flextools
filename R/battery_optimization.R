@@ -1,21 +1,6 @@
 # Battery optimization (OSQP / HiGHS) ----------------------------------------
 
 
-battery_qp_zero_profile <- function(time_slots) {
-  rep(0, time_slots)
-}
-
-
-battery_qp_infeasible_bounds <- function(lower, upper, tolerance = 1e-8) {
-  any(lower > upper + tolerance)
-}
-
-
-battery_qp_clip <- function(x, lower, upper) {
-  pmin(pmax(x, lower), upper)
-}
-
-
 battery_qp_try_heuristic <- function(
     target,
     lower,
@@ -46,7 +31,7 @@ battery_qp_try_heuristic <- function(
       return(NULL)
     }
 
-    profile[i] <- battery_qp_clip(target[i], step_lower, step_upper)
+    profile[i] <- pmin(pmax(target[i], step_lower), step_upper)
     storage <- storage + profile[i]
   }
 
@@ -54,7 +39,7 @@ battery_qp_try_heuristic <- function(
 }
 
 
-battery_qp_solve_osqp <- function(P, q, A, lower, upper) {
+battery_solve_osqp <- function(P, q, A, lower, upper) {
   sol <- solve_osqp(P, q, A, lower, upper)
   list(
     result = sol$result,
@@ -83,7 +68,7 @@ battery_qp_solve_osqp <- function(P, q, A, lower, upper) {
 #' @return numeric vector
 #' @keywords internal
 #'
-solve_optimization_battery_window_qp <- function(
+battery_solve_grid_window <- function(
     G,
     L,
     Bcap,
@@ -111,7 +96,7 @@ solve_optimization_battery_window_qp <- function(
   ub_B <- pmin(Bc, G - L + import_capacity)
   relaxed_bounds <- FALSE
 
-  if (battery_qp_infeasible_bounds(lb_B, ub_B)) {
+  if (any(lb_B > ub_B + 1e-8)) {
     message_once(
       "⚠️ Optimization warning: infeasible battery QP bounds. Removing grid constraints."
     )
@@ -126,7 +111,7 @@ solve_optimization_battery_window_qp <- function(
   Amat <- rbind(identityMat, cumsumMat, matrix(1, nrow = 1, ncol = time_slots))
   lower <- round(c(lb_B, lb_cumsum, 0), 2)
   upper <- round(c(ub_B, ub_cumsum, 0), 2)
-  solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper)
+  solution <- battery_solve_osqp(P, q, Amat, lower, upper)
 
   if (!is.null(solution$profile)) {
     return(solution$profile)
@@ -155,7 +140,7 @@ solve_optimization_battery_window_qp <- function(
     ub_B <- rep(Bc, time_slots)
     lower <- round(c(lb_B, lb_cumsum, 0), 2)
     upper <- round(c(ub_B, ub_cumsum, 0), 2)
-    solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper)
+    solution <- battery_solve_osqp(P, q, Amat, lower, upper)
 
     if (!is.null(solution$profile)) {
       return(solution$profile)
@@ -182,12 +167,12 @@ solve_optimization_battery_window_qp <- function(
     solution$result$info$status,
     ". Disabling battery for some windows."
   ))
-  battery_qp_zero_profile(time_slots)
+  rep(0, time_slots)
 }
 
 
 #' @keywords internal
-minimize_net_power_window_battery <- function(
+battery_grid_window <- function(
     G,
     L,
     Bcap,
@@ -205,7 +190,7 @@ minimize_net_power_window_battery <- function(
   P <- 2 * (diag(time_slots) + lambda * lambdaMat)
   q <- 2 * (L - G)
 
-  solve_optimization_battery_window_qp(
+  battery_solve_grid_window(
     G, L, Bcap, Bc, Bd, SOCmin, SOCmax, SOCini,
     import_capacity, export_capacity, P, q
   )
@@ -213,7 +198,7 @@ minimize_net_power_window_battery <- function(
 
 
 #' @keywords internal
-curtail_capacity_window_battery <- function(
+battery_capacity_window <- function(
     G,
     L,
     Bcap,
@@ -248,7 +233,7 @@ curtail_capacity_window_battery <- function(
     return(rep(0, length(G)))
   }
 
-  minimize_net_power_window_battery(
+  battery_grid_window(
     G, L, Bcap_curtail, Bc, Bd, SOCmin, SOCmax, SOCini,
     import_capacity, export_capacity, lambda
   )
@@ -399,7 +384,7 @@ battery_solve_cost_milp_window <- function(
     return(as.numeric(result$primal_solution[seq_len(n)]))
   }
 
-  battery_qp_zero_profile(n)
+  rep(0, n)
 }
 
 
@@ -481,7 +466,7 @@ battery_solve_cost_osqp_window <- function(
 
 
 #' @keywords internal
-minimize_cost_window_battery <- function(
+battery_cost_window <- function(
     G,
     L,
     PI,
@@ -517,7 +502,7 @@ minimize_cost_window_battery <- function(
 
 
 #' @keywords internal
-optimize_battery_window <- function(
+battery_combined_window <- function(
     G,
     L,
     PI,
@@ -681,7 +666,7 @@ add_battery_optimization <- function(
   if (opt_objective == "grid") {
     B_windows <- map(
       windows_data,
-      ~ minimize_net_power_window_battery(
+      ~ battery_grid_window(
         G = .x$production, L = .x$static,
         Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
@@ -693,7 +678,7 @@ add_battery_optimization <- function(
   } else if (opt_objective == "capacity") {
     B_windows <- map(
       windows_data,
-      ~ curtail_capacity_window_battery(
+      ~ battery_capacity_window(
         G = .x$production, L = .x$static,
         Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,
         SOCmin = SOCmin, SOCmax = SOCmax, SOCini = SOCini,
@@ -705,7 +690,7 @@ add_battery_optimization <- function(
   } else if (opt_objective == "cost") {
     B_windows <- map(
       windows_data,
-      ~ minimize_cost_window_battery(
+      ~ battery_cost_window(
         G = .x$production, L = .x$static,
         PI = .x$price_imported, PE = .x$price_exported,
         Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,
@@ -718,7 +703,7 @@ add_battery_optimization <- function(
   } else if (is.numeric(opt_objective)) {
     B_windows <- map(
       windows_data,
-      ~ optimize_battery_window(
+      ~ battery_combined_window(
         G = .x$production, L = .x$static,
         PI = .x$price_imported, PE = .x$price_exported,
         Bcap = Bcap_scaled, Bc = Bc, Bd = Bd,

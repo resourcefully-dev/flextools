@@ -85,27 +85,8 @@ get_bounds <- function(
 }
 
 
-demand_highs_options <- function() {
-  optimization_highs_options(include_mip_gap = FALSE)
-}
-
-
 demand_highs_is_optimal <- function(result) {
   identical(result$status_message, "Optimal")
-}
-
-
-demand_normalize_quadratic <- function(P, tolerance = 1e-8) {
-  optimization_normalize_quadratic(
-    P = P,
-    tolerance = tolerance,
-    problem_name = "demand optimization"
-  )
-}
-
-
-demand_solve_osqp <- function(P, q, A, lb, ub) {
-  solve_osqp(P, q, A, lb, ub)
 }
 
 
@@ -118,26 +99,6 @@ demand_attach_profile <- function(optimized_load, imported = NULL, exported = NU
   }
 
   optimized_load
-}
-
-
-demand_solution_tolerance <- function() {
-  optimization_solution_tolerance()
-}
-
-
-demand_objective_tolerance <- function() {
-  optimization_objective_tolerance()
-}
-
-
-demand_relative_gap_tolerance <- function() {
-  optimization_relative_gap_tolerance()
-}
-
-
-demand_objective_gap <- function(lower_bound, incumbent) {
-  optimization_objective_gap(lower_bound, incumbent)
 }
 
 
@@ -221,7 +182,7 @@ demand_extract_solution <- function(x_value, solver_data) {
 
   imported <- pmax(x_value[solver_data$import_idx], 0)
   exported <- pmax(x_value[solver_data$export_idx], 0)
-  tolerance <- demand_solution_tolerance()
+  tolerance <- optimization_solution_tolerance()
   imported[imported < tolerance] <- 0
   exported[exported < tolerance] <- 0
 
@@ -253,7 +214,7 @@ demand_solve_milp_window <- function(solver_data, bounds) {
     lhs = problem$lhs,
     rhs = problem$rhs,
     types = problem$types,
-    control = demand_highs_options()
+    control = optimization_highs_options(include_mip_gap = FALSE)
   )
 
   list(result = result, x = result$primal_solution)
@@ -287,7 +248,7 @@ demand_solve_qp_window <- function(solver_data, bounds) {
     ub[2 * n + seq_len(n)] <- pmin(ub[2 * n + seq_len(n)], bounds$export_mode_ub)
   }
 
-  demand_solve_osqp(
+  solve_osqp(
     P = solver_data$P,
     q = q,
     A = solver_data$A,
@@ -300,7 +261,7 @@ demand_solve_qp_window <- function(solver_data, bounds) {
 demand_select_window_solver <- function(solver_data) {
   if (!solver_data$has_grid_flows) {
     return(function(solver_data, bounds) {
-      demand_solve_osqp(
+      solve_osqp(
         P = solver_data$P,
         q = solver_data$q,
         A = solver_data$A,
@@ -464,14 +425,14 @@ select_capacity_slice <- function(
     lhs = problem$lhs,
     rhs = problem$rhs,
     types = rep(1L, ncol(problem$A)),
-    control = demand_highs_options()
+    control = optimization_highs_options(include_mip_gap = FALSE)
   )
 
   if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
     return(NULL)
   }
 
-  tolerance <- demand_solution_tolerance()
+  tolerance <- optimization_solution_tolerance()
   slice <- pmax(result$primal_solution[seq_len(time_slots)], 0)
   slice[slice < tolerance] <- 0
 
@@ -482,7 +443,7 @@ select_capacity_slice <- function(
 }
 
 
-curtail_capacity_window <- function(
+demand_capacity_window <- function(
   G,
   LF,
   LS,
@@ -518,7 +479,7 @@ curtail_capacity_window <- function(
       "⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints."
     )
     return(
-      minimize_net_power_window(
+      demand_grid_window(
         G = G,
         LF = LF,
         LS = LS,
@@ -538,7 +499,7 @@ curtail_capacity_window <- function(
   }
 
   fixed_load <- round(LF - moved_slice, 2)
-  optimized_slice <- minimize_net_power_window(
+  optimized_slice <- demand_grid_window(
     G = G,
     LF = moved_slice,
     LS = LS + fixed_load,
@@ -677,7 +638,7 @@ optimize_demand <- function(
   if (opt_objective == "grid") {
     O_windows <- map(
       windows_data,
-      ~ minimize_net_power_window(
+      ~ demand_grid_window(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,
@@ -692,7 +653,7 @@ optimize_demand <- function(
   } else if (opt_objective == "capacity") {
     O_windows <- map(
       windows_data,
-      ~ curtail_capacity_window(
+      ~ demand_capacity_window(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,
@@ -707,7 +668,7 @@ optimize_demand <- function(
   } else if (opt_objective == "cost") {
     O_windows <- map(
       windows_data,
-      ~ minimize_cost_window(
+      ~ demand_cost_window(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,
@@ -726,7 +687,7 @@ optimize_demand <- function(
   } else if (is.numeric(opt_objective)) {
     O_windows <- map(
       windows_data,
-      ~ optimize_demand_window(
+      ~ demand_combined_window(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,
@@ -785,7 +746,7 @@ optimize_demand <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-solve_optimization_window <- function(
+demand_solve_window <- function(
   G,
   LF,
   LS,
@@ -809,7 +770,7 @@ solve_optimization_window <- function(
   }
   identityMat <- diag(time_slots)
   has_grid_flows <- nrow(P) > time_slots
-  P_normalized <- demand_normalize_quadratic(P)
+  P_normalized <- optimization_normalize_quadratic(P, problem_name = "demand optimization")
 
   # Build the same physical bounds as before. The continuous `grid` objective
   # still solves directly, while cost/combined add a binary grid mode to avoid
@@ -1044,7 +1005,7 @@ solve_optimization_window <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_net_power_window <- function(
+demand_grid_window <- function(
   G,
   LF,
   LS,
@@ -1063,7 +1024,7 @@ minimize_net_power_window <- function(
   P <- 2 * (identityMat + lambda * LambdaMat)
   q <- 2 * (LS - G)
 
-  solve_optimization_window(
+  demand_solve_window(
     G,
     LF,
     LS,
@@ -1097,7 +1058,7 @@ minimize_net_power_window <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-minimize_cost_window <- function(
+demand_cost_window <- function(
   G,
   LF,
   LS,
@@ -1143,7 +1104,7 @@ minimize_cost_window <- function(
     -PE
   )
 
-  solve_optimization_window(
+  demand_solve_window(
     G,
     LF,
     LS,
@@ -1178,7 +1139,7 @@ minimize_cost_window <- function(
 #' @return numeric vector
 #' @keywords internal
 #'
-optimize_demand_window <- function(
+demand_combined_window <- function(
   G,
   LF,
   LS,
@@ -1224,7 +1185,7 @@ optimize_demand_window <- function(
     -(1 - w) * PE
   )
 
-  solve_optimization_window(
+  demand_solve_window(
     G,
     LF,
     LS,

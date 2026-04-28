@@ -233,7 +233,7 @@ demand_solve_qp_window <- function(solver_data, bounds) {
   export_q_clipped <- pmax(q[solver_data$export_idx], -q[solver_data$import_idx])
   if (any(export_q_clipped != q[solver_data$export_idx])) {
     message_once(
-      "⚠️ Optimization: export price exceeds import price in some slots; clipping for bounded QP."
+      "\u26a0\ufe0f Optimization: export price exceeds import price in some slots; clipping for bounded QP."
     )
     q[solver_data$export_idx] <- export_q_clipped
   }
@@ -476,7 +476,7 @@ demand_capacity_window <- function(
 
   if (is.null(slice_solution)) {
     message_once(
-      "⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Removing grid constraints."
     )
     return(
       demand_grid_window(

@@ -116,7 +116,8 @@ demand_solve_osqp <- function(P, q, A, lb, ub) {
         verbose = FALSE,
         eps_abs = 1e-6,
         eps_rel = 1e-6,
-        polishing = TRUE
+        polishing = TRUE,
+        max_iter = 100000L
       )
     )
     solver@Solve()
@@ -1140,10 +1141,12 @@ minimize_cost_window <- function(
   LambdaMat <- get_lambda_matrix(time_slots)
 
   # Unknown variable: X = [O, I, E]
-  # Quadratic term penalizes ramping: lambda * sum((O_t - O_{t-1})^2)
+  # Quadratic term penalizes ramping: lambda * sum((O_t - O_{t-1})^2).
+  # A tiny diagonal term (1e-6 * lambda * I) regularises the PSD LambdaMat to
+  # PD so that OSQP converges reliably for large lambda values.
   P <- rbind(
     cbind(
-      2 * lambda * LambdaMat,
+      2 * lambda * (LambdaMat + 1e-6 * identityMat),
       identityMat * 0,
       identityMat * 0
     ),

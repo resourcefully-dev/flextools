@@ -97,7 +97,7 @@ battery_solve_grid_window <- function(
 
   if (any(lb_B > ub_B + 1e-8)) {
     message_once(
-      "⚠️ Optimization warning: infeasible battery QP bounds. Removing grid constraints."
+      "\u26a0\ufe0f Optimization warning: infeasible battery QP bounds. Removing grid constraints."
     )
     lb_B <- rep(-Bd, time_slots)
     ub_B <- rep(Bc, time_slots)
@@ -129,7 +129,7 @@ battery_solve_grid_window <- function(
   )
   if (!is.null(heuristic)) {
     message_once(paste0(
-      "⚠️ Optimization warning: ",
+      "\u26a0\ufe0f Optimization warning: ",
       solution$result$info$status,
       ". Using heuristic battery profile for some windows."
     ))
@@ -138,7 +138,7 @@ battery_solve_grid_window <- function(
 
   if (!relaxed_bounds) {
     message_once(
-      "⚠️ Optimization warning: optimization not feasible for some windows. Removing grid constraints."
+      "\u26a0\ufe0f Optimization warning: optimization not feasible for some windows. Removing grid constraints."
     )
     lb_B <- rep(-Bd, time_slots)
     ub_B <- rep(Bc, time_slots)
@@ -163,7 +163,7 @@ battery_solve_grid_window <- function(
     )
     if (!is.null(heuristic)) {
       message_once(paste0(
-        "⚠️ Optimization warning: ",
+        "\u26a0\ufe0f Optimization warning: ",
         solution$result$info$status,
         ". Using heuristic battery profile for some windows."
       ))
@@ -172,7 +172,7 @@ battery_solve_grid_window <- function(
   }
 
   message_once(paste0(
-    "⚠️ Optimization warning: ",
+    "\u26a0\ufe0f Optimization warning: ",
     solution$result$info$status,
     ". Disabling battery for some windows."
   ))
@@ -460,7 +460,7 @@ battery_solve_cost_osqp_window <- function(
   PE_clipped <- pmin(PE, PI)
   if (any(PE_clipped != PE)) {
     message_once(
-      "⚠️ Optimization: export price exceeds import price; clipping for bounded QP."
+      "\u26a0\ufe0f Optimization: export price exceeds import price; clipping for bounded QP."
     )
   }
 
@@ -504,7 +504,7 @@ battery_solve_cost_osqp_window <- function(
 
   # Fallback: MILP without quadratic term
   message_once(
-    "⚠️ Optimization warning: OSQP failed for cost/combined. Falling back to MILP."
+    "\u26a0\ufe0f Optimization warning: OSQP failed for cost/combined. Falling back to MILP."
   )
   battery_solve_cost_milp_window(
     G,
@@ -729,7 +729,7 @@ add_battery_optimization <- function(
 
   if (Bcap == 0 || Bc == 0 || Bd == 0 || SOCmin == SOCmax) {
     message(
-      "⚠️ Optimization warning: battery parameters don't allow optimization."
+      "\u26a0\ufe0f Optimization warning: battery parameters don't allow optimization."
     )
     return(rep(0, nrow(opt_data)))
   }

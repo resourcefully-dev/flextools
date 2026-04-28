@@ -66,9 +66,16 @@ check_optimization_data <- function(opt_data, opt_objective) {
 
 
 triangulate_matrix <- function(mat, direction = c("l", "u"), k = 0) {
+  if (is.null(k) || length(k) != 1 || !is.finite(k)) {
+    k <- 0
+  }
+  k <- as.integer(round(k))
+  k <- max(min(k, ncol(mat)), -nrow(mat))
+
   if (direction == "l") {
     return(as.matrix(Matrix::tril(mat, k = k)))
-  } else if (direction == "u") {
+  }
+  if (direction == "u") {
     return(as.matrix(Matrix::triu(mat, k = k)))
   }
 }
@@ -197,25 +204,28 @@ optimization_highs_options <- function(
 
 
 solve_osqp <- function(P, q, A, lb, ub) {
-  osqp_result <- tryCatch({
-    solver <- osqp::osqp(
-      P = P,
-      q = q,
-      A = A,
-      l = lb,
-      u = ub,
-      osqp::osqpSettings(
-        verbose = FALSE,
-        eps_abs = 1e-6,
-        eps_rel = 1e-6,
-        polishing = TRUE,
-        max_iter = 100000L
+  osqp_result <- tryCatch(
+    {
+      solver <- osqp::osqp(
+        P = P,
+        q = q,
+        A = A,
+        l = lb,
+        u = ub,
+        osqp::osqpSettings(
+          verbose = FALSE,
+          eps_abs = 1e-6,
+          eps_rel = 1e-6,
+          polishing = TRUE,
+          max_iter = 100000L
+        )
       )
-    )
-    solver@Solve()
-  }, error = function(e) {
-    list(info = list(status_val = -7L, status = conditionMessage(e)))
-  })
+      solver@Solve()
+    },
+    error = function(e) {
+      list(info = list(status_val = -7L, status = conditionMessage(e)))
+    }
+  )
 
   if (osqp_result$info$status_val %in% c(1L, 2L)) {
     list(result = list(status_message = "Optimal"), x = osqp_result$x)

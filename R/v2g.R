@@ -667,7 +667,7 @@ solve_optimization_window_v2g <- function(
   l_vec <- c(bounds$lb_O, bounds$lb_cumsum, bounds$lb_energy)
   u_vec <- c(bounds$ub_O, bounds$ub_cumsum, bounds$ub_energy)
 
-  O <- demand_solve_osqp(
+  O <- solve_osqp(
     P = P,
     q = q,
     A = A,

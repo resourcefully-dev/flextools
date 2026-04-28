@@ -694,7 +694,7 @@ get_setpoints <- function(
             lambda = lambda
           )
         } else if (opt_objective == "cost") {
-          O <- minimize_cost_window(
+          O <- demand_cost_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
@@ -710,7 +710,7 @@ get_setpoints <- function(
             lambda = lambda
           )
         } else if (is.numeric(opt_objective)) {
-          O <- optimize_demand_window(
+          O <- demand_combined_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],

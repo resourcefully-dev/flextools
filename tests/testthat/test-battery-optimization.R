@@ -13,7 +13,7 @@ opt_data <- flextools::energy_profiles |>
 
 test_that("battery optimization works for grid objective", {
   opt_battery <- opt_data |>
-    add_battery_optimization_qp(
+    add_battery_optimization(
       opt_objective = "grid",
       Bcap = 50,
       Bc = 4,
@@ -24,32 +24,32 @@ test_that("battery optimization works for grid objective", {
   expect_type(opt_battery, "double")
 })
 
-test_that("battery optimization qp helper returns a feasible battery profile", {
-  opt_battery_qp <- opt_data |>
-    add_battery_optimization_qp(
+test_that("battery optimization returns a feasible battery profile", {
+  opt_battery <- opt_data |>
+    add_battery_optimization(
       Bcap = 50,
       Bc = 4,
       Bd = 4,
       window_start_hour = 5
     )
 
-  expect_type(opt_battery_qp, "double")
-  expect_equal(length(opt_battery_qp), nrow(opt_data))
+  expect_type(opt_battery, "double")
+  expect_equal(length(opt_battery), nrow(opt_data))
 
   storage <- get_storage_level(
-    opt_battery_qp,
+    opt_battery,
     time_resolution = 15,
     init = 0
   )
 
-  expect_lte(max(opt_battery_qp), 4 + 1e-6)
-  expect_gte(min(opt_battery_qp), -4 - 1e-6)
+  expect_lte(max(opt_battery), 4 + 1e-6)
+  expect_gte(min(opt_battery), -4 - 1e-6)
   expect_lte(max(storage), 50 + 1e-6)
   expect_gte(min(storage), -1e-6)
   expect_equal(tail(storage, 1), 0, tolerance = 1e-6)
 })
 
-test_that("battery optimization qp returns zero profile when bounds are infeasible", {
+test_that("battery optimization returns zero profile when bounds are infeasible", {
   opt_data_infeasible <- opt_data |>
     mutate(
       production = 0,
@@ -58,8 +58,8 @@ test_that("battery optimization qp returns zero profile when bounds are infeasib
       export_capacity = 0
     )
 
-  opt_battery_qp <- opt_data_infeasible |>
-    add_battery_optimization_qp(
+  opt_battery <- opt_data_infeasible |>
+    add_battery_optimization(
       Bcap = 50,
       Bc = 1,
       Bd = 1,
@@ -67,15 +67,15 @@ test_that("battery optimization qp returns zero profile when bounds are infeasib
     )
 
   expect_equal(
-    as.numeric(opt_battery_qp),
+    as.numeric(opt_battery),
     rep(0, nrow(opt_data_infeasible))
   )
 })
 
 
-test_that("battery optimization qp falls back to a heuristic profile on solver failure", {
+test_that("battery optimization falls back to a heuristic profile on solver failure", {
   testthat::local_mocked_bindings(
-    battery_qp_solve_osqp = function(P, q, A, lower, upper, time_slots) {
+    battery_solve_osqp = function(P, q, A, lower, upper) {
       list(
         result = list(
           info = list(
@@ -89,7 +89,7 @@ test_that("battery optimization qp falls back to a heuristic profile on solver f
     .package = "flextools"
   )
 
-  profile <- flextools:::solve_optimization_battery_window_qp(
+  profile <- flextools:::battery_solve_grid_window(
     G = c(8, 8, 0, 0),
     L = c(0, 0, 8, 8),
     Bcap = 8,
@@ -117,7 +117,7 @@ test_that("battery optimization qp falls back to a heuristic profile on solver f
 test_that("error when `opt_objective` is wrong in battery optimization", {
   expect_error(
     opt_data |>
-      add_battery_optimization_qp(
+      add_battery_optimization(
         opt_objective = "grids",
         Bcap = 50,
         Bc = 4,
@@ -138,11 +138,8 @@ test_that("battery optimization works with constrained import capacity", {
       )
     )
 
-  # opt_data_batt |>
-  #   plot_ts()
-
   opt_battery_vct <- opt_data_batt |>
-    add_battery_optimization_qp(
+    add_battery_optimization(
       opt_objective = "grid",
       Bcap = 5000,
       Bc = 5000,
@@ -157,11 +154,8 @@ test_that("battery optimization works with constrained import capacity", {
     ) |>
     get_energy_balance()
 
-  # opt_battery |>
-  #   plot_ts()
-
   expect_false(
-    any(round(opt_battery$import_capacity - opt_battery$imported) < 0) # There's still some error
+    any(round(opt_battery$import_capacity - opt_battery$imported) < 0)
   )
 })
 
@@ -174,7 +168,7 @@ test_that("battery optimization works with constrained import capacity and 'capa
     )
 
   opt_battery_vct <- opt_data_batt |>
-    add_battery_optimization_qp(
+    add_battery_optimization(
       opt_objective = "capacity",
       Bcap = 5000,
       Bc = 500,
@@ -189,11 +183,50 @@ test_that("battery optimization works with constrained import capacity and 'capa
     ) |>
     get_energy_balance()
 
-  # opt_battery |>
-  #   plot_ts() |>
-  #   dygraphs::dyLegend(show = "onmouseover")
-
   expect_false(
-    any(round(opt_battery$import_capacity - opt_battery$imported) < 0) # There's still some error
+    any(round(opt_battery$import_capacity - opt_battery$imported) < 0)
   )
+})
+
+test_that("battery optimization works for cost objective", {
+  opt_battery <- opt_data |>
+    add_battery_optimization(
+      opt_objective = "cost",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5
+    )
+
+  expect_type(opt_battery, "double")
+  expect_equal(length(opt_battery), nrow(opt_data))
+})
+
+test_that("battery optimization works for combined objective", {
+  opt_battery <- opt_data |>
+    add_battery_optimization(
+      opt_objective = 0.5,
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5
+    )
+
+  expect_type(opt_battery, "double")
+  expect_equal(length(opt_battery), nrow(opt_data))
+})
+
+test_that("battery optimization works for grid objective with lambda > 0", {
+  opt_battery <- opt_data |>
+    add_battery_optimization(
+      opt_objective = "grid",
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      window_start_hour = 5,
+      lambda = 0.1
+    )
+
+  expect_type(opt_battery, "double")
+  expect_equal(length(opt_battery), nrow(opt_data))
 })

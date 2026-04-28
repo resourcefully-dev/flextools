@@ -275,7 +275,7 @@ test_that("demand cost and combined windows do not import and export simultaneou
     nrow(window_data)
   )
 
-  cost_profile <- minimize_cost_window(
+  cost_profile <- demand_cost_window(
     G = window_data$solar,
     LF = window_data$building,
     LS = rep(0, nrow(window_data)),
@@ -291,7 +291,7 @@ test_that("demand cost and combined windows do not import and export simultaneou
     lambda = 0
   )
 
-  combined_profile <- optimize_demand_window(
+  combined_profile <- demand_combined_window(
     G = window_data$solar,
     LF = window_data$building,
     LS = rep(0, nrow(window_data)),

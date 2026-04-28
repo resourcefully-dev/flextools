@@ -101,6 +101,21 @@ test_that("Get error when no user profiles in `opt_data` and not optimization", 
   ))
 })
 
+
+test_that("smart charging works with grid objective and 'none' method", {
+  sc_results <- smart_charging(
+    sessions,
+    opt_data,
+    opt_objective = "grid",
+    method = "none",
+    window_days = 1,
+    window_start_hour = 5
+  )
+
+  # plot_smart_charging(sc_results, sessions, legend_width = 150)
+  expect_equal(sc_results$demand, sc_results$setpoints)
+})
+
 test_that("smart charging works with grid objective and curtail method", {
   sc_results <- smart_charging(
     sessions,
@@ -255,9 +270,18 @@ test_that("smart charging uses profile setpoints directly when opt_objective is 
     window_start_hour = 6
   )
 
-  expect_true(all(c("datetime", "Worktime", "Visit") %in% names(sc_results$setpoints)))
-  expect_equal(length(unique(sc_results$sessions$Session)), length(unique(sessions$Session)))
-  expect_equal(sum(sc_results$sessions$Energy), sum(sessions$Energy), tolerance = 0.1)
+  expect_true(all(
+    c("datetime", "Worktime", "Visit") %in% names(sc_results$setpoints)
+  ))
+  expect_equal(
+    length(unique(sc_results$sessions$Session)),
+    length(unique(sessions$Session))
+  )
+  expect_equal(
+    sum(sc_results$sessions$Energy),
+    sum(sessions$Energy),
+    tolerance = 0.1
+  )
   expect_equal(length(sc_results$log), 0)
 })
 
@@ -355,9 +379,14 @@ test_that("smart charging sessions are summarised", {
 })
 
 test_that("smart charging sessions can be summarised by timecycle", {
-  timecycle_summary <- summarise_timecycle_smart_charging_sessions(sc_results$sessions)
+  timecycle_summary <- summarise_timecycle_smart_charging_sessions(
+    sc_results$sessions
+  )
   expect_true(nrow(timecycle_summary) > 0)
-  expect_true(all(c("profile", "group", "subgroup", "n_sessions", "pct") %in% names(timecycle_summary)))
+  expect_true(all(
+    c("profile", "group", "subgroup", "n_sessions", "pct") %in%
+      names(timecycle_summary)
+  ))
 })
 
 

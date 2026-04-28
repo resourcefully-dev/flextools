@@ -172,7 +172,13 @@ optimization_objective_gap <- function(lower_bound, incumbent) {
 }
 
 
-optimization_highs_options <- function(include_mip_gap = FALSE) {
+optimization_highs_options <- function(
+  include_mip_gap = FALSE,
+  time_limit = NULL
+) {
+  # `threads = 1L` is intentional: callers typically parallelize at the
+  # window level (e.g. via mirai + purrr::in_parallel), so letting HiGHS
+  # spawn its own threads would oversubscribe the machine.
   args <- list(
     threads = 1L,
     log_to_console = FALSE
@@ -180,6 +186,10 @@ optimization_highs_options <- function(include_mip_gap = FALSE) {
 
   if (include_mip_gap) {
     args$mip_rel_gap <- optimization_relative_gap_tolerance()
+  }
+
+  if (!is.null(time_limit) && is.finite(time_limit) && time_limit > 0) {
+    args$time_limit <- as.numeric(time_limit)
   }
 
   do.call(highs::highs_control, args)

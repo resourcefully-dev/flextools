@@ -248,6 +248,66 @@ get_energy_total_cost <- function(df) {
 }
 
 
+#' Evaluate total grid cost for an optimized demand profile
+#'
+#' Thin benchmarking helper that takes the optimization context `opt_data`
+#' (the same tibble passed to [optimize_demand_qp()]) and an optimized
+#' flexible-demand vector `O`, and returns the total grid energy cost.
+#' Makes cost benchmarking a single call:
+#'
+#' ```
+#' # Baseline cost (no flexibility)
+#' evaluate_cost(opt_data, opt_data$flexible)
+#'
+#' # Cost after optimization
+#' O <- optimize_demand_qp(opt_data, opt_objective = "cost")
+#' evaluate_cost(opt_data, O)
+#' ```
+#'
+#' Internally this builds the equivalent `consumption = O + static` column
+#' and delegates to [get_energy_total_cost()], so the pricing convention
+#' matches the rest of the package.
+#'
+#' @param opt_data tibble, same shape expected by [optimize_demand_qp()].
+#'   Must contain `datetime`. Optional columns `static`, `production`,
+#'   `price_imported` and `price_exported` default to `0`, `0`, `1` and `0`
+#'   respectively when missing -- matching the defaults used by
+#'   [optimize_demand_qp()].
+#' @param O numeric vector of flexible demand (kW), same length as
+#'   `opt_data$datetime`. Pass `opt_data$flexible` for the baseline cost,
+#'   or the return value of [optimize_demand_qp()] for the optimized cost.
+#'
+#' @return numeric scalar, the total grid cost in the currency units of
+#'   the price columns.
+#' @export
+#'
+#' @importFrom dplyr tibble
+#'
+evaluate_cost <- function(opt_data, O) {
+  if (!("datetime" %in% names(opt_data))) {
+    stop("Error: `datetime` variable must exist in `opt_data`")
+  }
+  if (length(O) != nrow(opt_data)) {
+    stop("Error: `O` must have the same length as `opt_data$datetime`")
+  }
+
+  LS <- if ("static" %in% names(opt_data)) opt_data$static else 0
+  G  <- if ("production" %in% names(opt_data)) opt_data$production else 0
+  PI <- if ("price_imported" %in% names(opt_data)) opt_data$price_imported else 1
+  PE <- if ("price_exported" %in% names(opt_data)) opt_data$price_exported else 0
+
+  df <- tibble(
+    datetime = opt_data$datetime,
+    consumption = O + LS,
+    production = G,
+    price_imported = PI,
+    price_exported = PE
+  )
+
+  get_energy_total_cost(df)
+}
+
+
 #' Get imbalance income time-series
 #'
 #' The energy income (in Euros) based on the difference between the baseline and

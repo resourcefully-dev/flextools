@@ -105,31 +105,7 @@ demand_normalize_quadratic <- function(P, tolerance = 1e-8) {
 
 
 demand_solve_osqp <- function(P, q, A, lb, ub) {
-  osqp_result <- tryCatch({
-    solver <- osqp::osqp(
-      P = P,
-      q = q,
-      A = A,
-      l = lb,
-      u = ub,
-      osqp::osqpSettings(
-        verbose = FALSE,
-        eps_abs = 1e-6,
-        eps_rel = 1e-6,
-        polishing = TRUE,
-        max_iter = 100000L
-      )
-    )
-    solver@Solve()
-  }, error = function(e) {
-    list(info = list(status_val = -7L, status = conditionMessage(e)))
-  })
-
-  if (osqp_result$info$status_val %in% c(1L, 2L)) {
-    list(result = list(status_message = "Optimal"), x = osqp_result$x)
-  } else {
-    list(result = list(status_message = osqp_result$info$status), x = NULL)
-  }
+  solve_osqp(P, q, A, lb, ub)
 }
 
 

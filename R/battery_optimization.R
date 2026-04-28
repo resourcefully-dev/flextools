@@ -55,29 +55,10 @@ battery_qp_try_heuristic <- function(
 
 
 battery_qp_solve_osqp <- function(P, q, A, lower, upper, time_slots) {
-  solver <- osqp::osqp(
-    P = P,
-    q = q,
-    A = A,
-    l = lower,
-    u = upper,
-    pars = osqp::osqpSettings(
-      verbose = FALSE,
-      eps_abs = 1e-6,
-      eps_rel = 1e-6,
-      polishing = TRUE,
-      max_iter = 100000L
-    )
-  )
-  result <- solver@Solve()
-
+  sol <- solve_osqp(P, q, A, lower, upper)
   list(
-    result = result,
-    profile = if (result$info$status_val %in% c(1L, 2L)) {
-      as.numeric(result$x[seq_len(time_slots)])
-    } else {
-      NULL
-    }
+    result = sol$result,
+    profile = if (!is.null(sol$x)) as.numeric(sol$x[seq_len(time_slots)]) else NULL
   )
 }
 

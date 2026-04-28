@@ -75,7 +75,7 @@ test_that("battery optimization returns zero profile when bounds are infeasible"
 
 test_that("battery optimization falls back to a heuristic profile on solver failure", {
   testthat::local_mocked_bindings(
-    battery_qp_solve_osqp = function(P, q, A, lower, upper, time_slots) {
+    battery_qp_solve_osqp = function(P, q, A, lower, upper) {
       list(
         result = list(
           info = list(

@@ -54,11 +54,11 @@ battery_qp_try_heuristic <- function(
 }
 
 
-battery_qp_solve_osqp <- function(P, q, A, lower, upper, time_slots) {
+battery_qp_solve_osqp <- function(P, q, A, lower, upper) {
   sol <- solve_osqp(P, q, A, lower, upper)
   list(
     result = sol$result,
-    profile = if (!is.null(sol$x)) as.numeric(sol$x[seq_len(time_slots)]) else NULL
+    profile = if (!is.null(sol$x)) as.numeric(sol$x) else NULL
   )
 }
 
@@ -126,7 +126,7 @@ solve_optimization_battery_window_qp <- function(
   Amat <- rbind(identityMat, cumsumMat, matrix(1, nrow = 1, ncol = time_slots))
   lower <- round(c(lb_B, lb_cumsum, 0), 2)
   upper <- round(c(ub_B, ub_cumsum, 0), 2)
-  solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper, time_slots)
+  solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper)
 
   if (!is.null(solution$profile)) {
     return(solution$profile)
@@ -155,7 +155,7 @@ solve_optimization_battery_window_qp <- function(
     ub_B <- rep(Bc, time_slots)
     lower <- round(c(lb_B, lb_cumsum, 0), 2)
     upper <- round(c(ub_B, ub_cumsum, 0), 2)
-    solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper, time_slots)
+    solution <- battery_qp_solve_osqp(P, q, Amat, lower, upper)
 
     if (!is.null(solution$profile)) {
       return(solution$profile)
@@ -462,12 +462,10 @@ battery_solve_cost_osqp_window <- function(
   lower_osqp <- c(d$lb_B, d$lb_I, d$lb_E, d$lb)
   upper_osqp <- c(d$ub_B, ub_I, ub_E, d$ub)
 
-  sol <- battery_qp_solve_osqp(
-    P_full, q_full, A_osqp, lower_osqp, upper_osqp, n
-  )
+  sol <- solve_osqp(P_full, q_full, A_osqp, lower_osqp, upper_osqp)
 
-  if (!is.null(sol$profile)) {
-    return(sol$profile)
+  if (!is.null(sol$x)) {
+    return(as.numeric(sol$x[seq_len(n)]))
   }
 
   # Fallback: MILP without quadratic term

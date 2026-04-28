@@ -3,7 +3,6 @@
 S3method(plot,SmartCharging)
 S3method(print,SmartCharging)
 export(add_battery_optimization)
-export(add_battery_optimization_qp)
 export(add_battery_simple)
 export(get_conversion_losses)
 export(get_energy_balance)

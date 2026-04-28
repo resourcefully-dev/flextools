@@ -1080,11 +1080,11 @@ minimize_net_power_window <- function(
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
+  LambdaMat <- get_lambda_matrix(time_slots)
 
-  # Same net-power objective as before:
-  #   min sum((O + LS - G)^2) + lambda * sum((O - LF)^2)
-  P <- 2 * identityMat * (1 + lambda)
-  q <- 2 * (LS - G - lambda * LF)
+  # min sum((O + LS - G)^2) + lambda * sum((O_t - O_{t-1})^2)
+  P <- 2 * (identityMat + lambda * LambdaMat)
+  q <- 2 * (LS - G)
 
   solve_optimization_window(
     G,
@@ -1137,13 +1137,13 @@ minimize_cost_window <- function(
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
+  LambdaMat <- get_lambda_matrix(time_slots)
 
   # Unknown variable: X = [O, I, E]
-  # The linear part is the same economic objective used before. The only
-  # quadratic term is the optional smoothing penalty on deviations from LF.
+  # Quadratic term penalizes ramping: lambda * sum((O_t - O_{t-1})^2)
   P <- rbind(
     cbind(
-      2 * lambda * identityMat,
+      2 * lambda * LambdaMat,
       identityMat * 0,
       identityMat * 0
     ),
@@ -1159,7 +1159,7 @@ minimize_cost_window <- function(
     )
   )
   q <- c(
-    PTD - PTU - 2 * lambda * LF,
+    PTD - PTU,
     PI,
     -PE
   )
@@ -1217,12 +1217,14 @@ optimize_demand_window <- function(
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
+  LambdaMat <- get_lambda_matrix(time_slots)
 
   # Unknown variable: X = [O, I, E]
-  # This preserves the original weighted combination of cost and grid terms.
+  # Grid term uses diagonal quadratic (normalized by mean price squared).
+  # Ramping penalty uses LambdaMat = D'D so lambda penalizes slot-to-slot changes.
   P <- rbind(
     cbind(
-      2 * (w * mean(PI)^2 + lambda) * identityMat,
+      2 * w * mean(PI)^2 * identityMat + 2 * lambda * LambdaMat,
       identityMat * 0,
       identityMat * 0
     ),
@@ -1238,7 +1240,7 @@ optimize_demand_window <- function(
     )
   )
   q <- c(
-    (1 - w) * (PTD - PTU) - 2 * lambda * LF - 2 * w * mean(PI)^2 * (G - LS),
+    (1 - w) * (PTD - PTU) - 2 * w * mean(PI)^2 * (G - LS),
     (1 - w) * PI,
     -(1 - w) * PE
   )

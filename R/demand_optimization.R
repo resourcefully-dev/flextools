@@ -104,21 +104,31 @@ demand_normalize_quadratic <- function(P, tolerance = 1e-8) {
 }
 
 
-demand_solve_highs_problem <- function(P, q, Amat, lb, ub) {
-  # OSQP solved `1/2 x'Px + q'x` subject to `lb <= Ax <= ub`.
-  # HiGHS uses the same QP convention, so the original formulation can be
-  # reused directly once the constraint matrix is mapped to `lhs/rhs`.
-  highs::highs_solve(
-    Q = demand_normalize_quadratic(P),
-    L = q,
-    lower = rep(-Inf, ncol(Amat)),
-    upper = rep(Inf, ncol(Amat)),
-    A = Amat,
-    lhs = lb,
-    rhs = ub,
-    types = rep(1L, ncol(Amat)),
-    control = demand_highs_options()
-  )
+demand_solve_osqp <- function(P, q, A, lb, ub) {
+  osqp_result <- tryCatch({
+    solver <- osqp::osqp(
+      P = P,
+      q = q,
+      A = A,
+      l = lb,
+      u = ub,
+      osqp::osqpSettings(
+        verbose = FALSE,
+        eps_abs = 1e-6,
+        eps_rel = 1e-6,
+        polishing = TRUE
+      )
+    )
+    solver@Solve()
+  }, error = function(e) {
+    list(info = list(status_val = -7L, status = conditionMessage(e)))
+  })
+
+  if (osqp_result$info$status_val %in% c(1L, 2L)) {
+    list(result = list(status_message = "Optimal"), x = osqp_result$x)
+  } else {
+    list(result = list(status_message = osqp_result$info$status), x = NULL)
+  }
 }
 
 
@@ -225,52 +235,6 @@ demand_build_highs_problem <- function(
 }
 
 
-demand_mode_values <- function(x_value, solver_data) {
-  x_value[solver_data$grid_mode_idx]
-}
-
-
-demand_round_mode_guess <- function(x_value, solver_data) {
-  import <- x_value[solver_data$import_idx]
-  export <- x_value[solver_data$export_idx]
-
-  as.numeric(import >= export)
-}
-
-
-demand_branch_index <- function(x_value, solver_data, tolerance = 1e-6) {
-  import <- x_value[solver_data$import_idx]
-  export <- x_value[solver_data$export_idx]
-  simultaneous <- which(import > tolerance & export > tolerance)
-
-  if (length(simultaneous) > 0) {
-    scores <- pmin(import[simultaneous], export[simultaneous])
-    return(simultaneous[which.max(scores)])
-  }
-
-  z_value <- demand_mode_values(x_value, solver_data)
-  fractional <- which(z_value > tolerance & z_value < 1 - tolerance)
-  if (length(fractional) == 0) {
-    return(NA_integer_)
-  }
-
-  scores <- pmin(z_value[fractional], 1 - z_value[fractional])
-  fractional[which.max(scores)]
-}
-
-
-demand_has_simultaneous_flows <- function(
-  x_value,
-  solver_data,
-  tolerance = 1e-6
-) {
-  import <- x_value[solver_data$import_idx]
-  export <- x_value[solver_data$export_idx]
-
-  any(import > tolerance & export > tolerance)
-}
-
-
 demand_extract_solution <- function(x_value, solver_data) {
   optimized_load <- round(x_value[solver_data$optimized_idx], 2)
 
@@ -283,6 +247,15 @@ demand_extract_solution <- function(x_value, solver_data) {
   tolerance <- demand_solution_tolerance()
   imported[imported < tolerance] <- 0
   exported[exported < tolerance] <- 0
+
+  # Enforce physical exclusivity: continuous QP solvers (OSQP) may produce
+  # small simultaneous I and E. Net = I - E is preserved by collapsing to one direction.
+  both_positive <- imported > 0 & exported > 0
+  if (any(both_positive)) {
+    net <- imported - exported
+    imported[both_positive] <- pmax(net[both_positive], 0)
+    exported[both_positive] <- pmax(-net[both_positive], 0)
+  }
 
   demand_attach_profile(optimized_load, imported, exported)
 }
@@ -310,186 +283,39 @@ demand_solve_milp_window <- function(solver_data, bounds) {
 }
 
 
-demand_solve_qp_relaxation <- function(
-  solver_data,
-  bounds,
-  mode_lower,
-  mode_upper
-) {
-  problem <- demand_build_highs_problem(
-    solver_data = solver_data,
-    bounds = bounds,
-    relax_binaries = TRUE,
-    mode_lower = mode_lower,
-    mode_upper = mode_upper
-  )
-  result <- highs::highs_solve(
-    Q = problem$Q,
-    L = problem$L,
-    lower = problem$lower,
-    upper = problem$upper,
-    A = problem$A,
-    lhs = problem$lhs,
-    rhs = problem$rhs,
-    types = problem$types,
-    control = demand_highs_options()
-  )
+demand_solve_qp_window <- function(solver_data, bounds) {
+  q <- solver_data$q
+  ub <- bounds$ub
+  n <- solver_data$time_slots
 
-  list(result = result, x = result$primal_solution)
-}
-
-
-demand_solve_miqp_window <- function(solver_data, bounds) {
-  time_slots <- solver_data$time_slots
-  objective_tolerance <- demand_objective_tolerance()
-  relative_gap_tolerance <- demand_relative_gap_tolerance()
-
-  root_relaxation <- demand_solve_qp_relaxation(
-    solver_data = solver_data,
-    bounds = bounds,
-    mode_lower = rep(0, time_slots),
-    mode_upper = rep(1, time_slots)
-  )
-
-  if (!demand_highs_is_optimal(root_relaxation$result)) {
-    return(list(
-      result = root_relaxation$result,
-      x = root_relaxation$x
-    ))
-  }
-
-  # Most quadratic demand windows already satisfy import/export exclusivity in
-  # the continuous relaxation. Accepting those windows directly avoids the
-  # expensive custom branch-and-bound search with no change in feasibility.
-  if (!demand_has_simultaneous_flows(root_relaxation$x, solver_data)) {
-    return(root_relaxation)
-  }
-
-  best_objective <- Inf
-  best_x <- NULL
-  stack <- list(list(
-    mode_lower = rep(0, time_slots),
-    mode_upper = rep(1, time_slots)
-  ))
-
-  update_incumbent <- function(mode_fixed) {
-    heuristic <- demand_solve_qp_relaxation(
-      solver_data = solver_data,
-      bounds = bounds,
-      mode_lower = mode_fixed,
-      mode_upper = mode_fixed
+  # When export price exceeds import price in some slots the QP objective is
+  # unbounded (both I and E can grow without limit). Clip export prices to
+  # import prices to restore convexity. Physical import/export are re-derived
+  # from O by callers, so the optimal O profile is unaffected.
+  export_q_clipped <- pmax(q[solver_data$export_idx], -q[solver_data$import_idx])
+  if (any(export_q_clipped != q[solver_data$export_idx])) {
+    message_once(
+      "⚠️ Optimization: export price exceeds import price in some slots; clipping for bounded QP."
     )
-
-    if (!demand_highs_is_optimal(heuristic$result)) {
-      return()
-    }
-
-    if (heuristic$result$objective_value + objective_tolerance < best_objective) {
-      best_objective <<- heuristic$result$objective_value
-      best_x <<- heuristic$x
-    }
+    q[solver_data$export_idx] <- export_q_clipped
   }
 
-  root_mode_guess <- demand_round_mode_guess(root_relaxation$x, solver_data)
-  update_incumbent(root_mode_guess)
-
-  if (
-    !is.null(best_x) &&
-      demand_objective_gap(
-        lower_bound = root_relaxation$result$objective_value,
-        incumbent = best_objective
-      ) <= relative_gap_tolerance
-  ) {
-    return(list(
-      result = list(
-        status_message = "Optimal",
-        objective_value = best_objective
-      ),
-      x = best_x
-    ))
+  # Cap I and E upper bounds at their physical limits (max possible import/export
+  # given O bounds and site balance). Without this cap, infinite capacity data
+  # yields an unbounded QP whenever clipped PE == PI.
+  if (!is.null(bounds$import_mode_ub)) {
+    ub[n + seq_len(n)] <- pmin(ub[n + seq_len(n)], bounds$import_mode_ub)
+  }
+  if (!is.null(bounds$export_mode_ub)) {
+    ub[2 * n + seq_len(n)] <- pmin(ub[2 * n + seq_len(n)], bounds$export_mode_ub)
   }
 
-  while (length(stack) > 0) {
-    node <- stack[[length(stack)]]
-    stack <- stack[-length(stack)]
-
-    if (
-      identical(node$mode_lower, rep(0, time_slots)) &&
-        identical(node$mode_upper, rep(1, time_slots))
-    ) {
-      relaxation <- root_relaxation
-    } else {
-      relaxation <- demand_solve_qp_relaxation(
-        solver_data = solver_data,
-        bounds = bounds,
-        mode_lower = node$mode_lower,
-        mode_upper = node$mode_upper
-      )
-    }
-    if (!demand_highs_is_optimal(relaxation$result)) {
-      next
-    }
-
-    if (relaxation$result$objective_value >= best_objective - objective_tolerance) {
-      next
-    }
-
-    if (
-      !is.null(best_x) &&
-        demand_objective_gap(
-          lower_bound = relaxation$result$objective_value,
-          incumbent = best_objective
-        ) <= relative_gap_tolerance
-    ) {
-      next
-    }
-
-    branch_idx <- demand_branch_index(relaxation$x, solver_data)
-    if (is.na(branch_idx)) {
-      best_objective <- relaxation$result$objective_value
-      best_x <- relaxation$x
-      next
-    }
-
-    mode_guess <- demand_round_mode_guess(relaxation$x, solver_data)
-    mode_guess <- pmin(pmax(mode_guess, node$mode_lower), node$mode_upper)
-    update_incumbent(mode_guess)
-
-    left_node <- list(
-      mode_lower = node$mode_lower,
-      mode_upper = node$mode_upper
-    )
-    left_node$mode_lower[branch_idx] <- 0
-    left_node$mode_upper[branch_idx] <- 0
-
-    right_node <- list(
-      mode_lower = node$mode_lower,
-      mode_upper = node$mode_upper
-    )
-    right_node$mode_lower[branch_idx] <- 1
-    right_node$mode_upper[branch_idx] <- 1
-
-    mode_value <- demand_mode_values(relaxation$x, solver_data)[branch_idx]
-    if (mode_value >= 0.5) {
-      stack <- c(stack, list(left_node, right_node))
-    } else {
-      stack <- c(stack, list(right_node, left_node))
-    }
-  }
-
-  if (is.null(best_x)) {
-    return(list(
-      result = list(status_message = "Primal infeasible or unbounded"),
-      x = NULL
-    ))
-  }
-
-  list(
-    result = list(
-      status_message = "Optimal",
-      objective_value = best_objective
-    ),
-    x = best_x
+  demand_solve_osqp(
+    P = solver_data$P,
+    q = q,
+    A = solver_data$A,
+    lb = bounds$lb,
+    ub = ub
   )
 }
 
@@ -497,23 +323,257 @@ demand_solve_miqp_window <- function(solver_data, bounds) {
 demand_select_window_solver <- function(solver_data) {
   if (!solver_data$has_grid_flows) {
     return(function(solver_data, bounds) {
-      result <- demand_solve_highs_problem(
+      demand_solve_osqp(
         P = solver_data$P,
         q = solver_data$q,
-        Amat = solver_data$A,
+        A = solver_data$A,
         lb = bounds$lb,
         ub = bounds$ub
       )
-
-      list(result = result, x = result$primal_solution)
     })
   }
 
   if (is.null(solver_data$P)) {
+    # lambda = 0: use MILP to enforce import/export exclusivity exactly
     return(demand_solve_milp_window)
   }
 
-  demand_solve_miqp_window
+  # lambda > 0: use OSQP (continuous QP, no binary variables). The quadratic
+  # smoothing term ensures a well-posed bounded problem after PE clipping;
+  # OSQP with polishing converges reliably where HiGHS QP ASM is too slow.
+  demand_solve_qp_window
+}
+
+
+# Capacity objective helpers ------------------------------------------------------
+
+capacity_slice_problem <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity
+) {
+  time_slots <- length(LF)
+  identityMat <- diag(time_slots)
+  zeroMat <- matrix(0, nrow = time_slots, ncol = time_slots)
+  cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
+
+  if (direction == "forward") {
+    if (time_horizon == time_slots) {
+      horizonMat_cumsum <- matrix(0, nrow = time_slots, ncol = time_slots)
+    } else {
+      horizonMat_cumsum <- triangulate_matrix(
+        matrix(1, time_slots, time_slots),
+        "l",
+        -time_horizon
+      )
+    }
+    horizonMat_identity <- triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "l"),
+      "u",
+      -time_horizon
+    )
+
+    A_cumsum_lb <- cbind(-horizonMat_cumsum, cumsumMat)
+    lhs_cumsum_lb <- rep(0, time_slots)
+    rhs_cumsum_lb <- rep(Inf, time_slots)
+
+    A_cumsum_ub <- cbind(-cumsumMat, cumsumMat)
+    lhs_cumsum_ub <- rep(-Inf, time_slots)
+    rhs_cumsum_ub <- rep(0, time_slots)
+  } else {
+    horizonMat_cumsum <- triangulate_matrix(
+      matrix(1, time_slots, time_slots),
+      "l",
+      time_horizon
+    )
+    horizonMat_identity <- triangulate_matrix(
+      triangulate_matrix(matrix(1, time_slots, time_slots), "u"),
+      "l",
+      time_horizon
+    )
+
+    A_cumsum_lb <- cbind(-cumsumMat, cumsumMat)
+    lhs_cumsum_lb <- rep(0, time_slots)
+    rhs_cumsum_lb <- rep(Inf, time_slots)
+
+    A_cumsum_ub <- cbind(-horizonMat_cumsum, cumsumMat)
+    lhs_cumsum_ub <- rep(-Inf, time_slots)
+    rhs_cumsum_ub <- rep(0, time_slots)
+  }
+
+  final_lb <- round(pmax(G - LS - export_capacity, 0), 2)
+  final_ub <- round(pmin(pmax(G - LS + import_capacity, 0), LFmax), 2)
+
+  A_slice_bounds <- cbind(identityMat, zeroMat)
+  A_final_bounds <- cbind(-identityMat, identityMat)
+  A_shift_identity <- cbind(-horizonMat_identity, identityMat)
+  A_energy <- matrix(0, nrow = 1, ncol = 2 * time_slots)
+  A_energy[1, seq_len(time_slots)] <- -1
+  A_energy[1, time_slots + seq_len(time_slots)] <- 1
+
+  list(
+    L = c(rep(1, time_slots), rep(0, time_slots)),
+    lower = c(rep(0, time_slots), rep(0, time_slots)),
+    upper = c(LF, rep(Inf, time_slots)),
+    A = rbind(
+      A_slice_bounds,
+      A_final_bounds,
+      A_cumsum_lb,
+      A_cumsum_ub,
+      A_shift_identity,
+      A_energy
+    ),
+    lhs = c(
+      rep(0, time_slots),
+      final_lb - LF,
+      lhs_cumsum_lb,
+      lhs_cumsum_ub,
+      rep(-Inf, time_slots),
+      0
+    ),
+    rhs = c(
+      LF,
+      final_ub - LF,
+      rhs_cumsum_lb,
+      rhs_cumsum_ub,
+      rep(0, time_slots),
+      0
+    )
+  )
+}
+
+
+select_capacity_slice <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity
+) {
+  G <- round(as.numeric(G), 2)
+  LF <- round(as.numeric(LF), 2)
+  LS <- round(as.numeric(LS), 2)
+
+  time_slots <- length(LF)
+  LFmax <- as.numeric(rep_len(LFmax, time_slots))
+  import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
+  export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+
+  problem <- capacity_slice_problem(
+    G = G,
+    LF = LF,
+    LS = LS,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = LFmax,
+    import_capacity = import_capacity,
+    export_capacity = export_capacity
+  )
+
+  result <- highs::highs_solve(
+    Q = NULL,
+    L = problem$L,
+    lower = problem$lower,
+    upper = problem$upper,
+    A = problem$A,
+    lhs = problem$lhs,
+    rhs = problem$rhs,
+    types = rep(1L, ncol(problem$A)),
+    control = demand_highs_options()
+  )
+
+  if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
+    return(NULL)
+  }
+
+  tolerance <- demand_solution_tolerance()
+  slice <- pmax(result$primal_solution[seq_len(time_slots)], 0)
+  slice[slice < tolerance] <- 0
+
+  list(
+    slice = round(slice, 2),
+    result = result
+  )
+}
+
+
+curtail_capacity_window <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  lambda = 0
+) {
+  G <- round(as.numeric(G), 2)
+  LF <- round(as.numeric(LF), 2)
+  LS <- round(as.numeric(LS), 2)
+
+  time_slots <- length(LF)
+  LFmax <- as.numeric(rep_len(LFmax, time_slots))
+  import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
+  export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+
+  slice_solution <- select_capacity_slice(
+    G = G,
+    LF = LF,
+    LS = LS,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = LFmax,
+    import_capacity = import_capacity,
+    export_capacity = export_capacity
+  )
+
+  if (is.null(slice_solution)) {
+    message_once(
+      "⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+    )
+    return(
+      minimize_net_power_window(
+        G = G,
+        LF = LF,
+        LS = LS,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = LFmax,
+        import_capacity = rep(Inf, time_slots),
+        export_capacity = rep(Inf, time_slots),
+        lambda = lambda
+      )
+    )
+  }
+
+  moved_slice <- slice_solution$slice
+  if (all(moved_slice == 0)) {
+    return(LF)
+  }
+
+  fixed_load <- round(LF - moved_slice, 2)
+  optimized_slice <- minimize_net_power_window(
+    G = G,
+    LF = moved_slice,
+    LS = LS + fixed_load,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = round(pmax(LFmax - fixed_load, 0), 2),
+    import_capacity = import_capacity,
+    export_capacity = export_capacity,
+    lambda = lambda
+  )
+
+  round(fixed_load + as.numeric(optimized_slice), 2)
 }
 
 
@@ -561,9 +621,14 @@ demand_select_window_solver <- function(solver_data) {
 #' This is used when `opt_objective = "cost"`.
 #'
 #' @param opt_objective character or numeric.
-#' Optimization objective can be `"grid"` (default) or `"cost"`, or
+#' Optimization objective can be `"grid"` (default), `"cost"` or `"capacity"`, or
 #' a number between `0` and `1` to perform combined optimization
 #' where `0 == "cost"` and `1 == "grid"`.
+#' The `"capacity"` objective minimizes the amount of flexible demand that
+#' needs to be moved to respect `import_capacity` and `export_capacity`,
+#' then applies the grid-minimizing formulation only to that moved slice.
+#' If that constrained problem is infeasible, grid limits are removed for the
+#' affected optimization window.
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of time slots to shift energy from.
 #'  If `NULL`, the `time_horizon` will be the total optimization window length.
@@ -636,6 +701,21 @@ optimize_demand <- function(
     O_windows <- map(
       windows_data,
       ~ minimize_net_power_window(
+        G = .x$production,
+        LF = .x$flexible,
+        LS = .x$static,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = .x$load_capacity,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        lambda = lambda
+      )
+    )
+  } else if (opt_objective == "capacity") {
+    O_windows <- map(
+      windows_data,
+      ~ curtail_capacity_window(
         G = .x$production,
         LF = .x$flexible,
         LS = .x$static,

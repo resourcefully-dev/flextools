@@ -16,7 +16,9 @@ add_battery_optimization(
   window_days = 1,
   window_start_hour = 0,
   flex_window_hours = 24,
-  lambda = 0
+  lambda = 0,
+  charge_eff = 1,
+  discharge_eff = 1
 )
 }
 \arguments{
@@ -56,6 +58,13 @@ where \code{w=1} is pure grid and \code{w=0} is pure cost.}
 
 \item{lambda}{numeric, ramping penalty weight. Penalises rapid changes in
 battery power between consecutive time slots.}
+
+\item{charge_eff}{numeric, charging efficiency in (0, 1]. Default 1 (lossless).
+When below 1 with \code{"cost"} objective, uses an efficiency-aware MILP that embeds
+round-trip losses in the SOC constraints, naturally penalising unnecessary cycling.}
+
+\item{discharge_eff}{numeric, discharging efficiency in (0, 1]. Default 1 (lossless).
+See \code{charge_eff}.}
 }
 \value{
 numeric vector

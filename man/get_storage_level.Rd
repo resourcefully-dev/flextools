@@ -28,8 +28,15 @@ numeric vector of energy stored
 }
 \description{
 Each value represents the energy level at the beginning of the time slot,
-starting from the provided initial State-of-Charge. When the \code{power}
-vector carries \code{charge} and \code{discharge} attributes (as provided by
-\code{add_battery_optimization()}), those are used internally to compute the
-storage evolution when efficiencies are below 1.
+starting from the provided initial State-of-Charge.
+}
+\details{
+\code{power} is interpreted as the \strong{grid-side} battery power: positive when the
+grid is charging the battery, negative when the battery is supplying the grid.
+Pass \code{charge_eff} / \code{discharge_eff} to convert grid-side power to actual
+stored energy (grid draws \code{power / charge_eff} when charging; storage releases
+\verb{|power| / discharge_eff} when discharging).
+
+If \code{power} is already \strong{storage-side} (e.g. from \code{add_battery_optimization()}),
+call with the default efficiencies of 1.
 }

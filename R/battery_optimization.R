@@ -265,8 +265,11 @@ battery_cost_build_constraints <- function(
   export_capacity <- as.numeric(rep_len(export_capacity, n))
 
   # Physical per-slot mode upper bounds for MILP and OSQP cap
+  # Snap sub-machine-epsilon residuals to zero to avoid HiGHS near-zero warnings
   import_mode_ub <- pmax(L - G + Bc, 0)
   export_mode_ub <- pmax(G - L + Bd, 0)
+  import_mode_ub[import_mode_ub < 1e-9] <- 0
+  export_mode_ub[export_mode_ub < 1e-9] <- 0
   import_mode_ub[is.finite(import_capacity)] <- pmin(
     import_mode_ub[is.finite(import_capacity)],
     import_capacity[is.finite(import_capacity)]

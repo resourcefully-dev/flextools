@@ -1,6 +1,22 @@
 library(dplyr)
 devtools::load_all()
 
+# Time benchmark for a whole year:
+# - grid (1): 2.7s
+# - cost (0): 6.44s
+# - combined (0.5): 4.97s
+# timefully::tic()
+# flextools::energy_profiles |>
+#   rename(
+#     production = "solar",
+#     flexible = building
+#   ) |>
+#   optimize_demand(
+#     opt_objective = 1,
+#     direction = "forward"
+#   )
+# timefully::toc()
+
 opt_data <- flextools::energy_profiles |>
   filter(lubridate::isoweek(datetime) == 18) |>
   rename(

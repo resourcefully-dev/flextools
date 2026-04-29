@@ -55,10 +55,16 @@ get_conversion_losses <- function(power, charge_eff = 1, discharge_eff = 1) {
 #' Accumulated storage level (energy)
 #'
 #' Each value represents the energy level at the beginning of the time slot,
-#' starting from the provided initial State-of-Charge. When the `power`
-#' vector carries `charge` and `discharge` attributes (as provided by
-#' `add_battery_optimization()`), those are used internally to compute the
-#' storage evolution when efficiencies are below 1.
+#' starting from the provided initial State-of-Charge.
+#'
+#' `power` is interpreted as the **grid-side** battery power: positive when the
+#' grid is charging the battery, negative when the battery is supplying the grid.
+#' Pass `charge_eff` / `discharge_eff` to convert grid-side power to actual
+#' stored energy (grid draws `power / charge_eff` when charging; storage releases
+#' `|power| / discharge_eff` when discharging).
+#'
+#' If `power` is already **storage-side** (e.g. from `add_battery_optimization()`),
+#' call with the default efficiencies of 1.
 #'
 #' @param power numeric vector, being positive when charging and negative when discharging
 #' @param init numeric, initial storage level (in kWh, not %)
@@ -85,29 +91,9 @@ get_storage_level <- function(
     stop("Error: efficiencies must be lower or equal to 1")
   }
 
-  # ΔE = charge * η_charge − discharge / η_discharge
-  # we need both terms because a battery can charge and discharge in a time slot (optimization solver issue)
-  charge_power <- attr(power, "charge")
-  discharge_power <- attr(power, "discharge")
-
-  if (
-    !is.null(charge_power) &&
-      !is.null(discharge_power) &&
-      length(charge_power) == length(power) &&
-      length(discharge_power) == length(power)
-  ) {
-    energy_delta <- (charge_power *
-      charge_eff -
-      discharge_power / discharge_eff) *
-      time_resolution /
-      60
-  } else {
-    energy_delta <- power * time_resolution / 60
-    energy_delta[energy_delta >= 0] <- energy_delta[energy_delta >= 0] *
-      charge_eff
-    energy_delta[energy_delta < 0] <- energy_delta[energy_delta < 0] /
-      discharge_eff
-  }
+  energy_delta <- power * time_resolution / 60
+  energy_delta[energy_delta >= 0] <- energy_delta[energy_delta >= 0] * charge_eff
+  energy_delta[energy_delta < 0] <- energy_delta[energy_delta < 0] / discharge_eff
 
   storage <- c(init, init + cumsum(energy_delta))
   storage <- round(storage[seq_len(length(power))], 2)

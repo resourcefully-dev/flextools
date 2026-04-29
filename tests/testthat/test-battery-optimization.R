@@ -1,6 +1,14 @@
 library(dplyr)
 devtools::load_all()
 
+# Time benchmark for a whole year:
+# - grid (1): 1.7s
+# - cost (0): 17.33s
+# - cost with eff (0): 17.33s
+# - combined (0.1): 4.77s
+# - combined (0.5): 4.77s
+# compare_battery_year()
+
 opt_data <- flextools::energy_profiles |>
   filter(lubridate::isoweek(datetime) == 18) |>
   select(
@@ -240,3 +248,106 @@ test_that("battery optimization works for grid objective with lambda > 0", {
   expect_type(opt_battery, "double")
   expect_equal(length(opt_battery), nrow(opt_data))
 })
+
+
+# Time benchmarking for battery optimization ----------------------
+test_battery_year <- function(opt_objective, eff = FALSE) {
+  message(sprintf(
+    "Testing battery optimization for objective: %s",
+    opt_objective
+  ))
+
+  efficiency <- 0.95
+
+  timefully::tic()
+  B <- flextools::energy_profiles |>
+    rename(
+      production = "solar",
+      static = building
+    ) |>
+    add_battery_optimization(
+      opt_objective = opt_objective,
+      Bcap = 50,
+      Bc = 4,
+      Bd = 4,
+      charge_eff = ifelse(eff, efficiency, 1),
+      discharge_eff = ifelse(eff, efficiency, 1)
+    )
+  time <- timefully::toc()
+
+  # losses <- get_conversion_losses(
+  #   B,
+  #   charge_eff = efficiency,
+  #   discharge_eff = efficiency
+  # )
+  # B <- B + losses
+
+  cost <- evaluate_cost(
+    flextools::energy_profiles |>
+      rename(
+        production = "solar",
+        static = building
+      ),
+    B
+  )
+
+  n_cycles <- -sum(pmin(B, 0)) / 50
+
+  list(
+    profile = B,
+    time = time,
+    cost = cost,
+    n_cycles = n_cycles
+  )
+}
+compare_battery_year <- function() {
+  res_grid <- test_battery_year("grid")
+  res_cost <- test_battery_year("cost")
+  res_cost_eff <- test_battery_year("cost", eff = TRUE)
+  res_combined_0.1 <- test_battery_year(0.1)
+  res_combined_0.5 <- test_battery_year(0.5)
+
+  kpis <- purrr::map(
+    purrr::set_names(c(
+      "grid",
+      "cost",
+      "cost_eff",
+      "combined_0.1",
+      "combined_0.5"
+    )),
+    ~ tibble(
+      time = get(paste0("res_", .x))$time,
+      cost = get(paste0("res_", .x))$cost,
+      n_cycles = get(paste0("res_", .x))$n_cycles
+    )
+  ) |>
+    purrr::list_rbind(names_to = "objective")
+  print(kpis)
+
+  flextools::energy_profiles |>
+    rename(
+      production = "solar",
+      static = building
+    ) |>
+    select(
+      -any_of(c("price_turn_up", "price_turn_down"))
+    ) |>
+    mutate(
+      battery_grid = res_grid$profile,
+      battery_cost = res_cost$profile,
+      battery_cost_eff = res_cost_eff$profile,
+      battery_combined_0.1 = res_combined_0.1$profile,
+      battery_combined_0.5 = res_combined_0.5$profile
+    ) |>
+    timefully::plot_ts(
+      title = sprintf(
+        "Benchmarking: Grid: %0.1fs, Cost: %0.1fs, Cost w/ eff: %0.1fs, Combined (0.1): %0.1fs, Combined (0.5): %0.1fs",
+        res_grid$time,
+        res_cost$time,
+        res_cost_eff$time,
+        res_combined_0.1$time,
+        res_combined_0.5$time
+      ),
+      legend_width = 200
+    )
+}

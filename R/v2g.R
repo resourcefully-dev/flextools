@@ -100,7 +100,9 @@ smart_v2g <- function(
     )
   }
 
-  has_explicit_export_capacity <- any(c("grid_capacity", "export_capacity") %in% names(opt_data))
+  has_explicit_export_capacity <- any(
+    c("grid_capacity", "export_capacity") %in% names(opt_data)
+  )
 
   opt_data$flexible <- 0
   opt_data <- check_optimization_data(opt_data, opt_objective)
@@ -112,7 +114,10 @@ smart_v2g <- function(
   # makes the V2G bounds contradictory (`lb > ub`) as soon as a negative import
   # limit appears. To preserve the original V2G semantics, missing export
   # capacity remains unconstrained in those signed-capacity windows.
-  if (!has_explicit_export_capacity && any(opt_data$import_capacity < 0, na.rm = TRUE)) {
+  if (
+    !has_explicit_export_capacity &&
+      any(opt_data$import_capacity < 0, na.rm = TRUE)
+  ) {
     opt_data$export_capacity <- Inf
   }
 
@@ -337,7 +342,7 @@ get_setpoints_v2g <- function(
           (dttm_seq <= window_prof_dttm[2])
 
         if (opt_objective == "grid") {
-          O <- minimize_net_power_v2g_window(
+          O <- demand_grid_v2g_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
@@ -352,7 +357,7 @@ get_setpoints_v2g <- function(
           message(
             "Cost-based optimisation is not yet implemented for V2G; reusing grid objective."
           )
-          O <- minimize_net_power_v2g_window(
+          O <- demand_grid_v2g_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
@@ -364,10 +369,7 @@ get_setpoints_v2g <- function(
             lambda = lambda
           )
         } else if (opt_objective == "capacity") {
-          message(
-            "Capacity optimisation for V2G uses a charging-only formulation (discharge not considered)."
-          )
-          O <- demand_capacity_window(
+          O <- capacity_v2g_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
@@ -382,7 +384,7 @@ get_setpoints_v2g <- function(
           message(
             "Combined optimisation is not yet implemented for V2G; reusing grid objective."
           )
-          O <- minimize_net_power_v2g_window(
+          O <- demand_grid_v2g_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
@@ -608,11 +610,94 @@ smart_v2g_window_parallel <- function(
 }
 
 
+#' Capacity optimisation with bidirectional flexibility (single window)
+#'
+#' Mirrors `demand_capacity_window()` but falls back to
+#' `demand_grid_v2g_window()` so that discharge is considered when
+#' resolving capacity violations.
+#'
+#' @keywords internal
+#'
+capacity_v2g_window <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  lambda = 0
+) {
+  G <- round(as.numeric(G), 2)
+  LF <- round(as.numeric(LF), 2)
+  LS <- round(as.numeric(LS), 2)
+
+  time_slots <- length(LF)
+  if (is.null(time_horizon)) {
+    time_horizon <- time_slots
+  }
+  LFmax <- as.numeric(rep_len(LFmax, time_slots))
+  import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
+  export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+
+  slice_solution <- select_capacity_slice(
+    G = G,
+    LF = LF,
+    LS = LS,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = LFmax,
+    import_capacity = import_capacity,
+    export_capacity = export_capacity
+  )
+
+  if (is.null(slice_solution)) {
+    message_once(
+      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+    )
+    return(
+      demand_grid_v2g_window(
+        G = G,
+        LF = LF,
+        LS = LS,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = LFmax,
+        import_capacity = rep(Inf, time_slots),
+        export_capacity = rep(Inf, time_slots),
+        lambda = lambda
+      )
+    )
+  }
+
+  moved_slice <- slice_solution$slice
+  if (all(moved_slice == 0)) {
+    return(LF)
+  }
+
+  fixed_load <- round(LF - moved_slice, 2)
+  optimized_slice <- demand_grid_v2g_window(
+    G = G,
+    LF = moved_slice,
+    LS = LS + fixed_load,
+    direction = direction,
+    time_horizon = time_horizon,
+    LFmax = round(pmax(LFmax - fixed_load, 0), 2),
+    import_capacity = import_capacity,
+    export_capacity = export_capacity,
+    lambda = lambda
+  )
+
+  round(fixed_load + as.numeric(optimized_slice), 2)
+}
+
+
 #' Minimisation of net power with bidirectional flexibility (single window)
 #'
 #' @keywords internal
 #'
-minimize_net_power_v2g_window <- function(
+demand_grid_v2g_window <- function(
   G,
   LF,
   LS,
@@ -861,8 +946,8 @@ schedule_sessions_v2g <- function(
       EnergyToCharge = .data$EnergyRequired,
       Flexible = NA,
       Exploited = NA,
-      BatteryCapacity = .data$EnergyRequired * 2, #  50% initial SOC
-      EnergyInBattery = .data$BatteryCapacity * SOCini #  50% initial SOC
+      BatteryCapacity = .data$EnergyRequired * 2, # 50% initial SOC
+      EnergyInBattery = .data$BatteryCapacity * SOCini # 50% initial SOC
     ) %>%
     left_join(
       select(
@@ -970,8 +1055,8 @@ schedule_sessions_v2g <- function(
         ),
         MinPowerTimeslot = ifelse(
           .data$ChargingPowerMin > 0 & .data$MinPowerTimeslot > 0,
-          pmax(.data$MinPowerTimeslot, .data$ChargingPowerMin), # Charging
-          .data$MinPowerTimeslot # Discharging or no min power defined
+          pmax(.data$MinPowerTimeslot, .data$ChargingPowerMin), # Charging
+          .data$MinPowerTimeslot # Discharging or no min power defined
         ),
         MaxPowerReduction = .data$PowerTimeslot - .data$MinPowerTimeslot,
         Flexible = ifelse(

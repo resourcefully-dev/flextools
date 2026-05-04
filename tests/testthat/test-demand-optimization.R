@@ -1,5 +1,5 @@
 library(dplyr)
-devtools::load_all()
+# devtools::load_all()
 
 # Time benchmark for a whole year:
 # - grid (1): 2.43s

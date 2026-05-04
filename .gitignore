@@ -3,3 +3,5 @@ R/*.rda
 .DS_Store
 .Rhistory
 .claude
+tests/benchmark_report_cache
+tests/benchmark_report_files

@@ -53,7 +53,7 @@ If columns of \code{opt_data} are user profiles names, these are used as setpoin
 and no optimization is performed for the corresponding user profiles.}
 
 \item{opt_objective}{character, optimization objective being \code{"none"},
-\code{"grid"}, \code{"cost"} or a value between 0 (cost) and 1 (grid).
+\code{"grid"}, \code{"cost"}, \code{"capacity"} or a value between 0 (cost) and 1 (grid).
 See details section for more information about the different objectives.}
 
 \item{window_days}{integer, number of days to consider as optimization window.}

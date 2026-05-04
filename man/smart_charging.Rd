@@ -53,7 +53,7 @@ If columns of \code{opt_data} are user profiles names, these are used as setpoin
 and no optimization is performed for the corresponding user profiles.}
 
 \item{opt_objective}{character, optimization objective being \code{"none"},
-\code{"grid"}, \code{"cost"} or a value between 0 (cost) and 1 (grid).
+\code{"grid"}, \code{"cost"}, \code{"capacity"} or a value between 0 (cost) and 1 (grid).
 See details section for more information about the different objectives.}
 
 \item{method}{character, scheduling method being \code{"none"}, \code{"postpone"}, \code{"curtail"} or \code{"interrupt"}.
@@ -106,12 +106,16 @@ the formulation of the optimization problems in the
 An important parameter of this function is \code{opt_data}, which defines the time
 sequence of the smart charging algorithm and the optimization variables.
 The \code{opt_data} parameter is directly related with the \code{opt_objective} parameter.
-There are three different optimization objectives implemented by this function:
+There are four different optimization objectives implemented by this function:
 \itemize{
 \item Minimize grid interaction (\code{opt_objective = "grid"}): minimizes the peak of
 the flexible load and the amount of imported power from the grid.
 If \code{production} is not found in \code{opt_data}, only a peak shaving objective
 will be considered.
+\item Minimize capacity violations (\code{opt_objective = "capacity"}): minimizes only
+the load slices that exceed the grid capacity limits (\code{import_capacity} or
+\code{export_capacity} in \code{opt_data}), leaving the rest of the load profile
+unchanged. Falls back to grid objective when the capacity slice is infeasible.
 \item Minimize the energy cost (\code{opt_objective = "cost"}): minimizes the energy cost.
 In this case, the columns
 \code{grid_capacity}, \code{price_imported}, \code{price_exported},

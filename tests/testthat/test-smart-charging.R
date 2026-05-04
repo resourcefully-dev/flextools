@@ -201,6 +201,25 @@ test_that("smart charging works without optimization, curtail method and min cha
   expect_type(sc_results, "list")
 })
 
+test_that("smart charging works with capacity objective and curtail method", {
+  opt_data_cap <- opt_data %>%
+    mutate(import_capacity = 50)
+  sc_results <- smart_charging(
+    sessions,
+    opt_data_cap,
+    opt_objective = "capacity",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 0,
+    responsive = list(Workday = list(Worktime = 1))
+  )
+  expect_type(sc_results, "list")
+  expect_equal(
+    trunc(sum(sessions$Energy) - sum(sc_results$sessions$Energy)),
+    0
+  )
+})
+
 test_that("smart charging works without optimization but grid capacity limit and curtail method", {
   opt_data$grid_capacity <- 50
   sc_results <- smart_charging(

@@ -468,6 +468,9 @@ demand_capacity_window <- function(
   LS <- round(as.numeric(LS), 2)
 
   time_slots <- length(LF)
+  if (is.null(time_horizon)) {
+    time_horizon <- time_slots
+  }
   LFmax <- as.numeric(rep_len(LFmax, time_slots))
   import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
   export_capacity <- as.numeric(rep_len(export_capacity, time_slots))

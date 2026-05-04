@@ -46,7 +46,7 @@
 #' and no optimization is performed for the corresponding user profiles.
 #'
 #' @param opt_objective character, optimization objective being `"none"`,
-#'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
+#'  `"grid"`, `"cost"`, `"capacity"` or a value between 0 (cost) and 1 (grid).
 #' See details section for more information about the different objectives.
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
 #' If `none`, the scheduling part is skipped and the sessions returned in the
@@ -91,12 +91,17 @@
 #' An important parameter of this function is `opt_data`, which defines the time
 #' sequence of the smart charging algorithm and the optimization variables.
 #' The `opt_data` parameter is directly related with the `opt_objective` parameter.
-#' There are three different optimization objectives implemented by this function:
+#' There are four different optimization objectives implemented by this function:
 #'
 #' - Minimize grid interaction (`opt_objective = "grid"`): minimizes the peak of
 #' the flexible load and the amount of imported power from the grid.
 #' If `production` is not found in `opt_data`, only a peak shaving objective
 #' will be considered.
+#'
+#' - Minimize capacity violations (`opt_objective = "capacity"`): minimizes only
+#' the load slices that exceed the grid capacity limits (`import_capacity` or
+#' `export_capacity` in `opt_data`), leaving the rest of the load profile
+#' unchanged. Falls back to grid objective when the capacity slice is infeasible.
 #'
 #' - Minimize the energy cost (`opt_objective = "cost"`): minimizes the energy cost.
 #' In this case, the columns
@@ -702,6 +707,18 @@ get_setpoints <- function(
             PE = opt_data$price_exported[opt_idxs],
             PTU = opt_data$price_turn_up[opt_idxs],
             PTD = opt_data$price_turn_down[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
+        } else if (opt_objective == "capacity") {
+          O <- demand_capacity_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
             LFmax = Inf,

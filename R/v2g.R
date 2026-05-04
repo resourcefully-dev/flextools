@@ -363,6 +363,21 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda
           )
+        } else if (opt_objective == "capacity") {
+          message(
+            "Capacity optimisation for V2G uses a charging-only formulation (discharge not considered)."
+          )
+          O <- demand_capacity_window(
+            G = opt_data$production[opt_idxs],
+            LF = LF[opt_idxs],
+            LS = LS[opt_idxs],
+            direction = "forward",
+            time_horizon = NULL,
+            LFmax = Inf,
+            import_capacity = opt_data$import_capacity[opt_idxs],
+            export_capacity = opt_data$export_capacity[opt_idxs],
+            lambda = lambda
+          )
         } else if (is.numeric(opt_objective)) {
           message(
             "Combined optimisation is not yet implemented for V2G; reusing grid objective."

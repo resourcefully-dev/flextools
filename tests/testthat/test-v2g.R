@@ -237,6 +237,30 @@ test_that("charging_power_min enforces minimum absolute power in v2g", {
     )
 })
 
+test_that("capacity objective works in v2g with charging-only fallback message", {
+    opt_data_cap <- opt_data %>%
+        mutate(import_capacity = 25, export_capacity = 0)
+
+    capacity_results <- NULL
+    expect_message(
+        capacity_results <- smart_v2g(
+            sessions = sessions,
+            opt_data_cap,
+            opt_objective = "capacity",
+            window_days = 1,
+            window_start_hour = 0,
+            responsive = list(Workday = list(Worktime = 1))
+        ),
+        "charging-only"
+    )
+
+    expect_type(capacity_results, "list")
+    expect_equal(
+        trunc(sum(sessions$Energy) - sum(capacity_results$sessions$Energy)),
+        0
+    )
+})
+
 test_that("cost objective currently reuses grid objective in v2g", {
     opt_data_prices <- opt_data %>%
         mutate(

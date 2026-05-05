@@ -445,7 +445,9 @@ battery_solve_cost_unified_window <- function(
   export_capacity,
   charge_eff = 1,
   discharge_eff = 1,
-  cycle_cost = 0
+  cycle_cost = 0,
+  P_B = NULL,
+  q_B = NULL
 ) {
   G <- round(G, 2)
   L <- round(L, 2)
@@ -501,12 +503,29 @@ battery_solve_cost_unified_window <- function(
   # Penalise each kW\u00b7slot of discharge: 1 kW\u00b7slot / Bcap = one full-cycle fraction.
   cycle_coef <- cycle_cost / Bcap
 
-  if (cycle_cost > 0) {
-    # LP path \u2014 cycle_cost makes simultaneous B_c, B_d > 0 economically
-    # self-defeating, so the binary mode variable is unnecessary.
+  # Build optional quadratic term on net battery power (B_c - B_d)
+  # Q block for [B_c, B_d, I, E]: encodes 0.5*(B_c-B_d)^T P_B (B_c-B_d)
+  build_Q_4n <- function(P_B, size) {
+    Q <- matrix(0, 4 * size, 4 * size)
+    Q[seq_len(size), seq_len(size)] <- P_B
+    Q[seq_len(size), seq(size + 1, 2 * size)] <- -P_B
+    Q[seq(size + 1, 2 * size), seq_len(size)] <- -P_B
+    Q[seq(size + 1, 2 * size), seq(size + 1, 2 * size)] <- P_B
+    Q
+  }
+
+  if (cycle_cost > 0 || !is.null(P_B)) {
+    # LP/QP path \u2014 binary mode variable is skipped because:
+    #   cycle_cost > 0: makes simultaneous B_c, B_d > 0 economically
+    #     self-defeating
+    #   P_B != NULL: HiGHS does not support MIQP; the quadratic grid term
+    #     already makes simultaneous charge+discharge suboptimal
+    Q_full <- if (!is.null(P_B)) build_Q_4n(P_B, n) else NULL
+    q_Bc <- if (!is.null(q_B)) q_B else rep(0, n)
+    q_Bd <- if (!is.null(q_B)) -q_B else rep(0, n)
     result <- highs::highs_solve(
-      Q = NULL,
-      L = c(rep(0, n), rep(cycle_coef, n), PI, -PE),
+      Q = Q_full,
+      L = c(q_Bc, rep(cycle_coef, n) + q_Bd, PI, -PE),
       lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n)),
       upper = c(rep(Bc, n), rep(Bd, n), import_capacity, export_capacity),
       A = A_vars,
@@ -776,12 +795,15 @@ battery_combined_window <- function(
   import_capacity,
   export_capacity,
   w,
-  lambda = 0
+  lambda = 0,
+  charge_eff = 1,
+  discharge_eff = 1,
+  cycle_cost = 0
 ) {
   n <- length(G)
   scale <- mean(PI)^2
 
-  # Quadratic grid term on B
+  # Quadratic grid term on net battery power (B_c - B_d)
   P_grid <- 2 * w * scale * diag(n)
   q_grid <- 2 * w * scale * (L - G)
 
@@ -792,42 +814,26 @@ battery_combined_window <- function(
     P_B <- P_grid
   }
 
-  # Check if P_B is effectively zero \u2192 MILP path
-  if (max(abs(P_B)) < 1e-8) {
-    battery_solve_cost_milp_window(
-      G,
-      L,
-      PI = (1 - w) * PI,
-      PE = (1 - w) * PE,
-      P_B = NULL,
-      q_B = NULL,
-      Bcap,
-      Bc,
-      Bd,
-      SOCmin,
-      SOCmax,
-      SOCini,
-      import_capacity,
-      export_capacity
-    )
-  } else {
-    battery_solve_cost_osqp_window(
-      G,
-      L,
-      PI = (1 - w) * PI,
-      PE = (1 - w) * PE,
-      P_B = P_B,
-      q_B = q_grid,
-      Bcap,
-      Bc,
-      Bd,
-      SOCmin,
-      SOCmax,
-      SOCini,
-      import_capacity,
-      export_capacity
-    )
-  }
+  # Route through unified solver so efficiency is applied in all cases
+  battery_solve_cost_unified_window(
+    G,
+    L,
+    PI = (1 - w) * PI,
+    PE = (1 - w) * PE,
+    Bcap,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini,
+    import_capacity,
+    export_capacity,
+    charge_eff = charge_eff,
+    discharge_eff = discharge_eff,
+    cycle_cost = cycle_cost,
+    P_B = if (max(abs(P_B)) < 1e-8) NULL else P_B,
+    q_B = if (max(abs(P_B)) < 1e-8) NULL else q_grid
+  )
 }
 
 
@@ -1039,7 +1045,10 @@ add_battery_optimization <- function(
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         w = opt_objective,
-        lambda = lambda
+        lambda = lambda,
+        charge_eff = charge_eff,
+        discharge_eff = discharge_eff,
+        cycle_cost = cycle_cost
       )
     )
   } else {

@@ -244,7 +244,7 @@ battery_capacity_window <- function(
     summarise_all(sum)
 
   Bcap_curtail <- min(
-    max(balance_sum$exported_over, balance_sum$imported_over) * 1.05, # add 5% headroom to ensure feasibility
+    max(balance_sum$exported_over, balance_sum$imported_over) * 1.01, # add 1% headroom to ensure feasibility
     Bcap
   )
 

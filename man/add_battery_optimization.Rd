@@ -18,7 +18,8 @@ add_battery_optimization(
   flex_window_hours = 24,
   lambda = 0,
   charge_eff = 1,
-  discharge_eff = 1
+  discharge_eff = 1,
+  cycle_cost = 0
 )
 }
 \arguments{
@@ -60,11 +61,15 @@ where \code{w=1} is pure grid and \code{w=0} is pure cost.}
 battery power between consecutive time slots.}
 
 \item{charge_eff}{numeric, charging efficiency in (0, 1]. Default 1 (lossless).
-When below 1 with \code{"cost"} objective, uses an efficiency-aware MILP that embeds
-round-trip losses in the SOC constraints, naturally penalising unnecessary cycling.}
+Embeds round-trip losses in the SOC constraints for accurate energy accounting.}
 
 \item{discharge_eff}{numeric, discharging efficiency in (0, 1]. Default 1 (lossless).
 See \code{charge_eff}.}
+
+\item{cycle_cost}{numeric, degradation cost per kWh cycled (Euro/kWh). Default 0.
+Adds a linear penalty on battery discharge so the optimizer trades off energy
+cost savings against battery wear. When positive, the problem is solved as a
+pure LP (no binary variables) which is substantially faster than the default MILP.}
 }
 \value{
 numeric vector

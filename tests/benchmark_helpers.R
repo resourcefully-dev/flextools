@@ -182,6 +182,7 @@ bench_battery <- function(
   lambda            = 0,
   charge_eff        = 1,
   discharge_eff     = 1,
+  cycle_cost        = 0,
   window_start_hour = 5L
 ) {
   timefully::tic()
@@ -194,6 +195,7 @@ bench_battery <- function(
       lambda            = lambda,
       charge_eff        = charge_eff,
       discharge_eff     = discharge_eff,
+      cycle_cost        = cycle_cost,
       window_start_hour = window_start_hour
     )
   time_sec <- timefully::toc()
@@ -308,6 +310,45 @@ sweep_battery <- function(
       w              = w,
       lambda         = lambda,
       eff            = eff,
+      time_sec       = res$time_sec,
+      cost           = res$cost,
+      n_cycles       = res$n_cycles,
+      peak_from_grid = res$peak_from_grid,
+      peak_to_grid   = res$peak_to_grid
+    )
+  }) |>
+    purrr::list_rbind()
+}
+
+#' Sweep battery optimization over a (w × cycle_cost) grid
+#'
+#' Measures the effect of explicit degradation cost on cycles, energy cost,
+#' and solver time.  Only meaningful for the `"cost"` objective (w = 0).
+#'
+#' @param opt_data tibble produced by `battery_opt_data()`
+#' @param w_seq numeric vector of combined-objective weights
+#' @param cycle_cost_seq numeric vector of degradation costs (€/kWh cycled)
+#' @param ... additional arguments forwarded to `bench_battery()` (e.g. Bcap, Bc, Bd)
+#' @return tidy tibble with columns: w, cycle_cost, time_sec, cost,
+#'   n_cycles, peak_from_grid, peak_to_grid
+sweep_battery_cc <- function(
+  opt_data,
+  w_seq           = 0,
+  cycle_cost_seq  = c(0, 0.01, 0.02, 0.05, 0.1, 0.2),
+  ...
+) {
+  grid <- tidyr::expand_grid(w = w_seq, cycle_cost = cycle_cost_seq)
+  message(sprintf("sweep_battery_cc: %d combinations", nrow(grid)))
+  purrr::pmap(grid, function(w, cycle_cost) {
+    res <- bench_battery(
+      opt_data      = opt_data,
+      opt_objective = w,
+      cycle_cost    = cycle_cost,
+      ...
+    )
+    tibble::tibble(
+      w              = w,
+      cycle_cost     = cycle_cost,
       time_sec       = res$time_sec,
       cost           = res$cost,
       n_cycles       = res$n_cycles,

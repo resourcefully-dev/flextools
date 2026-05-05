@@ -35,8 +35,9 @@ library(scales)
 # ── Benchmark parameters (adjust here to trade speed vs. resolution) ──────────
 W_SEQ_FINE   <- seq(0, 1, by = 0.05)   # 21 points for tradeoff curves
 W_SEQ_COARSE <- seq(0, 1, by = 0.1)    # 11 points for sweeps
-LAMBDA_SEQ   <- c(0, 0.01, 0.05, 0.1, 0.5, 1)
-EFF_SEQ      <- c(1.0, 0.99, 0.97, 0.95, 0.90, 0.85)
+LAMBDA_SEQ      <- c(0, 0.01, 0.05, 0.1, 0.5, 1)
+EFF_SEQ         <- c(1.0, 0.99, 0.97, 0.95, 0.90, 0.85)
+CYCLE_COST_SEQ  <- c(0, 0.01, 0.02, 0.05, 0.10, 0.20)  # €/kWh cycled
 
 # Battery hardware parameters (shared throughout)
 BCAP <- 50   # kWh
@@ -327,7 +328,82 @@ The `n_cycles` metric here is **total equivalent full cycles over the
 7-day dataset**: `n_cycles = −Σ min(B, 0) × (15/60) / Bcap`, where `B` is
 in kW and the factor `15/60` converts 15-minute slots to hours (kWh).
 
-## 2.1 · Efficiency vs. cycle count
+## 2.1 · cycle_cost vs. cycle count (direct economic penalty)
+
+`cycle_cost` (€/kWh cycled) adds an explicit degradation cost to the objective.
+This is **the recommended way to limit cycling** when the `"cost"` objective is
+used: it is economically meaningful, user-tunable, and — because it eliminates
+the need for binary mode variables — turns the MILP into a pure LP, which is
+substantially faster to solve.
+
+```{r battery-sweep-cc, cache=TRUE}
+sweep_b_cc <- sweep_battery_cc(
+  opt_battery_week,
+  w_seq          = c(0, 1),
+  cycle_cost_seq = CYCLE_COST_SEQ,
+  Bcap = BCAP, Bc = BC, Bd = BD
+)
+```
+
+```{r battery-cycles-cc-plot, cache=FALSE, fig.height=4.5}
+sweep_b_cc |>
+  mutate(objective = w_label(w)) |>
+  ggplot(aes(cycle_cost, n_cycles, colour = objective, group = objective)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  scale_colour_manual(values = c("#E07B54", "#4E8098")) +
+  labs(
+    title    = "Battery total cycles (7-day) vs. cycle_cost",
+    subtitle = "cycle_cost = degradation penalty (€/kWh cycled); η = 1; λ = 0",
+    x        = "cycle_cost (€/kWh)",
+    y        = "Equivalent full cycles (7-day total)",
+    colour   = NULL
+  ) +
+  theme_bench()
+```
+
+```{r battery-cc-cost-plot, cache=FALSE, fig.height=4.5}
+sweep_b_cc |>
+  filter(w == 0) |>
+  ggplot(aes(cycle_cost, cost)) +
+  geom_line(linewidth = 1, colour = "#E07B54") +
+  geom_point(size = 2.5, colour = "#E07B54") +
+  labs(
+    title    = "Energy cost vs. cycle_cost (cost objective only)",
+    subtitle = "Higher cycle_cost trades fewer cycles for slightly higher energy cost",
+    x        = "cycle_cost (€/kWh)",
+    y        = "Total energy cost (€)"
+  ) +
+  theme_bench()
+```
+
+```{r battery-cc-time-plot, cache=FALSE, fig.height=4.5}
+sweep_b_cc |>
+  filter(w == 0) |>
+  mutate(solver = ifelse(cycle_cost > 0, "LP (cycle_cost > 0)", "MILP (cycle_cost = 0)")) |>
+  ggplot(aes(cycle_cost, time_sec, fill = solver)) +
+  geom_col(width = 0.015) +
+  scale_fill_manual(values = c("LP (cycle_cost > 0)" = "#4E8098", "MILP (cycle_cost = 0)" = "#E07B54")) +
+  labs(
+    title    = "Solver time vs. cycle_cost",
+    subtitle = "cycle_cost > 0 switches to LP (no binary variables) → faster",
+    x        = "cycle_cost (€/kWh)",
+    y        = "Solver time (s)",
+    fill     = NULL
+  ) +
+  theme_bench()
+```
+
+**Key insight:** `cycle_cost` directly targets the economic trade-off between
+energy savings and battery wear.  Setting even a small value (e.g. 0.02 €/kWh)
+noticeably reduces cycles while keeping most of the cost savings — and the LP
+solver is faster than the default MILP.
+
+## 2.2 · Efficiency vs. cycle count
+
+Round-trip efficiency (η < 1) also reduces cycling indirectly — losses make
+unnecessary cycling costly — but efficiency is a physical property, not a
+tunable economic parameter.  Prefer `cycle_cost` for controlling cycling.
 
 ```{r battery-sweep-eff, cache=TRUE}
 sweep_b_eff <- sweep_battery(
@@ -352,7 +428,7 @@ sweep_b_eff |>
   scale_colour_manual(values = c("#E07B54", "#9B59B6", "#4E8098")) +
   labs(
     title    = "Battery total cycles (7-day) vs. round-trip efficiency",
-    subtitle = "charge_eff = discharge_eff; λ = 0",
+    subtitle = "charge_eff = discharge_eff; λ = 0; cycle_cost = 0",
     x        = "Round-trip efficiency",
     y        = "Equivalent full cycles (7-day total)",
     colour   = NULL
@@ -360,13 +436,12 @@ sweep_b_eff |>
   theme_bench()
 ```
 
-**Key insight:** the `"cost"` objective (w = 0) naturally reduces cycles when
-efficiency drops below 1, because the efficiency-aware MILP internalises
-round-trip losses in the SOC constraints — cycling becomes less attractive
-when losses are high.  The `"grid"` objective (w = 1) is blind to costs and
-may continue cycling even when inefficient.
+**Note:** when `cycle_cost = 0` (default), the `"cost"` objective still reduces
+cycles when η < 1 because the MILP internalises round-trip losses in the SOC
+constraints.  The `"grid"` objective is blind to costs and continues cycling
+regardless.
 
-## 2.2 · Lambda vs. cycle count
+## 2.3 · Lambda vs. cycle count
 
 ```{r battery-sweep-lambda-cycles, cache=TRUE}
 sweep_b_lam <- sweep_battery(
@@ -408,7 +483,7 @@ sweep_b_lam |>
 > continuous OSQP — this is *faster* but relaxes the binary import/export
 > exclusivity constraint.  The smoothing and the solver change happen together.
 
-## 2.3 · w vs. cycle count
+## 2.4 · w vs. cycle count
 
 ```{r battery-sweep-w-cycles, cache=TRUE}
 sweep_b_w <- sweep_battery(

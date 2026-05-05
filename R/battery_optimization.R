@@ -244,7 +244,7 @@ battery_capacity_window <- function(
     summarise_all(sum)
 
   Bcap_curtail <- min(
-    max(balance_sum$exported_over, balance_sum$imported_over),
+    max(balance_sum$exported_over, balance_sum$imported_over) * 1.05, # add 5% headroom to ensure feasibility
     Bcap
   )
 
@@ -427,10 +427,10 @@ battery_solve_cost_milp_window <- function(
 }
 
 
-# Cost solver with charging/discharging efficiencies: X = [B_c, B_d, I, E, m] ---
+# Unified cost solver: X = [B_c, B_d, I, E] (+ m when cycle_cost == 0) ---------
 
 #' @keywords internal
-battery_solve_cost_eff_milp_window <- function(
+battery_solve_cost_unified_window <- function(
   G,
   L,
   PI,
@@ -443,8 +443,9 @@ battery_solve_cost_eff_milp_window <- function(
   SOCini,
   import_capacity,
   export_capacity,
-  charge_eff,
-  discharge_eff
+  charge_eff = 1,
+  discharge_eff = 1,
+  cycle_cost = 0
 ) {
   G <- round(G, 2)
   L <- round(L, 2)
@@ -471,13 +472,15 @@ battery_solve_cost_eff_milp_window <- function(
     export_capacity[is.finite(export_capacity)]
   )
 
-  # X = [B_c_1..B_c_n, B_d_1..B_d_n, I_1..I_n, E_1..E_n, m_1..m_n]
-  # B_c: grid-side charge power (kW from grid; stored = B_c * charge_eff)
-  # B_d: grid-side discharge power (kW to load; released from storage = B_d / discharge_eff)
+  # X = [B_c_1..B_c_n, B_d_1..B_d_n, I_1..I_n, E_1..E_n]
+  # (+ m_1..m_n appended in the MILP branch when cycle_cost == 0)
   #
-  # Balance:              B_c - B_d - I + E = G - L
-  # SOC evolution:        cumsum(charge_eff*B_c - (1/discharge_eff)*B_d) in [lb_soc, ub_soc]
-  # Energy conservation:  sum(charge_eff*B_c - (1/discharge_eff)*B_d) = 0
+  # B_c: grid-side charge power  (stored energy = B_c * charge_eff per slot)
+  # B_d: grid-side discharge power (released energy = B_d / discharge_eff per slot)
+  #
+  # Balance:             B_c - B_d - I + E = G - L
+  # SOC evolution:       cumsum(\u03b7_c * B_c - (1/\u03b7_d) * B_d) in [lb_soc, ub_soc]
+  # Energy conservation: sum(\u03b7_c * B_c - (1/\u03b7_d) * B_d) = 0
 
   A_balance <- cbind(diag(n), -diag(n), -diag(n), diag(n))
   A_soc <- cbind(
@@ -495,46 +498,64 @@ battery_solve_cost_eff_milp_window <- function(
   lb_vars <- c(G - L, lb_soc, 0)
   ub_vars <- c(G - L, ub_soc, 0)
 
-  A_base <- cbind(A_vars, matrix(0, nrow(A_vars), n))
+  # Penalise each kW\u00b7slot of discharge: 1 kW\u00b7slot / Bcap = one full-cycle fraction.
+  cycle_coef <- cycle_cost / Bcap
 
-  # Import mode: I_t <= import_mode_ub_t * m_t
-  A_import_mode <- cbind(
-    matrix(0, n, n), # B_c
-    matrix(0, n, n), # B_d
-    diag(n), # I
-    matrix(0, n, n), # E
-    -diag(import_mode_ub) # -M_I * m
-  )
-  # Export mode: E_t <= export_mode_ub_t * (1 - m_t)
-  A_export_mode <- cbind(
-    matrix(0, n, n), # B_c
-    matrix(0, n, n), # B_d
-    matrix(0, n, n), # I
-    diag(n), # E
-    diag(export_mode_ub) # M_E * m
-  )
+  if (cycle_cost > 0) {
+    # LP path \u2014 cycle_cost makes simultaneous B_c, B_d > 0 economically
+    # self-defeating, so the binary mode variable is unnecessary.
+    result <- highs::highs_solve(
+      Q = NULL,
+      L = c(rep(0, n), rep(cycle_coef, n), PI, -PE),
+      lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n)),
+      upper = c(rep(Bc, n), rep(Bd, n), import_capacity, export_capacity),
+      A = A_vars,
+      lhs = lb_vars,
+      rhs = ub_vars,
+      types = rep(1L, 4 * n),
+      control = optimization_highs_options()
+    )
+  } else {
+    # MILP path \u2014 binary mode variable m prevents simultaneous charge+discharge.
+    A_base <- cbind(A_vars, matrix(0, nrow(A_vars), n))
+    # Import mode: I_t <= import_mode_ub_t * m_t
+    A_import_mode <- cbind(
+      matrix(0, n, n), # B_c
+      matrix(0, n, n), # B_d
+      diag(n), # I
+      matrix(0, n, n), # E
+      -diag(import_mode_ub) # -M_I * m
+    )
+    # Export mode: E_t <= export_mode_ub_t * (1 - m_t)
+    A_export_mode <- cbind(
+      matrix(0, n, n), # B_c
+      matrix(0, n, n), # B_d
+      matrix(0, n, n), # I
+      diag(n), # E
+      diag(export_mode_ub) # M_E * m
+    )
+    A_full <- rbind(A_base, A_import_mode, A_export_mode)
+    lhs_full <- c(lb_vars, rep(-Inf, 2 * n))
+    rhs_full <- c(ub_vars, rep(0, n), export_mode_ub)
 
-  A_full <- rbind(A_base, A_import_mode, A_export_mode)
-  lhs_full <- c(lb_vars, rep(-Inf, 2 * n))
-  rhs_full <- c(ub_vars, rep(0, n), export_mode_ub)
-
-  result <- highs::highs_solve(
-    Q = NULL,
-    L = c(rep(0, n), rep(0, n), PI, -PE, rep(0, n)),
-    lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n), rep(0, n)),
-    upper = c(
-      rep(Bc, n),
-      rep(Bd, n),
-      import_capacity,
-      export_capacity,
-      rep(1, n)
-    ),
-    A = A_full,
-    lhs = lhs_full,
-    rhs = rhs_full,
-    types = c(rep(1L, 4 * n), rep(2L, n)),
-    control = optimization_highs_options(include_mip_gap = TRUE)
-  )
+    result <- highs::highs_solve(
+      Q = NULL,
+      L = c(rep(0, n), rep(0, n), PI, -PE, rep(0, n)),
+      lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n), rep(0, n)),
+      upper = c(
+        rep(Bc, n),
+        rep(Bd, n),
+        import_capacity,
+        export_capacity,
+        rep(1, n)
+      ),
+      A = A_full,
+      lhs = lhs_full,
+      rhs = rhs_full,
+      types = c(rep(1L, 4 * n), rep(2L, n)),
+      control = optimization_highs_options(include_mip_gap = TRUE)
+    )
+  }
 
   if (
     identical(result$status_message, "Optimal") &&
@@ -545,8 +566,7 @@ battery_solve_cost_eff_milp_window <- function(
     B_d <- sol[seq(n + 1, 2 * n)]
     # Return storage-side power (consistent with all other objectives) so that
     # get_conversion_losses() can be applied uniformly to get grid-side flows.
-    B_net <- round(B_c * charge_eff - B_d / discharge_eff, 10)
-    return(B_net)
+    return(round(B_c * charge_eff - B_d / discharge_eff, 10))
   }
 
   rep(0, n)
@@ -611,7 +631,7 @@ battery_solve_cost_osqp_window <- function(
     -PE_clipped
   )
 
-  # Variable bounds — cap I and E to prevent unbounded QP when PE_clipped == PI
+  # Variable bounds \u2014 cap I and E to prevent unbounded QP when PE_clipped == PI
   ub_I <- pmin(d$ub_I, d$import_mode_ub)
   ub_E <- pmin(d$ub_E, d$export_mode_ub)
 
@@ -668,18 +688,24 @@ battery_cost_window <- function(
   SOCini,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  charge_eff = 1,
+  discharge_eff = 1,
+  cycle_cost = 0
 ) {
   n <- length(G)
 
-  if (lambda == 0) {
-    battery_solve_cost_milp_window(
+  if (cycle_cost > 0) {
+    if (lambda > 0) {
+      message_once(
+        "\u26a0\ufe0f Optimization: cycle_cost > 0 uses LP solver; lambda smoothing is not applied."
+      )
+    }
+    battery_solve_cost_unified_window(
       G,
       L,
       PI,
       PE,
-      NULL,
-      NULL,
       Bcap,
       Bc,
       Bd,
@@ -687,9 +713,32 @@ battery_cost_window <- function(
       SOCmax,
       SOCini,
       import_capacity,
-      export_capacity
+      export_capacity,
+      charge_eff = charge_eff,
+      discharge_eff = discharge_eff,
+      cycle_cost = cycle_cost
+    )
+  } else if (lambda == 0) {
+    battery_solve_cost_unified_window(
+      G,
+      L,
+      PI,
+      PE,
+      Bcap,
+      Bc,
+      Bd,
+      SOCmin,
+      SOCmax,
+      SOCini,
+      import_capacity,
+      export_capacity,
+      charge_eff = charge_eff,
+      discharge_eff = discharge_eff,
+      cycle_cost = 0
     )
   } else {
+    # lambda > 0, cycle_cost == 0: OSQP with smoothing term.
+    # Note: efficiency parameters are not applied in this path.
     lambdaMat <- get_lambda_matrix(n)
     P_B <- 2 * lambda * (lambdaMat + 1e-6 * diag(n))
     battery_solve_cost_osqp_window(
@@ -743,7 +792,7 @@ battery_combined_window <- function(
     P_B <- P_grid
   }
 
-  # Check if P_B is effectively zero → MILP path
+  # Check if P_B is effectively zero \u2192 MILP path
   if (max(abs(P_B)) < 1e-8) {
     battery_solve_cost_milp_window(
       G,
@@ -815,10 +864,13 @@ battery_combined_window <- function(
 #' @param lambda numeric, ramping penalty weight. Penalises rapid changes in
 #'   battery power between consecutive time slots.
 #' @param charge_eff numeric, charging efficiency in (0, 1]. Default 1 (lossless).
-#'   When below 1 with `"cost"` objective, uses an efficiency-aware MILP that embeds
-#'   round-trip losses in the SOC constraints, naturally penalising unnecessary cycling.
+#'   Embeds round-trip losses in the SOC constraints for accurate energy accounting.
 #' @param discharge_eff numeric, discharging efficiency in (0, 1]. Default 1 (lossless).
 #'   See `charge_eff`.
+#' @param cycle_cost numeric, degradation cost per kWh cycled (Euro/kWh). Default 0.
+#'   Adds a linear penalty on battery discharge so the optimizer trades off energy
+#'   cost savings against battery wear. When positive, the problem is solved as a
+#'   pure LP (no binary variables) which is substantially faster than the default MILP.
 #'
 #' @return numeric vector
 #' @export
@@ -855,7 +907,8 @@ add_battery_optimization <- function(
   flex_window_hours = 24,
   lambda = 0,
   charge_eff = 1,
-  discharge_eff = 1
+  discharge_eff = 1,
+  cycle_cost = 0
 ) {
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
@@ -885,6 +938,9 @@ add_battery_optimization <- function(
   }
   if (discharge_eff <= 0 || discharge_eff > 1) {
     stop("Error: discharge_eff must be in (0, 1]")
+  }
+  if (!is.numeric(cycle_cost) || length(cycle_cost) != 1 || cycle_cost < 0) {
+    stop("Error: cycle_cost must be a non-negative number.")
   }
 
   # Collapse numeric endpoints to named objectives for simpler dispatch
@@ -945,46 +1001,27 @@ add_battery_optimization <- function(
       )
     )
   } else if (opt_objective == "cost") {
-    if (charge_eff < 1 || discharge_eff < 1) {
-      B_windows <- map(
-        windows_data,
-        ~ battery_solve_cost_eff_milp_window(
-          G = .x$production,
-          L = .x$static,
-          PI = .x$price_imported,
-          PE = .x$price_exported,
-          Bcap = Bcap_scaled,
-          Bc = Bc,
-          Bd = Bd,
-          SOCmin = SOCmin,
-          SOCmax = SOCmax,
-          SOCini = SOCini,
-          import_capacity = .x$import_capacity,
-          export_capacity = .x$export_capacity,
-          charge_eff = charge_eff,
-          discharge_eff = discharge_eff
-        )
+    B_windows <- map(
+      windows_data,
+      ~ battery_cost_window(
+        G = .x$production,
+        L = .x$static,
+        PI = .x$price_imported,
+        PE = .x$price_exported,
+        Bcap = Bcap_scaled,
+        Bc = Bc,
+        Bd = Bd,
+        SOCmin = SOCmin,
+        SOCmax = SOCmax,
+        SOCini = SOCini,
+        import_capacity = .x$import_capacity,
+        export_capacity = .x$export_capacity,
+        lambda = lambda,
+        charge_eff = charge_eff,
+        discharge_eff = discharge_eff,
+        cycle_cost = cycle_cost
       )
-    } else {
-      B_windows <- map(
-        windows_data,
-        ~ battery_cost_window(
-          G = .x$production,
-          L = .x$static,
-          PI = .x$price_imported,
-          PE = .x$price_exported,
-          Bcap = Bcap_scaled,
-          Bc = Bc,
-          Bd = Bd,
-          SOCmin = SOCmin,
-          SOCmax = SOCmax,
-          SOCini = SOCini,
-          import_capacity = .x$import_capacity,
-          export_capacity = .x$export_capacity,
-          lambda = lambda
-        )
-      )
-    }
+    )
   } else if (is.numeric(opt_objective)) {
     B_windows <- map(
       windows_data,

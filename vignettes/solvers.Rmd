@@ -1,0 +1,447 @@
+---
+title: "Battery Optimization: Solvers, Formulations, and Architecture"
+output: html_document
+---
+
+This document is a technical reference for the battery optimization internals in `flextools`. It describes every solver formulation, the branching logic that selects between them, known performance bottlenecks, and directions for future improvement. It is intended for developers working on this codebase, not end users.
+
+The public entry point is `add_battery_optimization()`. It dispatches to one of four objective-specific window solvers. Each solver operates independently on a contiguous block of time slots (one optimization **window**, typically one day). The outer loop in `add_battery_optimization()` applies the solver to each window via `purrr::map`.
+
+**Time scaling.** Battery capacity `Bcap` is converted internally as `Bcap_scaled = Bcap * 60 / time_resolution`, which converts from kWh to kW·slots so that energy and power share the same units inside every solver.
+
+---
+
+# Common notation
+
+- $T$ : Number of time slots within the optimization window
+- $G_t$ : Local power generation (kW)
+- $L_t$ : Static power load (kW)
+- $C_t$ : Battery charging power (kW), decision variable, non-negative
+- $D_t$ : Battery discharging power (kW), decision variable, non-negative
+- $B_t = C_t - D_t$ : Net battery exchange with the grid (positive = charging)
+- $I_t$ : Grid import power (kW), decision variable, non-negative
+- $E_t$ : Grid export power (kW), decision variable, non-negative
+- $S_t$ : Incremental SOC state (kW·slots relative to $SOC_{ini}$), used in QP paths
+- $y_t \in \{0,1\}$ : Binary grid mode (1 = importing, 0 = exporting)
+- $\pi^I_t$ : Import energy price (€/kWh)
+- $\pi^E_t$ : Export energy price (€/kWh)
+- $\lambda$ : Ramping penalty weight
+- $w$ : Grid weight in combined objective ($w \in (0,1)$)
+- $B_{cap}$ : Battery capacity (kW·slots)
+- $B_c$ : Maximum charging power (kW)
+- $B_d$ : Maximum discharging power (kW)
+- $SOC_{min}$, $SOC_{max}$, $SOC_{ini}$ : State of charge bounds and initial value (%)
+- $\eta_c$ : Charging efficiency $\in (0,1]$
+- $\eta_d$ : Discharging efficiency $\in (0,1]$
+- $c_{cyc}$ : Cycle degradation cost (€/kWh)
+- $IC_t$, $EC_t$ : Grid import and export capacity (kW)
+
+Define the SOC bounds relative to the initial state:
+
+$$
+\Delta S_{min} = \frac{SOC_{min} - SOC_{ini}}{100} \cdot B_{cap}, \qquad
+\Delta S_{max} = \frac{SOC_{max} - SOC_{ini}}{100} \cdot B_{cap}
+$$
+
+---
+
+# Grid and capacity objectives
+
+## Formulation
+
+Both `"grid"` and `"capacity"` objectives use a single net battery variable $B_t$ (no import/export split), solved with OSQP as a QP. The objective minimises the squared net power exchanged with the grid, with an optional smoothness penalty:
+
+$$
+\min_{B_t} \; \sum_{t=1}^{T} \Big(B_t - (L_t - G_t)\Big)^2 + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
+$$
+
+The first term drives the net grid flow $(L_t + B_t - G_t)$ towards zero (self-sufficiency / peak shaving). The second term penalises ramps in battery power when $\lambda > 0$.
+
+In matrix form: $\min_B \; B^\top P B + q^\top B$ with
+
+$$
+P = 2\,(I + \lambda\,\Lambda), \qquad q = 2\,(L - G)
+$$
+
+where $I$ is the $T \times T$ identity matrix and $\Lambda$ is the second-difference (discrete Laplacian) matrix returned by `get_lambda_matrix()`:
+
+$$
+\Lambda = \begin{bmatrix}
+1 & -1 & & \\
+-1 & 2 & -1 & \\
+ & \ddots & \ddots & \ddots \\
+ & & -1 & 1
+\end{bmatrix}
+\quad \Rightarrow \quad B^\top \Lambda B = \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
+$$
+
+## Constraints
+
+* Battery power box bounds (combines battery limits and grid capacity):
+
+$$
+\max\!\left(-B_d,\; G_t - L_t - EC_t\right) \;\le\; B_t \;\le\; \min\!\left(B_c,\; G_t - L_t + IC_t\right) \quad t \in T
+$$
+
+* State of charge limits:
+
+$$
+\Delta S_{min} \;\le\; \sum_{k=1}^{t} B_k \;\le\; \Delta S_{max} \quad t = 1, \dots, T
+$$
+
+* Energy conservation (battery returns to $SOC_{ini}$ at end of window):
+
+$$
+\sum_{t=1}^{T} B_t = 0
+$$
+
+Note: this formulation assumes $\eta_c = \eta_d = 1$ (lossless). Efficiency parameters are not supported for the grid and capacity objectives.
+
+## Capacity objective specifics
+
+`battery_capacity_window()` wraps `battery_grid_window()`. Before solving, it computes a curtailed capacity:
+
+$$
+B_{cap,curtail} = \min\!\left(1.01 \cdot \max\!\left(\sum_t \max(G_t - L_t - EC_t,\,0),\;\sum_t \max(L_t - G_t - IC_t,\,0)\right),\; B_{cap}\right)
+$$
+
+The 1% headroom ensures strict feasibility. If $B_{cap,curtail} = 0$ (no grid violations), the solver is skipped and a zero vector is returned.
+
+## Fallback chain (grid/capacity only)
+
+1. OSQP QP on original bounds
+2. Greedy heuristic (`battery_qp_try_heuristic`) — forward-pass clipped to feasible box
+3. OSQP QP with relaxed bounds (grid capacity constraints removed)
+4. Heuristic again on relaxed bounds
+5. Zero vector (battery disabled for this window)
+
+---
+
+# Cost objective
+
+`battery_cost_window()` calls `battery_solve_cost_unified_window()`, which contains three code paths selected by the `(lambda, cycle_cost)` arguments.
+
+All cost paths use split charging/discharging variables $C_t$ and $D_t$ to correctly apply efficiency parameters $\eta_c$, $\eta_d$ in the SOC constraints. The common constraints across all three paths are:
+
+* Balance behind-the-meter:
+
+$$
+C_t - D_t - I_t + E_t = G_t - L_t \quad t \in T
+$$
+
+* State of charge limits accounting for charging and discharging efficiencies:
+
+$$
+\Delta S_{min} \;\le\; \sum_{k=1}^{t} \left(\eta_c C_k - \frac{D_k}{\eta_d}\right) \;\le\; \Delta S_{max} \quad t = 1, \dots, T
+$$
+
+* Energy conservation:
+
+$$
+\sum_{t=1}^{T} \left(\eta_c C_t - \frac{D_t}{\eta_d}\right) = 0
+$$
+
+* Grid import and export bounds:
+
+$$
+0 \le I_t \le IC_t \quad t \in T
+$$
+
+$$
+0 \le E_t \le EC_t \quad t \in T
+$$
+
+* Charging and discharging power bounds:
+
+$$
+0 \le C_t \le B_c \quad 0 \le D_t \le B_d \quad t \in T
+$$
+
+---
+
+## Path 1 — HiGHS MILP (default: `lambda = 0`, `cycle_cost = 0`)
+
+**Variables:** $C_t,\, D_t,\, I_t,\, E_t$ (continuous) + $y_t$ (binary grid mode), $4T + T$ total.
+
+$$
+\min_{C_t,\, D_t,\, I_t,\, E_t} \; \sum_{t=1}^{T} \left( \pi^I_t \cdot I_t - \pi^E_t \cdot E_t \right)
+$$
+
+Additional constraint — simultaneous import and export are prevented via big-M:
+
+$$
+0 \le I_t \le M^I_t\, y_t \qquad 0 \le E_t \le M^E_t\,(1 - y_t) \qquad y_t \in \{0,1\} \quad t \in T
+$$
+
+where $M^I_t = \min(IC_t,\, \max(L_t - G_t + B_c, 0))$ and $M^E_t = \min(EC_t,\, \max(G_t - L_t + B_d, 0))$ are tight big-M coefficients derived from the feasible site import/export ranges.
+
+Simultaneous charging and discharging ($C_t > 0$ and $D_t > 0$) is not explicitly excluded by a binary variable. It is avoided implicitly: the objective contains no incentive to cycle energy through the battery at equal prices, and the SOC constraint bounds make it suboptimal in practice.
+
+This is the most accurate but most expensive cost path (branch-and-bound MILP per window).
+
+---
+
+## Path 2 — HiGHS LP (`cycle_cost > 0`, `lambda = 0`)
+
+**Variables:** $C_t,\, D_t,\, I_t,\, E_t$ (continuous), $4T$ total. No binary variables.
+
+$$
+\min_{C_t,\, D_t,\, I_t,\, E_t} \; \sum_{t=1}^{T} \left( \frac{c_{cyc}}{B_{cap}} \cdot D_t + \pi^I_t \cdot I_t - \pi^E_t \cdot E_t \right)
+$$
+
+The term $c_{cyc}/B_{cap}$ converts the per-kWh degradation cost to a per-kW·slot penalty on discharge. Simultaneously charging and discharging would incur cost $2\,c_{cyc}/B_{cap}$ per unit of power with no energy benefit, making it economically self-defeating and thus naturally avoided without binary variables.
+
+This is substantially faster than the MILP path (LP vs. MIP, no branch-and-bound).
+
+**Import/export bounds.** The LP uses tight physical upper bounds on $I_t$ and $E_t$:
+
+$$
+0 \le I_t \le \min(IC_t,\, L_t - G_t + B_c) \quad 0 \le E_t \le \min(EC_t,\, G_t - L_t + B_d) \quad t \in T
+$$
+
+These caps are the maximum physically achievable import (when battery charges at full power) and export (when battery discharges at full power). They are essential for LP boundedness when $\pi^I_t < 0$: without them, simultaneously increasing $I_t$ and $E_t$ would reduce the objective indefinitely (bounded only by the SOC coupling across slots).
+
+**No hard mutual exclusion.** The LP has no binary variable enforcing $I_t \cdot E_t = 0$. In principle, the solver can set $I_t > 0$ and $E_t > 0$ simultaneously at the same slot, which is physically impossible through a single grid meter. In practice, the day-wide SOC constraint creates strong coupling across slots: charging more during cheap periods preserves battery energy for discharging during expensive periods, which dominates any within-slot simultaneous flow profit. Verified on real data: the LP correctly charges at maximum power ($B_c = B_c^{max}$) during negative-price periods.
+
+When a strict mutual exclusion guarantee is required, use the default MILP path (`cycle_cost = 0`).
+
+---
+
+## Path 3 — OSQP QP (`lambda > 0`)
+
+**Variables:** $C_t,\, D_t,\, I_t,\, E_t,\, S_t$ (continuous), $5T$ total.
+
+`battery_cost_window()` constructs a quadratic penalty matrix on net battery power:
+
+$$
+P_B = 2\lambda\,(\Lambda + 10^{-6}\,I)
+$$
+
+The $10^{-6}$ ridge term ensures $P_B \succ 0$ (strictly positive definite), which is required for a strongly convex QP. The penalty is applied to $B_t = C_t - D_t$, so:
+
+$$
+(C - D)^\top P_B (C - D) = \lambda \sum_{t=1}^{T-1} (B_{t+1} - B_t)^2 + 10^{-6}\lambda \sum_{t=1}^{T} B_t^2
+$$
+
+**Objective:**
+
+$$
+\min_{C_t,\, D_t,\, I_t,\, E_t} \; \sum_{t=1}^{T} \left( \frac{c_{cyc}}{B_{cap}} \cdot D_t + \pi^I_t \cdot I_t - \pi^E_t \cdot E_t \right) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
+$$
+
+Both `cycle_cost` and `lambda` are active simultaneously when both are positive: `cycle_cost` enters as a linear penalty on $D_t$, and `lambda` enters as the quadratic smoothness penalty on $B_t$.
+
+**Incremental SOC formulation.** Instead of the cumulative-sum SOC constraint (dense $O(T^2)$ constraint matrix), this path introduces $S_t$ as an explicit incremental SOC state variable, yielding a bidiagonal $O(T)$ constraint:
+
+$$
+S_t - S_{t-1} = \eta_c C_t - \frac{D_t}{\eta_d} \quad t = 1, \dots, T \quad (S_0 = 0)
+$$
+
+$$
+\Delta S_{min} \le S_t \le \Delta S_{max} \quad t = 1, \dots, T
+$$
+
+$$
+S_T = 0
+$$
+
+The last equality replaces the energy conservation constraint and enforces that the battery returns to $SOC_{ini}$.
+
+**Export price clipping.** $\pi^E_t$ is clipped to $\min(\pi^E_t, \pi^I_t)$ before solving. If export revenue could exceed import cost, the QP would be unbounded below. A warning is emitted once if clipping occurs.
+
+**Objective normalization.** Before passing to OSQP, both $P$ and $q$ are divided by:
+
+$$
+\text{obj\_scale} = \max\!\left(\max|P_{5T}|,\; \max|q|,\; 10^{-6}\right)
+$$
+
+This keeps the quadratic and linear magnitudes comparable, which helps OSQP's ADMM parameter $\rho$ auto-tune effectively regardless of the value of $\lambda$.
+
+**Fallback.** If OSQP fails, the solver falls back to HiGHS LP (Path 2), which retains `cycle_cost` but loses the quadratic `lambda` smoothness term.
+
+---
+
+# Combined objective
+
+`battery_combined_window()` uses its own self-contained OSQP solver and does **not** call `battery_solve_cost_unified_window()`. It does not support efficiency parameters ($\eta_c$, $\eta_d$) or `cycle_cost` — by design, consistent with the grid objective.
+
+**Variables:** $B_t,\, I_t,\, E_t$ (continuous), $3T$ total.
+
+$$
+\min_{B_t,\, I_t,\, E_t} \; w \cdot \sigma \sum_{t=1}^{T} \Big(B_t - (L_t - G_t)\Big)^2 + (1-w) \sum_{t=1}^{T} \left(\pi^I_t \cdot I_t - \pi^E_t \cdot E_t\right) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
+$$
+
+where $\sigma = \bar{\pi}^2$ (squared mean import price over the window) is a scaling factor that makes the grid term dimensionally comparable to the cost term.
+
+The weight $w \in (0,1)$ controls the trade-off: $w \to 1$ recovers the pure grid objective (ignoring prices), $w \to 0$ recovers the pure cost objective (with smoothness penalty but no efficiency or cycle cost).
+
+## Constraints
+
+* Balance behind-the-meter:
+
+$$
+B_t - I_t + E_t = G_t - L_t \quad t \in T
+$$
+
+* State of charge limits (lossless, $\eta_c = \eta_d = 1$):
+
+$$
+\Delta S_{min} \;\le\; \sum_{k=1}^{t} B_k \;\le\; \Delta S_{max} \quad t = 1, \dots, T
+$$
+
+* Energy conservation:
+
+$$
+\sum_{t=1}^{T} B_t = 0
+$$
+
+* Grid import and export bounds:
+
+$$
+0 \le I_t \le \min\!\left(IC_t,\, \max(L_t - G_t + B_c, 0)\right) \quad t \in T
+$$
+
+$$
+0 \le E_t \le \min\!\left(EC_t,\, \max(G_t - L_t + B_d, 0)\right) \quad t \in T
+$$
+
+* Battery power bounds:
+
+$$
+-B_d \;\le\; B_t \;\le\; B_c \quad t \in T
+$$
+
+**Sparse P.** Only the $B$-block ($T \times T$) of the $3T \times 3T$ quadratic matrix is non-zero. It is constructed via `Matrix::sparseMatrix` so OSQP receives an $O(T)$ nnz matrix.
+
+**Export price clipping.** Same as the QP cost path: $\pi^E_t$ is clipped to $\min(\pi^E_t, \pi^I_t)$.
+
+**Fallback.** None — if OSQP fails, returns a zero vector with a warning.
+
+---
+
+# Solver selection summary
+
+| `opt_objective` | `lambda` | `cycle_cost` | Solver | Variables |
+|---|---|---|---|---|
+| `"grid"` or `"capacity"` | any | — | OSQP QP | $B_t$ ($T$) |
+| `"cost"` | 0 | 0 | HiGHS MILP | $C_t, D_t, I_t, E_t, y_t$ ($5T$) |
+| `"cost"` | 0 | > 0 | HiGHS LP | $C_t, D_t, I_t, E_t$ ($4T$) |
+| `"cost"` | > 0 | any | OSQP QP | $C_t, D_t, I_t, E_t, S_t$ ($5T$) |
+| numeric $w \in (0,1)$ | any | — | OSQP QP | $B_t, I_t, E_t$ ($3T$) |
+
+---
+
+# Solver backends
+
+## OSQP
+
+Used by: grid, capacity, combined, cost + `lambda > 0`.
+
+OSQP implements ADMM (Alternating Direction Method of Multipliers) for convex QPs. It requires a positive semi-definite $P$ and works best when the magnitudes of $P$ and $q$ are comparable (so the ADMM penalty parameter $\rho$ is well-matched). Key behaviours:
+
+- Sensitive to the ratio of quadratic to linear magnitudes: a tiny $P$ relative to $q$ degrades convergence significantly (near-LP regime)
+- Sparse $P$ is critical: a dense $T \times T$ block gives no speedup because OSQP already handles all constraints densely, and adds unnecessary memory bandwidth
+- No warm-starting across windows (each window is solved cold)
+
+## HiGHS
+
+Used by: cost MILP (default) and cost LP (`cycle_cost > 0`).
+
+HiGHS implements simplex and interior-point for LP/MIP. The LP path (no binary variables) is substantially faster than the MILP path. Interior-point QP is available in HiGHS but was tested and found to hang indefinitely on problems with negative import prices — it is therefore not used.
+
+---
+
+# Performance bottlenecks
+
+## 1. Negative import prices
+
+Negative import prices ($\pi^I_t < 0$) are increasingly common in renewable-heavy grids and represent an opportunity to charge the battery for free (or at profit). The expected behaviour is to charge at maximum power during negative-price slots. All solver paths handle this correctly:
+
+| Path | Mechanism | Notes |
+|---|---|---|
+| MILP | big-M forces import mode; $I_t$ maximised | Also may prefer export mode if $\pi^E > |\pi^I|$ |
+| LP | tight $I_t$ bounds prevent unboundedness; SOC coupling drives max charge | No hard mutual exclusion; see above |
+| QP (lambda) | PE clipping ($\pi^E \leftarrow \min(\pi^E, \pi^I)$) removes export incentive; $I_t$ bound prevents unboundedness | Export undervalued when $\pi^I < \pi^E$ |
+| Combined | same PE clipping as QP path | — |
+
+**LP path boundedness (historical bug, fixed).** Before the bounds fix, the LP path used raw `import_capacity` (defaulting to $\infty$) as the upper bound on $I_t$. With $\pi^I_t < 0$ and $\pi^E_t > 0$, simultaneously increasing $I_t$ and $E_t$ is profitable (objective change $({\pi^I_t - \pi^E_t})\,\epsilon < 0$) and was unbounded. HiGHS returned a non-optimal status and the function fell through to a zero profile. Fixed by applying $\min(IC_t,\, L_t - G_t + B_c)$ as the $I_t$ upper bound.
+
+**OSQP convergence degradation.** On windows where $\pi^I_t < 0$, OSQP's ADMM takes 3–8× more iterations because the problem becomes nearly an LP (the quadratic regularizer $P$ is negligible relative to the linear price term $q$). Observed: ~5 ms per window with positive prices, ~25 ms per window with negative prices. On datasets where ~17% of days have negative prices, total QP solve time roughly doubles.
+
+## 2. Dense constraint matrix (grid/capacity)
+
+`battery_solve_grid_window()` builds the cumulative SOC constraint as a dense lower-triangular $T \times T$ matrix. The full constraint matrix $A \in \mathbb{R}^{(2T+1) \times T}$ is dense. This grows quadratically with $T$ — relevant for multi-day windows or sub-15-min resolution.
+
+## 3. Dense lambda matrix
+
+`get_lambda_matrix()` constructs the $T \times T$ Laplacian $\Lambda$ as a dense matrix via `triangulate_matrix`. This matrix is tridiagonal (sparse) but stored and multiplied densely. It is recomputed on every window call.
+
+## 4. MILP per window (default cost)
+
+Branch-and-bound is required for each window. At $T = 96$ HiGHS is fast (~2–5 ms/window), but this is the slowest cost path. Introducing any `cycle_cost > 0` eliminates the MILP and routes to LP, with a large speedup at a small accuracy cost.
+
+## 5. 5n QP dense block assignment
+
+In the cost QP path, the $5T \times 5T$ sparse matrix `P_5n` is assembled by assigning four dense $T \times T$ blocks from `P_B`. When `lambda > 0`, `P_B` itself is a dense tridiagonal matrix (stored densely), making these block assignments wasteful for large $T$.
+
+---
+
+# Future improvements
+
+## A. Sparse lambda matrix
+
+Replace `get_lambda_matrix()` with a direct sparse tridiagonal construction, e.g.:
+
+```r
+Matrix::bandSparse(T, k = c(-1, 0, 1),
+  diagonals = list(rep(-1, T-1), c(1, rep(2, T-2), 1), rep(-1, T-1)))
+```
+
+This eliminates the $O(T^2)$ allocation and keeps `P_B` sparse throughout, reducing memory use and OSQP matrix construction time for both the cost QP and combined paths.
+
+## B. Sparse cumulative SOC constraint (grid/capacity)
+
+Replace the dense lower-triangular cumsum matrix with an incremental bidiagonal form by introducing an explicit SOC state variable $S_t$, analogous to what the cost QP path already does. This reduces the constraint matrix nnz from $O(T^2)$ to $O(T)$ and is essential for large windows or high time resolution.
+
+## C. Unify cost + lambda into the 3n formulation
+
+When `charge_eff = discharge_eff = 1` (the default), the 5n QP path is over-engineered for the cost + lambda case. A 3n `[B, I, E]` solver (analogous to `battery_combined_window`) would be simpler, consistent, and slightly faster. The 5n path would then only activate when `charge_eff != 1 || discharge_eff != 1`, making the routing logic explicit.
+
+## D. Warm-starting across windows
+
+OSQP supports warm-starting with a primal/dual initial point. Adjacent windows often have similar optimal profiles (same building, next day). Passing the previous window's solution as initialization could reduce iteration counts, especially on datasets with slowly varying price and load patterns.
+
+## E. OSQP conditioning under negative prices
+
+Two mitigations for the negative-price convergence problem:
+
+1. Extend objective normalization (currently only in the 5n cost QP path) to `battery_combined_window` as well.
+2. Expose a `price_floor` option that clips $\pi^I_t$ to a small positive value (e.g., `1e-4`) before passing to OSQP. This does not change the qualitative optimal behaviour but significantly improves ADMM conditioning.
+
+## F. Parallel window solving
+
+Windows are fully independent. `purrr::map` is sequential. Replacing it with `furrr::future_map` (with a pre-initialized worker pool) would give near-linear speedup on multi-core machines. See `vignettes/parallel-processing.Rmd` for existing parallel-processing patterns in the package.
+
+---
+
+# Call graph summary
+
+```
+add_battery_optimization()
+├─ [grid]      battery_grid_window()
+│               └─ battery_solve_grid_window()       OSQP QP, T vars
+│                   ├─ solve_osqp()
+│                   └─ battery_qp_try_heuristic()    greedy fallback
+│
+├─ [capacity]  battery_capacity_window()
+│               └─ battery_grid_window()              same as grid
+│
+├─ [cost]      battery_cost_window()
+│               └─ battery_solve_cost_unified_window()
+│                   ├─ [lambda > 0]  OSQP QP, 5T vars
+│                   │   └─ fallback: HiGHS LP
+│                   ├─ [cycle_cost > 0, lambda = 0]  HiGHS LP, 4T vars
+│                   └─ [default]  HiGHS MILP, 4T + T binary vars
+│
+└─ [numeric w] battery_combined_window()             OSQP QP, 3T vars
+```

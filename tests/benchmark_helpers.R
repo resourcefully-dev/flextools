@@ -200,15 +200,21 @@ bench_battery <- function(
     )
   time_sec <- timefully::toc()
 
-  cost <- evaluate_cost(opt_data, B)
+  # Convert battery SOC power to grid-side power so that round-trip losses are
+  # reflected in the energy cost and peak calculations.
+  # B > 0 (charging):  grid must supply B / charge_eff  (losses increase grid draw)
+  # B < 0 (discharging): grid receives  B * discharge_eff (losses reduce delivery)
+  B_grid <- ifelse(B >= 0, B / charge_eff, B * discharge_eff)
+
+  cost <- evaluate_cost(opt_data, B_grid)
 
   # Equivalent full cycles: total discharged energy (kWh) / Bcap
-  # B is in kW at 15-min resolution → multiply by 0.25 h to get kWh
+  # Use the original B (SOC side) so cycles measure actual battery wear.
   n_cycles <- -sum(pmin(B, 0)) * (15 / 60) / Bcap
 
   production <- if ("production" %in% names(opt_data)) opt_data$production else 0
   static     <- if ("static"     %in% names(opt_data)) opt_data$static     else 0
-  net <- B + static - production
+  net <- B_grid + static - production
 
   list(
     profile        = B,

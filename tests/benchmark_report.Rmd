@@ -35,8 +35,8 @@ library(scales)
 # ── Benchmark parameters (adjust here to trade speed vs. resolution) ──────────
 W_SEQ_FINE   <- seq(0, 1, by = 0.05)   # 21 points for tradeoff curves
 W_SEQ_COARSE <- seq(0, 1, by = 0.1)    # 11 points for sweeps
-LAMBDA_SEQ      <- c(0, 0.01, 0.05, 0.1, 0.5, 1)
-EFF_SEQ         <- c(1.0, 0.99, 0.97, 0.95, 0.90, 0.85)
+LAMBDA_SEQ      <- c(0, 0.01, 0.02, 0.05, 0.1, 0.5)
+EFF_SEQ         <- c(0.85, 0.90, 0.95, 1.0)
 CYCLE_COST_SEQ  <- c(0, 0.01, 0.02, 0.05, 0.10, 0.20)  # €/kWh cycled
 
 # Battery hardware parameters (shared throughout)
@@ -45,14 +45,14 @@ BC   <- 4    # kW
 BD   <- 4    # kW
 ```
 
----
+This reports presents a comprehensive benchmark of the `flextools` demand and battery optimization functions, sweeping across key parameters to illustrate their impact on performance and outcomes.
 
-> **How to run:** open this file in RStudio, then click **Knit**.
-> The first knit may take several minutes — subsequent knits are fast thanks to chunk caching.
-
----
 
 # 0 · Data & baselines {.tabset}
+
+The simulations in this report use the `energy_profiles` dataset included in the package, which contains 15-minute data for a full year (2023) of solar production, load, and time-varying prices.  
+The demand and battery optimization functions take this raw data and construct the necessary input tables for the solvers; these are shown in the next two sections.
+The battery parameters are set to `capacity = 50` kWh and `power = 4` kW (for both charge and discharge) for all simulations in this report.
 
 ```{r data-setup, cache=TRUE}
 library(lubridate)
@@ -65,16 +65,24 @@ profiles_week <- flextools::energy_profiles |>
 profiles_year <- flextools::energy_profiles   # full year (35 040 rows)
 
 # ── Demand optimization datasets ───────────────────────────────────────────────
-opt_demand_week <- demand_opt_data(profiles_week)   # for sweeps (fast)
-opt_demand_year <- demand_opt_data(profiles_year)   # for timing section
+# price_exported is set to price_imported - 0.05 so it is always lower
+opt_demand_week <- demand_opt_data(profiles_week) |>
+  mutate(price_exported = price_imported - 0.05)
+opt_demand_year <- demand_opt_data(profiles_year) |>
+  mutate(price_exported = price_imported - 0.05)
 
 # ── Battery optimization datasets ─────────────────────────────────────────────
-opt_battery_week <- battery_opt_data(profiles_week)
-opt_battery_year <- battery_opt_data(profiles_year)
+opt_battery_week <- battery_opt_data(profiles_week) |>
+  mutate(price_exported = price_imported - 0.05)
+opt_battery_year <- battery_opt_data(profiles_year) |>
+  mutate(price_exported = price_imported - 0.05)
 
 # ── Baselines (no optimization) ────────────────────────────────────────────────
 base_demand  <- demand_baseline(opt_demand_week)
 base_battery <- battery_baseline(opt_battery_week)
+
+# Average import price — used as a λ reference in both demand and battery sections
+avg_import_price <- mean(opt_demand_week$price_imported)
 ```
 
 ## Demand dataset
@@ -82,8 +90,10 @@ base_battery <- battery_baseline(opt_battery_week)
 ```{r data-demand-plot, cache=FALSE, fig.height=3.5}
 opt_demand_week |>
   tidyr::pivot_longer(-datetime, names_to = "variable") |>
-  dplyr::filter(variable %in% c("flexible", "production",
-                                 "price_imported", "price_exported")) |>
+  dplyr::filter(variable %in% c("price_imported", "price_exported",
+                                 "production", "flexible")) |>
+  dplyr::mutate(variable = factor(variable,
+    levels = c("price_imported", "price_exported", "production", "flexible"))) |>
   ggplot(aes(datetime, value, colour = variable)) +
   geom_line(linewidth = 0.5) +
   facet_wrap(~ variable, scales = "free_y", ncol = 2) +
@@ -98,6 +108,10 @@ opt_demand_week |>
 ```{r data-battery-plot, cache=FALSE, fig.height=3.5}
 opt_battery_week |>
   tidyr::pivot_longer(-datetime, names_to = "variable") |>
+  dplyr::filter(variable %in% c("price_imported", "price_exported",
+                                 "production", "static")) |>
+  dplyr::mutate(variable = factor(variable,
+    levels = c("price_imported", "price_exported", "production", "static"))) |>
   ggplot(aes(datetime, value, colour = variable)) +
   geom_line(linewidth = 0.5) +
   facet_wrap(~ variable, scales = "free_y", ncol = 2) +
@@ -107,7 +121,9 @@ opt_battery_week |>
   theme(legend.position = "none")
 ```
 
-## Baseline KPIs
+## {-}
+
+**Baseline KPIs**
 
 ```{r baseline-table, cache=FALSE}
 tibble::tibble(
@@ -135,6 +151,7 @@ three goals:
 | `opt_objective` | Solver | Description |
 |-----------------|--------|-------------|
 | `"grid"` / `w = 1` | QP | Minimise squared net power exchanged with the grid |
+| `"capacity"` | QP | Minimise squared net power that exceeds grid capacity |
 | `"cost"` / `w = 0` | MILP | Minimise energy cost (import/export prices) |
 | `w ∈ (0, 1)` | MIQP | Weighted combination of both |
 
@@ -212,17 +229,20 @@ ggplot(tradeoff_d, aes(w, pct_improvement, colour = metric)) +
 **Reading the chart:** moving `w` from 0 → 1 trades cost savings for peak
 reduction.  The crossover marks the `w` where both benefits are equal on a
 percentage basis.  To the right of the crossover, peak reduction outpaces the
-cost penalty; to the left, cost savings dominate.
+cost penalty; to the left, cost savings dominate.  For cases where only one
+objective matters, the endpoints are clear: `w = 0` for maximum cost savings,
+`w = 1` for maximum peak reduction.  A value near the crossover is a
+reasonable default when both matter equally.
 
 > **Note on the cost metric:** `evaluate_cost()` measures only grid energy
 > costs (import price × kWh imported − export price × kWh exported).  The
 > `"cost"` optimization objective *also* includes balancing-market revenues
 > (`price_turn_up` / `price_turn_down`), so the grid-energy-cost savings shown
-> here may *understate* the true economic benefit of `w = 0`.  Conversely,
-> `w = 1` (grid) often shows good grid-cost savings as a side effect of aligning
-> demand with local solar production.
+> here may *understate* the true economic benefit of `w = 0`.  **Conversely,
+> `w = 1` (grid) often shows good grid-cost savings as a side effect of
+> aligning demand with local solar production.**
 
-## 1.2 · Effect of λ on the tradeoff
+## 1.2 · Lambda vs. energy savings
 
 ```{r demand-sweep-lambda, cache=TRUE}
 sweep_d_lam <- sweep_demand(
@@ -232,280 +252,192 @@ sweep_d_lam <- sweep_demand(
 )
 ```
 
-```{r demand-lambda-plot, cache=FALSE, fig.height=5}
-sweep_d_lam |>
-  mutate(
-    peak_reduction_pct = (base_demand$peak_from_grid - peak_from_grid) /
-                          base_demand$peak_from_grid * 100,
-    cost_savings_pct   = (base_demand$cost - cost) /
-                          abs(base_demand$cost) * 100,
-    lambda_lab = paste0("λ = ", lambda)
-  ) |>
-  tidyr::pivot_longer(
-    c(peak_reduction_pct, cost_savings_pct),
-    names_to  = "metric",
-    values_to = "pct_improvement"
-  ) |>
-  mutate(metric = recode(metric,
-    peak_reduction_pct = "Peak-from-grid reduction (%)",
-    cost_savings_pct   = "Energy cost savings (%)"
-  )) |>
-  ggplot(aes(w, pct_improvement, colour = lambda_lab, group = lambda_lab)) +
-  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey80") +
-  geom_line(linewidth = 0.9) +
-  geom_point(size = 1.8) +
-  facet_wrap(~ metric, ncol = 2) +
-  scale_x_continuous(breaks = seq(0, 1, 0.2)) +
-  scale_colour_viridis_d(option = "plasma", end = 0.9) +
-  labs(
-    title    = "Effect of λ on the demand optimization tradeoff",
-    subtitle = "Each line is a different ramping-penalty value",
-    x        = "w  (0 = cost  →  1 = grid)",
-    y        = "% improvement vs. baseline",
-    colour   = "Lambda (λ)"
-  ) +
-  theme_bench()
-```
+```{r demand-lambda-plot, cache=FALSE, fig.height=4.5}
+max_savings_d <- sweep_d_lam |>
+  filter(lambda > 0) |>
+  mutate(s = (base_demand$cost - cost) / abs(base_demand$cost) * 100) |>
+  pull(s) |> max(na.rm = TRUE)
 
-```{r demand-lambda-single-w, cache=FALSE, fig.height=4}
-# Fix w = 0.5, show how each KPI evolves with lambda
 sweep_d_lam |>
-  filter(w == 0.5) |>
+  filter(lambda > 0) |>
   mutate(
-    peak_reduction_pct = (base_demand$peak_from_grid - peak_from_grid) /
-                          base_demand$peak_from_grid * 100,
-    cost_savings_pct   = (base_demand$cost - cost) /
-                          abs(base_demand$cost) * 100
+    cost_savings_pct = (base_demand$cost - cost) /
+                        abs(base_demand$cost) * 100,
+    w_lab = paste0("w = ", w)
   ) |>
-  tidyr::pivot_longer(
-    c(peak_reduction_pct, cost_savings_pct),
-    names_to  = "metric",
-    values_to = "pct_improvement"
-  ) |>
-  mutate(metric = recode(metric,
-    peak_reduction_pct = "Peak-from-grid reduction (%)",
-    cost_savings_pct   = "Energy cost savings (%)"
-  )) |>
-  ggplot(aes(lambda, pct_improvement, colour = metric)) +
+  ggplot(aes(lambda, cost_savings_pct, colour = w_lab, group = w_lab)) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
-  geom_line(linewidth = 1) +
-  geom_point(size = 2.5) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_vline(
+    xintercept = avg_import_price,
+    linetype = "dashed", colour = "grey50"
+  ) +
+  annotate("text",
+    x     = avg_import_price * 1.5,
+    y     = max_savings_d * 0.95,
+    label = paste0("avg. import price\n≈ ", round(avg_import_price, 3), " €/kWh"),
+    size  = 3.2, colour = "grey40", hjust = 0
+  ) +
   scale_x_log10(
     breaks = LAMBDA_SEQ[LAMBDA_SEQ > 0],
     labels = as.character(LAMBDA_SEQ[LAMBDA_SEQ > 0])
   ) +
-  scale_colour_manual(values = c("#E07B54", "#4E8098")) +
+  scale_colour_viridis_d(option = "plasma", end = 0.9) +
   labs(
-    title    = "Effect of λ at fixed w = 0.5 (demand)",
-    subtitle = "Log scale — note how large λ collapses both objectives toward zero improvement",
+    title    = "Lambda vs. energy savings (demand)",
+    subtitle = "Each line is a different w value; larger λ smooths the profile at the cost of savings",
     x        = "λ (log scale)",
-    y        = "% improvement vs. baseline",
-    colour   = NULL
+    y        = "Energy cost savings vs. baseline (%)",
+    colour   = "w"
   ) +
   theme_bench()
 ```
 
 > **λ guidance**
 > `lambda` adds a quadratic penalty on *changes* in the flexible load between
-> consecutive time slots — it acts as a smoothness regulariser.
+> consecutive time slots — it acts as a smoothness regulariser needed for cost
+> optimization to avoid spiky profiles.
 >
 > * **λ = 0** (default): no smoothness constraint; the solver is free to make
 >   sharp load ramps.  This gives maximum objective quality but may produce
 >   "spiky" profiles that are hard to implement in practice.
 > * **λ ≈ 0.01 – 0.1**: a good first range to try.  Profiles become noticeably
->   smoother with only a small sacrifice in peak / cost performance.
+>   smoother with only a small sacrifice in cost savings.
 > * **λ ≥ 0.5**: strong smoothing.  The flexible load barely moves from its
->   original shape — both peak reduction and cost savings shrink toward zero.
+>   original shape — cost savings shrink toward zero.
 >
-> Recommended starting point: **λ = 0.05** for balanced smoothness.
+> A practical starting reference for `lambda` is the **average import price**
+> (≈ `r round(avg_import_price, 3)` €/kWh in this dataset): at this value,
+> the ramp penalty is comparable in magnitude to the energy price, providing
+> meaningful smoothing without collapsing savings.  **Recommended range:
+> λ ≈ average import price to 2× average import price.**
 
 ---
 
-# 2 · Battery optimization — cycle count
+# 2 · Battery optimization
 
-Battery cycles matter for battery lifetime.  More cycles = faster degradation.
-The `n_cycles` metric here is **total equivalent full cycles over the
-7-day dataset**: `n_cycles = −Σ min(B, 0) × (15/60) / Bcap`, where `B` is
-in kW and the factor `15/60` converts 15-minute slots to hours (kWh).
+The `add_battery_optimization()` function schedules battery charge/discharge to
+minimise a weighted objective (cost, grid, or combined):
 
-## 2.1 · cycle_cost vs. cycle count (direct economic penalty)
+| `opt_objective` | Solver | Description |
+|-----------------|--------|-------------|
+| `"grid"` / `w = 1` | QP | Minimise squared net power exchanged with the grid |
+| `"capacity"` | QP | Minimise squared net power that exceeds grid capacity |
+| `"cost"` / `w = 0` | MILP or LP (if cycle_cost > 0) | Minimise energy cost (import/export prices) |
+| `w ∈ (0, 1)` | QP | Weighted combination of both |
 
-`cycle_cost` (€/kWh cycled) adds an explicit degradation cost to the objective.
-This is **the recommended way to limit cycling** when the `"cost"` objective is
-used: it is economically meaningful, user-tunable, and — because it eliminates
-the need for binary mode variables — turns the MILP into a pure LP, which is
-substantially faster to solve.
+**Key parameters:**
 
-```{r battery-sweep-cc, cache=TRUE}
-sweep_b_cc <- sweep_battery_cc(
+Key parameters are the same `w` and `lambda` as for demand, plus:
+
+* **`cycle_cost`** (€/kWh cycled) — explicit degradation penalty added to the
+  cost objective.  Setting a non-zero value converts the MILP to a pure LP
+  (much faster) and directly limits cycling.
+* **`charge_eff` / `discharge_eff`** — round-trip efficiency losses; when η < 1
+  the battery internalises losses in the SOC constraints, which also indirectly
+  reduces cycling.
+
+## 2.1 · Tradeoff curve: peak reduction vs. energy cost
+
+```{r battery-sweep-tradeoff, cache=TRUE}
+sweep_b_tradeoff <- sweep_battery(
   opt_battery_week,
-  w_seq          = c(0, 1),
-  cycle_cost_seq = CYCLE_COST_SEQ,
+  w_seq      = W_SEQ_FINE,
+  lambda_seq = 0,
+  eff_seq    = 1,
   Bcap = BCAP, Bc = BC, Bd = BD
 )
 ```
 
-```{r battery-cycles-cc-plot, cache=FALSE, fig.height=4.5}
-sweep_b_cc |>
-  mutate(objective = w_label(w)) |>
-  ggplot(aes(cycle_cost, n_cycles, colour = objective, group = objective)) +
+```{r battery-tradeoff-plot, cache=FALSE, fig.height=4.5}
+tradeoff_b <- sweep_b_tradeoff |>
+  mutate(
+    peak_reduction_pct = (base_battery$peak_from_grid - peak_from_grid) /
+                          base_battery$peak_from_grid * 100,
+    cost_savings_pct   = (base_battery$cost - cost) /
+                          abs(base_battery$cost) * 100
+  ) |>
+  tidyr::pivot_longer(
+    c(peak_reduction_pct, cost_savings_pct),
+    names_to  = "metric",
+    values_to = "pct_improvement"
+  ) |>
+  mutate(metric = recode(metric,
+    peak_reduction_pct = "Peak-from-grid reduction (%)",
+    cost_savings_pct   = "Energy cost savings (%)"
+  ))
+
+crossover_b <- sweep_b_tradeoff |>
+  mutate(
+    peak_red  = (base_battery$peak_from_grid - peak_from_grid) /
+                 base_battery$peak_from_grid * 100,
+    cost_sav  = (base_battery$cost - cost) / abs(base_battery$cost) * 100,
+    diff_abs  = abs(peak_red - cost_sav)
+  ) |>
+  slice_min(diff_abs, n = 1)
+
+ggplot(tradeoff_b, aes(w, pct_improvement, colour = metric)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
   geom_line(linewidth = 1) +
-  geom_point(size = 2.5) +
+  geom_point(size = 2) +
+  geom_vline(
+    xintercept = crossover_b$w,
+    linetype = "dotted", colour = "grey40"
+  ) +
+  annotate("text",
+    x     = crossover_b$w + 0.03,
+    y     = max(tradeoff_b$pct_improvement) * 0.85,
+    label = paste0("Crossover\nw ≈ ", crossover_b$w),
+    size  = 3.5, colour = "grey30", hjust = 0
+  ) +
+  scale_x_continuous(breaks = seq(0, 1, 0.1)) +
   scale_colour_manual(values = c("#E07B54", "#4E8098")) +
   labs(
-    title    = "Battery total cycles (7-day) vs. cycle_cost",
-    subtitle = "cycle_cost = degradation penalty (€/kWh cycled); η = 1; λ = 0",
-    x        = "cycle_cost (€/kWh)",
-    y        = "Equivalent full cycles (7-day total)",
+    title    = "Battery optimization: peak reduction vs. energy cost savings",
+    subtitle = "cycle_cost = 0; η = 1; λ = 0",
+    x        = "w  (0 = pure cost  →  1 = pure grid)",
+    y        = "% improvement vs. no-battery baseline",
     colour   = NULL
   ) +
   theme_bench()
 ```
 
-```{r battery-cc-cost-plot, cache=FALSE, fig.height=4.5}
-sweep_b_cc |>
-  filter(w == 0) |>
-  ggplot(aes(cycle_cost, cost)) +
-  geom_line(linewidth = 1, colour = "#E07B54") +
-  geom_point(size = 2.5, colour = "#E07B54") +
-  labs(
-    title    = "Energy cost vs. cycle_cost (cost objective only)",
-    subtitle = "Higher cycle_cost trades fewer cycles for slightly higher energy cost",
-    x        = "cycle_cost (€/kWh)",
-    y        = "Total energy cost (€)"
-  ) +
-  theme_bench()
-```
+The chart confirms that `w = 0` (cost) maximises energy savings through
+price-arbitrage, while `w = 1` (grid) focuses entirely on peak reduction,
+often at the cost of energy savings.  If the
+primary goal is to reduce the electricity bill, choose `w = 0` (or a low `w`);
+if the priority is grid relief, choose `w` near 1.
 
-```{r battery-cc-time-plot, cache=FALSE, fig.height=4.5}
-sweep_b_cc |>
-  filter(w == 0) |>
-  mutate(solver = ifelse(cycle_cost > 0, "LP (cycle_cost > 0)", "MILP (cycle_cost = 0)")) |>
-  ggplot(aes(cycle_cost, time_sec, fill = solver)) +
-  geom_col(width = 0.015) +
-  scale_fill_manual(values = c("LP (cycle_cost > 0)" = "#4E8098", "MILP (cycle_cost = 0)" = "#E07B54")) +
-  labs(
-    title    = "Solver time vs. cycle_cost",
-    subtitle = "cycle_cost > 0 switches to LP (no binary variables) → faster",
-    x        = "cycle_cost (€/kWh)",
-    y        = "Solver time (s)",
-    fill     = NULL
-  ) +
-  theme_bench()
-```
-
-**Key insight:** `cycle_cost` directly targets the economic trade-off between
-energy savings and battery wear.  Setting even a small value (e.g. 0.02 €/kWh)
-noticeably reduces cycles while keeping most of the cost savings — and the LP
-solver is faster than the default MILP.
-
-## 2.2 · Efficiency vs. cycle count
-
-Round-trip efficiency (η < 1) also reduces cycling indirectly — losses make
-unnecessary cycling costly — but efficiency is a physical property, not a
-tunable economic parameter.  Prefer `cycle_cost` for controlling cycling.
+## 2.2 · Cycle count
 
 ```{r battery-sweep-eff, cache=TRUE}
 sweep_b_eff <- sweep_battery(
   opt_battery_week,
-  w_seq      = c(0, 0.5, 1),
+  w_seq      = W_SEQ_COARSE,
   lambda_seq = 0,
   eff_seq    = EFF_SEQ,
   Bcap = BCAP, Bc = BC, Bd = BD
 )
 ```
 
-```{r battery-cycles-eff-plot, cache=FALSE, fig.height=4.5}
+```{r battery-cycles-w-eff-plot, cache=FALSE, fig.height=4.5}
+# Order efficiency legend from highest (100%) to lowest (85%)
+eff_levels <- paste0("η = ", scales::percent(rev(EFF_SEQ), accuracy = 1))
+
 sweep_b_eff |>
-  mutate(objective = w_label(w)) |>
-  ggplot(aes(eff, n_cycles, colour = objective, group = objective)) +
-  geom_line(linewidth = 1) +
-  geom_point(size = 2.5) +
-  scale_x_continuous(
-    breaks = EFF_SEQ,
-    labels = scales::percent_format(accuracy = 1)
-  ) +
-  scale_colour_manual(values = c("#E07B54", "#9B59B6", "#4E8098")) +
-  labs(
-    title    = "Battery total cycles (7-day) vs. round-trip efficiency",
-    subtitle = "charge_eff = discharge_eff; λ = 0; cycle_cost = 0",
-    x        = "Round-trip efficiency",
-    y        = "Equivalent full cycles (7-day total)",
-    colour   = NULL
-  ) +
-  theme_bench()
-```
-
-**Note:** when `cycle_cost = 0` (default), the `"cost"` objective still reduces
-cycles when η < 1 because the MILP internalises round-trip losses in the SOC
-constraints.  The `"grid"` objective is blind to costs and continues cycling
-regardless.
-
-## 2.3 · Lambda vs. cycle count
-
-```{r battery-sweep-lambda-cycles, cache=TRUE}
-sweep_b_lam <- sweep_battery(
-  opt_battery_week,
-  w_seq      = c(0, 0.5, 1),
-  lambda_seq = LAMBDA_SEQ,
-  eff_seq    = c(1, 0.95),
-  Bcap = BCAP, Bc = BC, Bd = BD
-)
-```
-
-```{r battery-cycles-lambda-plot, cache=FALSE, fig.height=5}
-sweep_b_lam |>
-  filter(lambda > 0) |>
-  mutate(
-    objective  = w_label(w),
-    eff_lab    = paste0("η = ", scales::percent(eff, accuracy = 1))
-  ) |>
-  ggplot(aes(lambda, n_cycles, colour = objective, group = objective)) +
-  geom_line(linewidth = 0.9) +
-  geom_point(size = 2) +
-  facet_wrap(~ eff_lab, ncol = 2) +
-  scale_x_log10(
-    breaks = LAMBDA_SEQ[LAMBDA_SEQ > 0],
-    labels = as.character(LAMBDA_SEQ[LAMBDA_SEQ > 0])
-  ) +
-  scale_colour_manual(values = c("#E07B54", "#9B59B6", "#4E8098")) +
-  labs(
-    title    = "Battery total cycles (7-day) vs. λ",
-    subtitle = "Higher λ penalises rapid charge/discharge swings → fewer cycles",
-    x        = "λ (log scale)",
-    y        = "Equivalent full cycles (7-day total)",
-    colour   = NULL
-  ) +
-  theme_bench()
-```
-
-> **Important:** when `lambda > 0`, the battery solver switches from MILP to
-> continuous OSQP — this is *faster* but relaxes the binary import/export
-> exclusivity constraint.  The smoothing and the solver change happen together.
-
-## 2.4 · w vs. cycle count
-
-```{r battery-sweep-w-cycles, cache=TRUE}
-sweep_b_w <- sweep_battery(
-  opt_battery_week,
-  w_seq      = W_SEQ_COARSE,
-  lambda_seq = 0,
-  eff_seq    = c(1, 0.95),
-  Bcap = BCAP, Bc = BC, Bd = BD
-)
-```
-
-```{r battery-cycles-w-plot, cache=FALSE, fig.height=4.5}
-sweep_b_w |>
-  mutate(eff_lab = paste0("η = ", scales::percent(eff, accuracy = 1))) |>
+  mutate(eff_lab = factor(
+    paste0("η = ", scales::percent(eff, accuracy = 1)),
+    levels = eff_levels
+  )) |>
   ggplot(aes(w, n_cycles, colour = eff_lab, group = eff_lab)) +
   geom_line(linewidth = 1) +
   geom_point(size = 2.5) +
   scale_x_continuous(breaks = seq(0, 1, 0.1)) +
-  scale_colour_manual(values = c("#4E8098", "#E07B54")) +
+  scale_colour_viridis_d(option = "viridis", end = 0.85) +
   labs(
-    title    = "Battery total cycles (7-day) vs. w (combined objective weight)",
-    subtitle = "λ = 0",
+    title    = "Battery total cycles (7-day) vs. w",
+    subtitle = "λ = 0; cycle_cost = 0",
     x        = "w  (0 = cost  →  1 = grid)",
     y        = "Equivalent full cycles (7-day total)",
     colour   = "Efficiency"
@@ -513,15 +445,267 @@ sweep_b_w |>
   theme_bench()
 ```
 
+**Key insight:** `efficiency` and `cycle_cost` are parameters that influence
+the battery profile **only through the cost objective** (`w = 0`).  For the
+cost objective, round-trip losses make each charge/discharge cycle less
+profitable, so the optimizer naturally reduces cycling.  For the grid and
+combined objectives, neither `efficiency` nor `cycle_cost` enters the
+objective function.  Any reduction in cycles visible for `w = 1` or
+intermediate `w` values as efficiency drops is simply a side effect of the
+changed SOC constraints (less energy is stored and delivered per cycle), not
+a deliberate optimization decision — the battery profile is less aggressive
+only because the constraints force it, not because the optimizer is trying to
+save money.
+
+For practical control of cycling, `cycle_cost` should always be paired with
+the **cost objective**.  Using the combined or grid objective and hoping that
+efficiency limits the cycles is not a reliable strategy.
+
+The reduction in cycles for the cost objective with lower efficiency is
+beneficial from a lifetime perspective, but it comes at a price: a less
+efficient battery extracts less value from arbitrage.  The next section
+quantifies this cost in terms of energy savings.
+
+```{r battery-profiles-eff, cache=FALSE, fig.height=4}
+# Battery profiles for each efficiency (cost obj., λ = 0, cycle_cost = 0)
+profiles_eff_ts <- opt_battery_week |> select(datetime)
+for (e in EFF_SEQ) {
+  res <- bench_battery(
+    opt_battery_week,
+    opt_objective = "cost",
+    lambda        = 0,
+    charge_eff    = e,
+    discharge_eff = e,
+    cycle_cost    = 0,
+    Bcap = BCAP, Bc = BC, Bd = BD
+  )
+  profiles_eff_ts[[paste0("η = ", scales::percent(e, accuracy = 1))]] <- res$profile
+}
+
+profiles_eff_ts |>
+  timefully::plot_ts(
+    title        = "Battery profiles by efficiency  (cost obj., λ = 0, cycle_cost = 0)",
+    ylab         = "Battery power (kW)",
+    legend_width = 120
+  )
+```
+
+```{r battery-sweep-cost-opt, cache=TRUE}
+# Focus on cost objective (w=0), η=90% — lambda varies, cycle_cost = 0
+sweep_b_cost_opt_lam <- sweep_battery(
+  opt_battery_week,
+  w_seq      = 0,
+  lambda_seq = LAMBDA_SEQ,
+  eff_seq    = 0.90,
+  Bcap = BCAP, Bc = BC, Bd = BD
+)
+
+# Anchored sweep: lambda varies, cycle_cost = 0.02, η=90%
+sweep_b_cost_opt_lam_cc02 <- sweep_battery(
+  opt_battery_week,
+  w_seq      = 0,
+  lambda_seq = LAMBDA_SEQ,
+  eff_seq    = 0.90,
+  cycle_cost = 0.02,
+  Bcap = BCAP, Bc = BC, Bd = BD
+)
+
+# cycle_cost × efficiency sweep: all EFF_SEQ values, lambda = 0, w = 0
+sweep_b_cc_eff <- purrr::map(EFF_SEQ, function(e) {
+  sweep_battery_cc(
+    opt_battery_week,
+    w_seq          = 0,
+    cycle_cost_seq = CYCLE_COST_SEQ,
+    charge_eff     = e,
+    discharge_eff  = e,
+    Bcap = BCAP, Bc = BC, Bd = BD
+  ) |> mutate(eff = e)
+}) |> purrr::list_rbind()
+```
+
+```{r battery-cycles-cc-plot, cache=FALSE, fig.height=4.5}
+sweep_b_cc_eff |>
+  mutate(eff_lab = factor(
+    paste0("η = ", scales::percent(eff, accuracy = 1)),
+    levels = paste0("η = ", scales::percent(rev(EFF_SEQ), accuracy = 1))
+  )) |>
+  ggplot(aes(cycle_cost, n_cycles, colour = eff_lab, group = eff_lab)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  scale_colour_viridis_d(option = "viridis", end = 0.85) +
+  labs(
+    title    = "Cycle count vs. cycle_cost (cost objective, λ = 0)",
+    subtitle = "Higher cycle_cost directly penalises cycling in the objective",
+    x        = "cycle_cost (€/kWh)",
+    y        = "Equivalent full cycles (7-day total)",
+    colour   = "Efficiency"
+  ) +
+  theme_bench()
+```
+
+Note that the cycle count barely decreases with `cycle_cost` until values
+around 0.20 €/kWh — which likely exceeds the real battery degradation cost in
+most deployments (typical Li-ion values are 0.02 – 0.05 €/kWh).  This means
+`cycle_cost` alone is not very effective at reducing cycles unless set
+unrealistically high.  Its main benefit is the solver speedup it provides
+(see Section 3).
+
+```{r battery-profiles-cc, cache=FALSE, fig.height=4}
+# Battery profiles for each cycle_cost (cost obj., η = 90%, λ = 0)
+profiles_cc_ts <- opt_battery_week |> select(datetime)
+for (cc in CYCLE_COST_SEQ) {
+  res <- bench_battery(
+    opt_battery_week,
+    opt_objective = "cost",
+    lambda        = 0,
+    charge_eff    = 0.90,
+    discharge_eff = 0.90,
+    cycle_cost    = cc,
+    Bcap = BCAP, Bc = BC, Bd = BD
+  )
+  profiles_cc_ts[[paste0("cc = ", cc)]] <- res$profile
+}
+
+profiles_cc_ts |>
+  timefully::plot_ts(
+    title        = "Battery profiles by cycle_cost  (cost obj., η = 90%, λ = 0)",
+    ylab         = "Battery power (kW)",
+    legend_width = 120
+  )
+```
+
+```{r battery-sweep-overview, cache=TRUE}
+# Full parameter-space sweep (w × lambda × eff × cycle_cost) on the week dataset
+# Used by the overview bar charts at the end of sections 2.2 and 2.3
+obj_seq <- c("cost", "0.1", "0.5", "grid")
+sweep_b_overview <- purrr::map(c(0, 0.1), function(lam) {
+  purrr::map(obj_seq, function(obj_chr) {
+    purrr::map(c(1.0, 0.90), function(eff_val) {
+      purrr::map(c(0, 0.02), function(cc_val) {
+        obj <- if (obj_chr %in% c("grid", "cost")) obj_chr else as.numeric(obj_chr)
+        res <- bench_battery(
+          opt_battery_week,
+          opt_objective = obj,
+          lambda        = lam,
+          charge_eff    = eff_val,
+          discharge_eff = eff_val,
+          cycle_cost    = cc_val,
+          Bcap = BCAP, Bc = BC, Bd = BD
+        )
+        tibble::tibble(
+          objective  = obj_chr,
+          lambda     = lam,
+          eff        = eff_val,
+          cycle_cost = cc_val,
+          n_cycles   = res$n_cycles,
+          cost       = res$cost
+        )
+      }) |> purrr::list_rbind()
+    }) |> purrr::list_rbind()
+  }) |> purrr::list_rbind()
+}) |> purrr::list_rbind()
+```
+
+```{r battery-cycles-lambda-plot, cache=FALSE, fig.height=4}
+sweep_b_cost_opt_lam_cc02 |>
+  ggplot(aes(lambda, n_cycles)) +
+  geom_line(linewidth = 1, colour = "#E07B54") +
+  geom_point(size = 2.5, colour = "#E07B54") +
+  geom_vline(
+    xintercept = avg_import_price,
+    linetype = "dashed", colour = "grey50"
+  ) +
+  annotate("text",
+    x     = avg_import_price * 1.15,
+    y     = max(sweep_b_cost_opt_lam_cc02$n_cycles) * 0.95,
+    label = paste0("avg. import price\n≈ ", round(avg_import_price, 3), " €/kWh"),
+    size  = 3.2, colour = "grey40", hjust = 0
+  ) +
+  scale_x_continuous(
+    breaks = LAMBDA_SEQ,
+    labels = as.character(LAMBDA_SEQ)
+  ) +
+  labs(
+    title    = "Cycle count vs. λ (cost objective, η = 90%, cycle_cost = 0.02 €/kWh)",
+    subtitle = "Including a small cycle_cost anchors the baseline and removes MILP solver instability",
+    x        = "λ",
+    y        = "Equivalent full cycles (7-day total)"
+  ) +
+  theme_bench()
+```
+
+With `cycle_cost = 0.02` included (to anchor the solver in LP mode), the
+relationship between `lambda` and cycle count is cleaner and monotonic.
+Larger `lambda` consistently reduces cycles by penalising rapid
+charge/discharge transitions.
+
+```{r battery-profiles-lambda, cache=FALSE, fig.height=4}
+# Collect battery power profiles for each lambda (same settings as sweep above)
+profiles_lam_ts <- opt_battery_week |> select(datetime)
+for (lam in LAMBDA_SEQ) {
+  res <- bench_battery(
+    opt_battery_week,
+    opt_objective = "cost",
+    lambda        = lam,
+    charge_eff    = 0.90,
+    discharge_eff = 0.90,
+    cycle_cost    = 0.02,
+    Bcap = BCAP, Bc = BC, Bd = BD
+  )
+  profiles_lam_ts[[paste0("λ = ", lam)]] <- res$profile
+}
+
+profiles_lam_ts |>
+  timefully::plot_ts(
+    title        = "Battery profiles by λ  (cost obj., η = 90%, cycle_cost = 0.02 €/kWh)",
+    ylab         = "Battery power (kW)",
+    legend_width = 120
+  )
+```
+
+The average import price (≈ `r round(avg_import_price, 3)` €/kWh in this
+dataset) provides an intuitive reference for setting `lambda`: at this value,
+the smoothing penalty on a 1 kW ramp per time slot is comparable in magnitude
+to the energy cost of importing 1 kWh.  Values of `lambda` well below the
+average import price have limited effect on cycling; values at or above it
+produce meaningful smoothing.  **Recommended range: λ ≈ average import price
+to 2× average import price** — this smooths the profile noticeably while
+retaining most of the energy savings.
+
+```{r battery-cycles-overview-plot, cache=FALSE, fig.height=5.5}
+sweep_b_overview |>
+  mutate(
+    lambda_lab = paste0("λ = ", lambda),
+    objective  = factor(objective, levels = c("cost", "0.1", "0.5", "grid")),
+    eff_cc_lab = paste0(
+      ifelse(eff == 1.0, "η = 100%", "η = 90%"),
+      ", cc = ", cycle_cost
+    ),
+    eff_cc_lab = factor(eff_cc_lab, levels = c(
+      "η = 100%, cc = 0", "η = 90%, cc = 0",
+      "η = 100%, cc = 0.02", "η = 90%, cc = 0.02"
+    ))
+  ) |>
+  ggplot(aes(objective, n_cycles)) +
+  geom_col(fill = "#4E8098") +
+  facet_grid(lambda_lab ~ eff_cc_lab, scales = "fixed") +
+  labs(
+    title    = "Cycle count across all parameter combinations (1-week dataset)",
+    subtitle = "Rows = λ; columns = efficiency × cycle_cost",
+    x        = "Objective",
+    y        = "Equivalent full cycles (7-day total)"
+  ) +
+  theme_bench() +
+  theme(strip.text = element_text(size = 8))
+```
+
 ---
 
-# 3 · Battery optimization — energy cost
-
-## 3.1 · Efficiency vs. cost change
+## 2.3 · Energy savings
 
 ```{r battery-cost-eff-plot, cache=FALSE, fig.height=4.5}
-# Reuse sweep_b_eff from Section 2.1
 sweep_b_eff |>
+  filter(w %in% c(0, 0.5, 1)) |>
   mutate(
     cost_savings_pct = (base_battery$cost - cost) /
                         abs(base_battery$cost) * 100,
@@ -538,7 +722,7 @@ sweep_b_eff |>
   scale_colour_manual(values = c("#E07B54", "#9B59B6", "#4E8098")) +
   labs(
     title    = "Energy cost savings vs. round-trip efficiency",
-    subtitle = "Positive = cheaper than no-battery baseline; λ = 0",
+    subtitle = "Positive = cheaper than no-battery baseline; λ = 0; cycle_cost = 0",
     x        = "Round-trip efficiency",
     y        = "Cost savings vs. no-battery baseline (%)",
     colour   = NULL
@@ -546,401 +730,253 @@ sweep_b_eff |>
   theme_bench()
 ```
 
-## 3.2 · Lambda vs. cost change
+Round-trip efficiency losses are now included in the cost evaluation:
+charging draws `B / charge_eff` from the grid (more than stored), and
+discharging delivers only `B × discharge_eff` back (less than released from
+the SOC).  This means the savings shown already reflect the full energy cost of
+operating the battery at a given efficiency.
 
-```{r battery-cost-lambda-plot, cache=FALSE, fig.height=5}
-# Reuse sweep_b_lam from Section 2.2
-sweep_b_lam |>
-  filter(lambda > 0) |>
+For the **cost objective**, lower efficiency directly erodes arbitrage profits
+— the battery draws more from the grid when charging and delivers less when
+discharging, so the energy-cost saving shrinks as η falls.  For the **grid
+objective**, efficiency does not enter the objective function, so the optimizer
+cycles regardless; the savings change stems entirely from the extra grid energy
+drawn to compensate for losses, not from a deliberate change in strategy.
+
+```{r battery-savings-cc-plot, cache=FALSE, fig.height=4.5}
+sweep_b_cc_eff |>
   mutate(
     cost_savings_pct = (base_battery$cost - cost) /
                         abs(base_battery$cost) * 100,
-    objective = w_label(w),
-    eff_lab   = paste0("η = ", scales::percent(eff, accuracy = 1))
+    eff_lab = factor(
+      paste0("η = ", scales::percent(eff, accuracy = 1)),
+      levels = paste0("η = ", scales::percent(rev(EFF_SEQ), accuracy = 1))
+    )
   ) |>
-  ggplot(aes(lambda, cost_savings_pct, colour = objective, group = objective)) +
-  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
-  geom_line(linewidth = 0.9) +
-  geom_point(size = 2) +
-  facet_wrap(~ eff_lab, ncol = 2) +
-  scale_x_log10(
-    breaks = LAMBDA_SEQ[LAMBDA_SEQ > 0],
-    labels = as.character(LAMBDA_SEQ[LAMBDA_SEQ > 0])
-  ) +
-  scale_colour_manual(values = c("#E07B54", "#9B59B6", "#4E8098")) +
-  labs(
-    title    = "Energy cost savings vs. λ",
-    x        = "λ (log scale)",
-    y        = "Cost savings vs. no-battery baseline (%)",
-    colour   = NULL
-  ) +
-  theme_bench()
-```
-
-## 3.3 · w vs. cost change
-
-```{r battery-cost-w-plot, cache=FALSE, fig.height=4.5}
-# Reuse sweep_b_w from Section 2.3
-sweep_b_w |>
-  mutate(
-    cost_savings_pct = (base_battery$cost - cost) /
-                        abs(base_battery$cost) * 100,
-    eff_lab = paste0("η = ", scales::percent(eff, accuracy = 1))
-  ) |>
-  ggplot(aes(w, cost_savings_pct, colour = eff_lab, group = eff_lab)) +
+  ggplot(aes(cycle_cost, cost_savings_pct, colour = eff_lab, group = eff_lab)) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
   geom_line(linewidth = 1) +
   geom_point(size = 2.5) +
-  scale_x_continuous(breaks = seq(0, 1, 0.1)) +
-  scale_colour_manual(values = c("#4E8098", "#E07B54")) +
+  scale_colour_viridis_d(option = "viridis", end = 0.85) +
   labs(
-    title    = "Energy cost savings vs. w",
-    subtitle = "λ = 0",
-    x        = "w  (0 = cost  →  1 = grid)",
+    title    = "Energy savings vs. cycle_cost (cost objective, λ = 0)",
+    subtitle = "Efficiency losses included in cost; each line is a different round-trip efficiency",
+    x        = "cycle_cost (€/kWh)",
     y        = "Cost savings vs. no-battery baseline (%)",
     colour   = "Efficiency"
   ) +
   theme_bench()
 ```
 
+With efficiency losses now included in the cost evaluation, each line shows the
+true energy savings at a given efficiency — no manual adjustment is needed.
+Higher efficiency consistently yields better savings because charging losses are
+smaller.  `cycle_cost` has little effect on the energy savings themselves
+(the lines are nearly flat), which confirms that its main role is to limit
+cycling and speed up the solver rather than improve economic performance.
+
+```{r battery-savings-lambda-plot, cache=FALSE, fig.height=4}
+sweep_b_cost_opt_lam_cc02 |>
+  mutate(
+    cost_savings_pct = (base_battery$cost - cost) /
+                        abs(base_battery$cost) * 100
+  ) |>
+  ggplot(aes(lambda, cost_savings_pct)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
+  geom_line(linewidth = 1, colour = "#E07B54") +
+  geom_point(size = 2.5, colour = "#E07B54") +
+  geom_vline(
+    xintercept = avg_import_price,
+    linetype = "dashed", colour = "grey50"
+  ) +
+  annotate("text",
+    x     = avg_import_price * 1.15,
+    y     = max(sweep_b_cost_opt_lam_cc02 |>
+                  mutate(s = (base_battery$cost - cost) / abs(base_battery$cost) * 100) |>
+                  pull(s)) * 0.92,
+    label = paste0("avg. import price\n≈ ", round(avg_import_price, 3), " €/kWh"),
+    size  = 3.2, colour = "grey40", hjust = 0
+  ) +
+  scale_x_continuous(
+    breaks = LAMBDA_SEQ,
+    labels = as.character(LAMBDA_SEQ)
+  ) +
+  labs(
+    title    = "Energy savings vs. λ (cost objective, η = 90%, cycle_cost = 0.02 €/kWh)",
+    subtitle = "Larger λ reduces the amplitude of charge/discharge, lowering both cycles and savings",
+    x        = "λ",
+    y        = "Cost savings vs. no-battery baseline (%)"
+  ) +
+  theme_bench()
+```
+
+The savings decline as `lambda` increases, consistent with the cycle count
+reduction: smoother charge/discharge profiles exploit the price spread less
+aggressively.  Setting `lambda` near the average import price still retains
+most of the energy savings while meaningfully reducing the cycle count — this
+confirms the λ ≈ average import price recommendation from the previous section.
+
+```{r battery-savings-overview-plot, cache=FALSE, fig.height=5.5}
+sweep_b_overview |>
+  mutate(
+    cost_savings_pct = (base_battery$cost - cost) / abs(base_battery$cost) * 100,
+    lambda_lab = paste0("λ = ", lambda),
+    objective  = factor(objective, levels = c("cost", "0.1", "0.5", "grid")),
+    eff_cc_lab = paste0(
+      ifelse(eff == 1.0, "η = 100%", "η = 90%"),
+      ", cc = ", cycle_cost
+    ),
+    eff_cc_lab = factor(eff_cc_lab, levels = c(
+      "η = 100%, cc = 0", "η = 90%, cc = 0",
+      "η = 100%, cc = 0.02", "η = 90%, cc = 0.02"
+    ))
+  ) |>
+  ggplot(aes(objective, cost_savings_pct)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
+  geom_col(fill = "#4E8098") +
+  facet_grid(lambda_lab ~ eff_cc_lab, scales = "fixed") +
+  labs(
+    title    = "Energy cost savings across all parameter combinations (1-week dataset)",
+    subtitle = "Rows = λ; columns = efficiency × cycle_cost; efficiency losses included in cost",
+    x        = "Objective",
+    y        = "Cost savings vs. no-battery baseline (%)"
+  ) +
+  theme_bench() +
+  theme(strip.text = element_text(size = 8))
+```
+
 ---
 
-# 4 · Computation time
+# 3 · Computation time
 
-> ⚠️ This section runs the full timing sweep including year-length datasets.
-> It may take **5–20 minutes** to complete on first run; results are cached.
+> ⚠️ This section runs the timing sweep on the full 1-year dataset (35 040 rows) for λ = 0, 0.01, and 0.1.
+> It may take **10–30 minutes** to complete on first run; results are cached.
 
 ```{r timing-data, cache=TRUE}
-# Build datasets of three different lengths from the same energy_profiles year ─
-data_lengths <- list(
-  "1 week  (672 rows)"    = profiles_week,
-  "1 month (2 976 rows)"  = flextools::energy_profiles |>
-                              filter(lubridate::month(datetime) == 1),
-  "1 year  (35 040 rows)" = profiles_year
-)
+objectives <- c("cost", "0.1", "0.5", "grid")
+timing_lam_seq <- c(0, 0.01, 0.1)
 
-objectives <- c("grid", "cost", "0.1", "0.5")
-
-# ── Demand timing ─────────────────────────────────────────────────────────────
-timing_demand <- purrr::map(names(data_lengths), function(len_lab) {
-  purrr::map(c(0, 0.1), function(lam) {
-    purrr::map(objectives, function(obj_chr) {
-      obj <- if (obj_chr %in% c("grid", "cost")) obj_chr else as.numeric(obj_chr)
-      d   <- demand_opt_data(data_lengths[[len_lab]])
-      res <- bench_demand(d, opt_objective = obj, lambda = lam)
-      tibble::tibble(
-        optimizer = "demand",
-        objective = obj_chr,
-        lambda    = lam,
-        n_rows    = len_lab,
-        time_sec  = res$time_sec
-      )
-    }) |> purrr::list_rbind()
+# ── Demand timing (1-year dataset, λ = 0 / 0.01 / 0.1) ───────────────────────
+timing_demand <- purrr::map(timing_lam_seq, function(lam) {
+  purrr::map(objectives, function(obj_chr) {
+    obj <- if (obj_chr %in% c("grid", "cost")) obj_chr else as.numeric(obj_chr)
+    d   <- demand_opt_data(profiles_year) |>
+      mutate(price_exported = price_imported - 0.05)
+    res <- bench_demand(d, opt_objective = obj, lambda = lam)
+    tibble::tibble(
+      objective = obj_chr,
+      lambda    = lam,
+      time_sec  = res$time_sec
+    )
   }) |> purrr::list_rbind()
 }) |> purrr::list_rbind()
 
-# ── Battery timing ────────────────────────────────────────────────────────────
-timing_battery <- purrr::map(names(data_lengths), function(len_lab) {
-  purrr::map(c(0, 0.1), function(lam) {
-    purrr::map(objectives, function(obj_chr) {
-      obj <- if (obj_chr %in% c("grid", "cost")) obj_chr else as.numeric(obj_chr)
-      d   <- battery_opt_data(data_lengths[[len_lab]])
-      res <- bench_battery(d, opt_objective = obj, lambda = lam,
-                           Bcap = BCAP, Bc = BC, Bd = BD)
-      tibble::tibble(
-        optimizer = "battery",
-        objective = obj_chr,
-        lambda    = lam,
-        n_rows    = len_lab,
-        time_sec  = res$time_sec
-      )
+# ── Battery timing (1-year dataset, λ = 0 / 0.01 / 0.1) ─────────────────────
+timing_battery <- purrr::map(timing_lam_seq, function(lam) {
+  purrr::map(objectives, function(obj_chr) {
+    purrr::map(c(1.0, 0.90), function(eff_val) {
+      purrr::map(c(0, 0.02), function(cc_val) {
+        obj <- if (obj_chr %in% c("grid", "cost")) obj_chr else as.numeric(obj_chr)
+        d   <- battery_opt_data(profiles_year) |>
+          mutate(price_exported = price_imported - 0.05)
+        res <- bench_battery(d, opt_objective = obj, lambda = lam,
+                             charge_eff = eff_val, discharge_eff = eff_val,
+                             cycle_cost = cc_val,
+                             Bcap = BCAP, Bc = BC, Bd = BD)
+        tibble::tibble(
+          objective  = obj_chr,
+          lambda     = lam,
+          eff        = eff_val,
+          cycle_cost = cc_val,
+          time_sec   = res$time_sec
+        )
+      }) |> purrr::list_rbind()
     }) |> purrr::list_rbind()
   }) |> purrr::list_rbind()
 }) |> purrr::list_rbind()
-
-timing_all <- dplyr::bind_rows(timing_demand, timing_battery)
 ```
 
-## 4.1 · Summary table
+## 3.1 · Demand computation time
 
-```{r timing-table, cache=FALSE}
-timing_all |>
-  mutate(time_sec = round(time_sec, 2)) |>
-  tidyr::pivot_wider(
-    names_from  = n_rows,
-    values_from = time_sec
-  ) |>
-  arrange(optimizer, lambda, objective) |>
-  knitr::kable(
-    col.names = c("Optimizer", "Objective", "λ",
-                  "1 week", "1 month", "1 year"),
-    caption   = "Computation time (seconds)",
-    align     = "llrrrr"
-  )
-```
-
-## 4.2 · Bar chart
-
-```{r timing-bar, cache=FALSE, fig.height=5}
-timing_all |>
+```{r timing-demand-bar, cache=FALSE, fig.height=5.5}
+timing_demand |>
   mutate(
-    lambda_lab = paste0("λ = ", lambda),
-    objective  = factor(objective, levels = c("grid", "0.1", "0.5", "cost"))
+    lambda_lab = factor(paste0("λ = ", lambda),
+                        levels = paste0("λ = ", timing_lam_seq)),
+    objective  = factor(objective, levels = c("cost", "0.1", "0.5", "grid"))
   ) |>
-  ggplot(aes(objective, time_sec, fill = n_rows)) +
-  geom_col(position = "dodge") +
-  facet_grid(optimizer ~ lambda_lab, scales = "free_y") +
-  scale_fill_brewer(palette = "Blues", direction = -1) +
+  ggplot(aes(objective, time_sec)) +
+  geom_col(fill = "#4E8098") +
+  facet_grid(lambda_lab ~ ., scales = "fixed") +
   labs(
-    title    = "Computation time by objective, λ, dataset length and optimizer",
-    subtitle = "Battery 'cost' with λ = 0 uses MILP — expect much longer runtimes",
+    title    = "Demand computation time by objective and λ (1-year dataset)",
+    subtitle = "'cost' with λ = 0 uses MILP — expect longer runtimes",
     x        = "Objective",
-    y        = "Time (seconds)",
-    fill     = "Dataset length"
-  ) +
-  theme_bench() +
-  theme(legend.position = "right")
-```
-
-> **Notes on solver choice:**
-> * **`"grid"`** and combined objectives use a **QP** (quadratic program) solved
->   by OSQP — fast and scales linearly with time-series length.
-> * **`"cost"`** with `lambda = 0` uses a **MILP** (mixed-integer linear program,
->   via HiGHS) to enforce binary import/export exclusivity — significantly
->   slower, especially for long datasets.
-> * Setting **`lambda > 0`** for the cost objective switches the solver to OSQP
->   (continuous relaxation), recovering fast solve times at the expense of exact
->   binary constraints.
-
----
-
-# 5 · Additional analyses
-
-## 5.1 · Load duration curves
-
-A load duration curve sorts power values from highest to lowest.  The area
-under the curve is proportional to total energy imported from the grid.
-
-```{r ldc-demand, cache=TRUE}
-ldc_demand_res <- list(
-  baseline  = list(profile = opt_demand_week$flexible),
-  grid      = bench_demand(opt_demand_week, "grid"),
-  cost      = bench_demand(opt_demand_week, "cost"),
-  combined  = bench_demand(opt_demand_week, 0.5)
-)
-```
-
-```{r ldc-demand-plot, cache=FALSE, fig.height=4.5}
-production <- opt_demand_week$production
-
-ldc_df <- purrr::imap(ldc_demand_res, function(res, nm) {
-  O   <- res$profile
-  net <- O - production
-  imp <- pmax(net, 0)
-  tibble::tibble(
-    scenario = nm,
-    rank     = seq_along(imp) / length(imp),
-    imported = sort(imp, decreasing = TRUE)
-  )
-}) |> purrr::list_rbind()
-
-ggplot(ldc_df, aes(rank, imported, colour = scenario)) +
-  geom_line(linewidth = 1) +
-  scale_x_continuous(labels = scales::percent_format()) +
-  scale_colour_manual(
-    values = c(baseline = "grey60", grid = "#4E8098",
-               cost = "#E07B54", combined = "#9B59B6"),
-    labels = c(baseline = "No optimization", grid = "Grid (w=1)",
-               cost = "Cost (w=0)", combined = "Combined (w=0.5)")
-  ) +
-  labs(
-    title    = "Load duration curve — imported power from grid (demand opt.)",
-    subtitle = "Area under curve = total imported energy",
-    x        = "% of time intervals (sorted by power)",
-    y        = "Imported power (kW)",
-    colour   = NULL
+    y        = "Time (seconds)"
   ) +
   theme_bench()
 ```
 
-```{r ldc-battery, cache=TRUE}
-ldc_battery_res <- list(
-  baseline = list(profile = rep(0, nrow(opt_battery_week))),
-  grid     = bench_battery(opt_battery_week, "grid",  Bcap=BCAP,Bc=BC,Bd=BD),
-  cost     = bench_battery(opt_battery_week, "cost",  Bcap=BCAP,Bc=BC,Bd=BD),
-  combined = bench_battery(opt_battery_week, 0.5,     Bcap=BCAP,Bc=BC,Bd=BD)
-)
-```
+## 3.2 · Battery computation time
 
-```{r ldc-battery-plot, cache=FALSE, fig.height=4.5}
-static_batt <- opt_battery_week$static
-prod_batt   <- opt_battery_week$production
-
-ldc_batt_df <- purrr::imap(ldc_battery_res, function(res, nm) {
-  net <- res$profile + static_batt - prod_batt
-  imp <- pmax(net, 0)
-  tibble::tibble(
-    scenario = nm,
-    rank     = seq_along(imp) / length(imp),
-    imported = sort(imp, decreasing = TRUE)
-  )
-}) |> purrr::list_rbind()
-
-ggplot(ldc_batt_df, aes(rank, imported, colour = scenario)) +
-  geom_line(linewidth = 1) +
-  scale_x_continuous(labels = scales::percent_format()) +
-  scale_colour_manual(
-    values = c(baseline = "grey60", grid = "#4E8098",
-               cost = "#E07B54", combined = "#9B59B6"),
-    labels = c(baseline = "No battery", grid = "Grid (w=1)",
-               cost = "Cost (w=0)", combined = "Combined (w=0.5)")
-  ) +
-  labs(
-    title    = "Load duration curve — imported power from grid (battery opt.)",
-    x        = "% of time intervals (sorted by power)",
-    y        = "Imported power (kW)",
-    colour   = NULL
-  ) +
-  theme_bench()
-```
-
-## 5.2 · Battery State-of-Charge profiles
-
-```{r soc-profiles, cache=TRUE}
-soc_scenarios <- list(
-  grid     = ldc_battery_res$grid$profile,
-  cost     = ldc_battery_res$cost$profile,
-  combined = ldc_battery_res$combined$profile
-)
-
-soc_df <- purrr::imap(soc_scenarios, function(B, nm) {
-  # get_storage_level returns length(power) elements (SOC at start of each slot)
-  soc <- get_storage_level(B, init = 0, time_resolution = 15)
-  tibble::tibble(
-    scenario = nm,
-    datetime = opt_battery_week$datetime,
-    soc_pct  = soc / BCAP * 100
-  )
-}) |> purrr::list_rbind()
-```
-
-```{r soc-plot, cache=FALSE, fig.height=4.5}
-ggplot(soc_df, aes(datetime, soc_pct, colour = scenario)) +
-  geom_line(linewidth = 0.8) +
-  scale_colour_manual(
-    values = c(grid = "#4E8098", cost = "#E07B54", combined = "#9B59B6"),
-    labels = c(grid = "Grid (w=1)", cost = "Cost (w=0)", combined = "Combined (w=0.5)")
-  ) +
-  scale_y_continuous(limits = c(0, 100), labels = scales::percent_format(scale = 1)) +
-  labs(
-    title    = "Battery State-of-Charge profiles by objective",
-    subtitle = paste0("Bcap = ", BCAP, " kWh  |  Bc = Bd = ", BC, " kW  |  λ = 0"),
-    x        = NULL,
-    y        = "State of Charge (%)",
-    colour   = NULL
-  ) +
-  theme_bench()
-```
-
-**Grid objective** charges when surplus solar is available and discharges to
-avoid importing.  **Cost objective** charges at low-price hours (off-peak
-night) and discharges during expensive peak hours — a classic arbitrage
-pattern.  **Combined** shows intermediate behaviour.
-
-## 5.3 · Sensitivity heatmap — peak reduction
-
-```{r demand-heatmap-sweep, cache=TRUE}
-heatmap_seq_w   <- seq(0, 1, by = 0.1)
-heatmap_seq_lam <- c(0, 0.01, 0.05, 0.1, 0.5, 1)
-
-sweep_heatmap <- sweep_demand(
-  opt_demand_week,
-  w_seq      = heatmap_seq_w,
-  lambda_seq = heatmap_seq_lam
-)
-```
-
-```{r demand-heatmap-plot, cache=FALSE, fig.height=5}
-sweep_heatmap |>
+```{r timing-battery-bar, cache=FALSE, fig.height=7}
+timing_battery |>
   mutate(
-    peak_reduction_pct = (base_demand$peak_from_grid - peak_from_grid) /
-                          base_demand$peak_from_grid * 100,
-    lambda_lab = paste0("λ=", lambda)
-  ) |>
-  ggplot(aes(factor(w), factor(lambda), fill = peak_reduction_pct)) +
-  geom_tile(colour = "white", linewidth = 0.5) +
-  geom_text(aes(label = sprintf("%.1f%%", peak_reduction_pct)),
-            size = 3, colour = "white") +
-  scale_fill_viridis_c(option = "magma", direction = -1, name = "Peak\nreduction (%)") +
-  labs(
-    title    = "Sensitivity heatmap: peak-from-grid reduction (demand opt.)",
-    subtitle = "Each cell shows % peak reduction vs. unoptimized baseline",
-    x        = "w  (0 = cost  →  1 = grid)",
-    y        = "λ (ramping penalty)"
-  ) +
-  theme_bench() +
-  theme(legend.position = "right")
-```
-
-## 5.4 · Round-trip efficiency: cost per kWh cycled
-
-This analysis quantifies how much each kWh cycled through the battery costs
-(or saves) — a direct measure of how efficiency losses erode economic
-benefits.
-
-```{r battery-cost-per-cycle, cache=TRUE}
-sweep_b_eff_cost <- sweep_battery(
-  opt_battery_week,
-  w_seq      = c(0, 0.5, 1),
-  lambda_seq = 0,
-  eff_seq    = EFF_SEQ,
-  Bcap = BCAP, Bc = BC, Bd = BD
-)
-```
-
-```{r battery-cost-per-cycle-plot, cache=FALSE, fig.height=4.5}
-sweep_b_eff_cost |>
-  mutate(
-    # n_cycles = total equiv. full cycles over 7 days (kWh discharged / Bcap)
-    # total_kwh_cycled = n_cycles * Bcap gives total kWh discharged
-    total_kwh_cycled = n_cycles * BCAP,
-    extra_cost       = cost - base_battery$cost,
-    # negative = savings per kWh; positive = extra cost per kWh
-    eur_per_kwh = ifelse(
-      total_kwh_cycled > 1e-6,
-      extra_cost / total_kwh_cycled,
-      NA_real_
+    lambda_lab = factor(paste0("λ = ", lambda),
+                        levels = paste0("λ = ", timing_lam_seq)),
+    objective  = factor(objective, levels = c("cost", "0.1", "0.5", "grid")),
+    eff_cc_lab = paste0(
+      ifelse(eff == 1.0, "η = 100%", "η = 90%"),
+      ", cc = ", cycle_cost
     ),
-    objective = w_label(w)
+    eff_cc_lab = factor(eff_cc_lab, levels = c(
+      "η = 100%, cc = 0", "η = 90%, cc = 0",
+      "η = 100%, cc = 0.02", "η = 90%, cc = 0.02"
+    ))
   ) |>
-  filter(!is.na(eur_per_kwh)) |>
-  ggplot(aes(eff, eur_per_kwh, colour = objective, group = objective)) +
-  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey70") +
-  geom_line(linewidth = 1) +
-  geom_point(size = 2.5) +
-  scale_x_continuous(
-    breaks = EFF_SEQ,
-    labels = scales::percent_format(accuracy = 1)
-  ) +
-  scale_colour_manual(values = c("#E07B54", "#9B59B6", "#4E8098")) +
+  ggplot(aes(objective, time_sec)) +
+  geom_col(fill = "#4E8098") +
+  facet_grid(lambda_lab ~ eff_cc_lab, scales = "fixed") +
   labs(
-    title    = "Net cost per kWh cycled vs. round-trip efficiency",
-    subtitle = "Negative = savings; positive = extra cost compared to no-battery baseline",
-    x        = "Round-trip efficiency",
-    y        = "€ per kWh cycled",
-    colour   = NULL
+    title    = "Battery computation time by objective, λ, efficiency, and cycle_cost (1-year dataset)",
+    subtitle = "'cost' with λ = 0 and cycle_cost = 0 uses MILP; cycle_cost > 0 switches to LP (faster)",
+    x        = "Objective",
+    y        = "Time (seconds)"
   ) +
-  theme_bench()
+  theme_bench() +
+  theme(strip.text = element_text(size = 8))
 ```
 
-**Interpretation:** at η = 1 the cost objective extracts maximum savings per
-kWh cycled (buy cheap, sell expensive).  As efficiency drops, round-trip
-losses erode those savings.  The grid objective may show increasing costs
-per kWh cycled because it cycles aggressively regardless of prices.
+**Key takeaways from the computation time analysis:**
+
+* **Grid optimization is always fast** — regardless of dataset length, lambda,
+  efficiency, or cycle_cost, the QP solver (OSQP) solves the grid objective
+  in a fraction of a second.  No parameter tuning is needed to keep it quick.
+
+* **For cost optimization, `cycle_cost` is the most impactful parameter** — with
+  `cycle_cost = 0`, the cost objective requires a MILP (HiGHS) that scales
+  poorly with dataset length.  Setting even a small `cycle_cost > 0` (e.g.
+  0.02 €/kWh) converts the problem to a pure LP, recovering solve times
+  comparable to the grid objective.  This is the recommended approach for
+  cost optimization in production.
+
+* **For combined objectives, `lambda` is the main lever** — with `lambda = 0`,
+  combined objectives already use a QP (fast), but adding `lambda > 0` on a
+  combined objective provides limited practical benefit: the grid component
+  already smooths the spiky profile that `lambda` would otherwise target.
+  Using `lambda` makes most sense when `w = 0` (pure cost) and the goal is to
+  reduce profile spikiness without fully switching to the grid objective.
+
+* **Efficiency (`η < 1`) has a negligible effect on computation time** —
+  efficiency changes the SOC constraints but does not alter the solver type.
+  The timing difference between η = 100% and η = 90% is minimal.
 
 ---
 
-# 6 · Summary
+# 4 · Summary and guidelines
+
+The table below gives a quick parameter reference.  The guidelines that follow
+summarise the recommended use of each objective.
 
 ```{r summary-table, cache=FALSE}
 tibble::tibble(
@@ -950,34 +986,70 @@ tibble::tibble(
     "λ (ramping penalty)",
     "λ (ramping penalty)",
     "λ (ramping penalty)",
+    "cycle_cost (battery)",
+    "cycle_cost (battery)",
     "Efficiency (battery)",
     "Efficiency (battery)",
-    "Solver (demand)",
-    "Solver (battery cost, λ=0)",
-    "Solver (battery cost, λ>0)"
+    "Solver (cost, λ=0, cc=0)",
+    "Solver (cost, λ>0 or cc>0)",
+    "Solver (grid / combined)"
   ),
   Value = c(
     "0 (cost)", "1 (grid)",
     "0", "0.01–0.1", "≥ 0.5",
-    "< 1", "= 1",
-    "QP / MIQP (OSQP / HiGHS)",
-    "MILP (HiGHS)", "QP (OSQP)"
+    "0", "> 0 (e.g. 0.02)",
+    "< 1 (e.g. 0.9)", "= 1",
+    "MILP (HiGHS)", "LP or QP (OSQP)", "QP (OSQP)"
   ),
   Effect = c(
-    "Minimise energy cost; may increase peak",
-    "Minimise peak; may increase cost",
+    "Minimise energy cost; may increase peak; MILP solver",
+    "Minimise peak; may increase cost; fast QP solver",
     "No smoothing; sharpest profile changes",
-    "Recommended range: smooth profiles, minor objective loss",
-    "Heavy smoothing; profile barely moves, objective near baseline",
-    "Fewer cycles; MILP internalises losses in SOC",
-    "Efficiency ignored in constraints",
-    "Fast, scales well with time-series length",
+    "Recommended: smooth profiles, minor objective loss",
+    "Heavy smoothing; profile barely moves, savings near zero",
+    "No cycling penalty; MILP solver for cost objective",
+    "Reduces cycles; switches to LP (faster than MILP)",
+    "Fewer cycles for cost obj.; losses modelled in SOC constraints",
+    "Efficiency not modelled in constraints",
     "Slow (especially for long datasets)",
-    "Fast (binary constraint relaxed)"
+    "Fast (LP or continuous relaxation)",
+    "Fast; scales well with time-series length"
   )
 ) |>
   knitr::kable(caption = "Quick reference: parameter effects")
 ```
+
+**Grid optimization (`w = 1`)**
+Use this when the primary goal is to reduce peak demand from the grid and
+the energy cost is a secondary concern.  The solver is always fast (QP),
+parameters like `lambda`, `cycle_cost`, and `efficiency` have no impact on
+computation time, and the resulting profile is already smooth.  There is no
+need to tune `lambda` for this objective.
+
+**Cost optimization (`w = 0`)**
+Use this when minimising the energy bill is the primary goal.  Key
+recommendations:
+
+* Always set `cycle_cost > 0` (e.g. 0.02 €/kWh) — this switches the MILP to
+  an LP (dramatically faster) and is economically meaningful as a degradation
+  cost.
+* Set `lambda` ≈ average import price to smooth the charge/discharge profile
+  without sacrificing significant savings.  Together, `cycle_cost` and
+  `lambda` give good control over the cycle count vs. savings tradeoff.
+* Lower round-trip efficiency reduces cycles and savings proportionally; use
+  the actual measured η for realistic results.
+
+**Combined optimization (`w ∈ (0, 1)`)**
+Use this when both cost and peak objectives matter.  The crossover `w` (where
+both metrics are equal on a percentage basis) is a natural starting point.
+Note that:
+
+* The grid component already smooths the profile, making `lambda` largely
+  redundant for combined objectives.
+* Cycling behaviour is dominated by the grid component even at moderate `w`
+  values, so `cycle_cost` remains the recommended tool for limiting cycles.
+* The solver is a fast QP for all `w > 0` (with or without `lambda`), so
+  computation time is not a concern.
 
 ---
 

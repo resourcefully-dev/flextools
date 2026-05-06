@@ -268,165 +268,6 @@ battery_capacity_window <- function(
 }
 
 
-# Cost/combined solvers: X = [B, I, E] ----------------------------------------
-
-battery_cost_build_constraints <- function(
-  G,
-  L,
-  Bcap,
-  Bc,
-  Bd,
-  SOCmin,
-  SOCmax,
-  SOCini,
-  import_capacity,
-  export_capacity
-) {
-  n <- length(G)
-  cumsumMat <- triangulate_matrix(matrix(1, n, n), "l")
-  zeroMat <- matrix(0, n, n)
-
-  lb_soc <- rep((SOCmin - SOCini) / 100 * Bcap, n)
-  ub_soc <- rep((SOCmax - SOCini) / 100 * Bcap, n)
-
-  import_capacity <- as.numeric(rep_len(import_capacity, n))
-  export_capacity <- as.numeric(rep_len(export_capacity, n))
-
-  # Physical per-slot mode upper bounds for MILP and OSQP cap
-  # Snap sub-machine-epsilon residuals to zero to avoid HiGHS near-zero warnings
-  import_mode_ub <- pmax(L - G + Bc, 0)
-  export_mode_ub <- pmax(G - L + Bd, 0)
-  import_mode_ub[import_mode_ub < 1e-9] <- 0
-  export_mode_ub[export_mode_ub < 1e-9] <- 0
-  import_mode_ub[is.finite(import_capacity)] <- pmin(
-    import_mode_ub[is.finite(import_capacity)],
-    import_capacity[is.finite(import_capacity)]
-  )
-  export_mode_ub[is.finite(export_capacity)] <- pmin(
-    export_mode_ub[is.finite(export_capacity)],
-    export_capacity[is.finite(export_capacity)]
-  )
-
-  # X = [B_1..B_n, I_1..I_n, E_1..E_n]
-  # Balance: B - I + E = G - L  (equality)
-  A_balance <- cbind(diag(n), -diag(n), diag(n))
-  # SOC: cumsum(B) in [lb_soc, ub_soc]
-  A_soc <- cbind(cumsumMat, zeroMat, zeroMat)
-  # Energy: sum(B) = 0
-  A_energy <- matrix(c(rep(1, n), rep(0, 2 * n)), nrow = 1)
-
-  A <- rbind(A_balance, A_soc, A_energy)
-  lb <- c(G - L, lb_soc, 0)
-  ub <- c(G - L, ub_soc, 0)
-
-  list(
-    n = n,
-    A = A,
-    lb = lb,
-    ub = ub,
-    lb_B = rep(-Bd, n),
-    ub_B = rep(Bc, n),
-    lb_I = rep(0, n),
-    ub_I = import_capacity,
-    lb_E = rep(0, n),
-    ub_E = export_capacity,
-    import_mode_ub = import_mode_ub,
-    export_mode_ub = export_mode_ub
-  )
-}
-
-
-battery_solve_cost_milp_window <- function(
-  G,
-  L,
-  PI,
-  PE,
-  P_B,
-  q_B,
-  Bcap,
-  Bc,
-  Bd,
-  SOCmin,
-  SOCmax,
-  SOCini,
-  import_capacity,
-  export_capacity
-) {
-  G <- round(G, 2)
-  L <- round(L, 2)
-  d <- battery_cost_build_constraints(
-    G,
-    L,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity
-  )
-  n <- d$n
-
-  # Extend constraint matrix with mode column block
-  A_base <- cbind(d$A, matrix(0, nrow(d$A), n))
-
-  # Import mode: I_t <= import_mode_ub_t * m_t
-  A_import_mode <- cbind(
-    matrix(0, n, n), # B
-    diag(n), # I
-    matrix(0, n, n), # E
-    -diag(d$import_mode_ub) # -M*m
-  )
-  # Export mode: E_t <= export_mode_ub_t * (1 - m_t)
-  A_export_mode <- cbind(
-    matrix(0, n, n), # B
-    matrix(0, n, n), # I
-    diag(n), # E
-    diag(d$export_mode_ub) # M*m
-  )
-
-  A_full <- rbind(A_base, A_import_mode, A_export_mode)
-  lhs_full <- c(d$lb, rep(-Inf, 2 * n))
-  rhs_full <- c(d$ub, rep(0, n), d$export_mode_ub)
-
-  Q_full <- if (!is.null(P_B)) {
-    Q <- matrix(0, 4 * n, 4 * n)
-    Q[seq_len(n), seq_len(n)] <- P_B
-    Q
-  } else {
-    NULL
-  }
-  L_full <- c(
-    if (!is.null(q_B)) q_B else rep(0, n),
-    PI,
-    -PE,
-    rep(0, n)
-  )
-
-  result <- highs::highs_solve(
-    Q = Q_full,
-    L = L_full,
-    lower = c(d$lb_B, d$lb_I, d$lb_E, rep(0, n)),
-    upper = c(d$ub_B, d$ub_I, d$ub_E, rep(1, n)),
-    A = A_full,
-    lhs = lhs_full,
-    rhs = rhs_full,
-    types = c(rep(1L, 3 * n), rep(2L, n)),
-    control = optimization_highs_options(include_mip_gap = TRUE)
-  )
-
-  if (
-    identical(result$status_message, "Optimal") &&
-      !is.null(result$primal_solution)
-  ) {
-    return(as.numeric(result$primal_solution[seq_len(n)]))
-  }
-
-  rep(0, n)
-}
-
-
 # Unified cost solver: X = [B_c, B_d, I, E] (+ m when cycle_cost == 0) ---------
 
 #' @keywords internal
@@ -503,31 +344,137 @@ battery_solve_cost_unified_window <- function(
   # Penalise each kW\u00b7slot of discharge: 1 kW\u00b7slot / Bcap = one full-cycle fraction.
   cycle_coef <- cycle_cost / Bcap
 
-  # Build optional quadratic term on net battery power (B_c - B_d)
-  # Q block for [B_c, B_d, I, E]: encodes 0.5*(B_c-B_d)^T P_B (B_c-B_d)
-  build_Q_4n <- function(P_B, size) {
-    Q <- matrix(0, 4 * size, 4 * size)
-    Q[seq_len(size), seq_len(size)] <- P_B
-    Q[seq_len(size), seq(size + 1, 2 * size)] <- -P_B
-    Q[seq(size + 1, 2 * size), seq_len(size)] <- -P_B
-    Q[seq(size + 1, 2 * size), seq(size + 1, 2 * size)] <- P_B
-    Q
-  }
-
   if (cycle_cost > 0 || !is.null(P_B)) {
     # LP/QP path \u2014 binary mode variable is skipped because:
     #   cycle_cost > 0: makes simultaneous B_c, B_d > 0 economically
     #     self-defeating
-    #   P_B != NULL: HiGHS does not support MIQP; the quadratic grid term
-    #     already makes simultaneous charge+discharge suboptimal
-    Q_full <- if (!is.null(P_B)) build_Q_4n(P_B, n) else NULL
+    #   P_B != NULL: the quadratic term already makes simultaneous
+    #     charge+discharge suboptimal
     q_Bc <- if (!is.null(q_B)) q_B else rep(0, n)
     q_Bd <- if (!is.null(q_B)) -q_B else rep(0, n)
+
+    if (!is.null(P_B)) {
+      # QP path via OSQP with 5n incremental SOC formulation.
+      # Variables: [B_c_1..n, B_d_1..n, I_1..n, E_1..n, S_1..n] (5n)
+      # S_t tracks cumulative SOC change; bidiagonal A_soc_incr gives O(n) nnz.
+      #
+      # Clip PE so the QP stays bounded when export price >= import price.
+      PE_clipped <- pmin(PE, PI)
+      if (any(PE_clipped != PE)) {
+        message_once(
+          "\u26a0\ufe0f Optimization: export price exceeds import price; clipping for bounded QP."
+        )
+      }
+      ub_I <- pmin(import_capacity, import_mode_ub)
+      ub_E <- pmin(export_capacity, export_mode_ub)
+
+      idx_Bc <- seq_len(n)
+      idx_Bd <- seq(n + 1, 2 * n)
+      idx_I <- seq(2 * n + 1, 3 * n)
+      idx_E <- seq(3 * n + 1, 4 * n)
+      idx_S <- seq(4 * n + 1, 5 * n)
+
+      # Sparse P on [B_c, B_d, I, E, S]: quadratic on (B_c - B_d)
+      P_5n <- Matrix::sparseMatrix(
+        i = integer(),
+        j = integer(),
+        x = numeric(),
+        dims = c(5 * n, 5 * n)
+      )
+      P_5n[idx_Bc, idx_Bc] <- P_B
+      P_5n[idx_Bc, idx_Bd] <- -P_B
+      P_5n[idx_Bd, idx_Bc] <- -P_B
+      P_5n[idx_Bd, idx_Bd] <- P_B
+      P_5n <- (P_5n + Matrix::t(P_5n)) / 2
+
+      # Balance: B_c_t - B_d_t - I_t + E_t = G_t - L_t
+      A_bal <- Matrix::sparseMatrix(
+        i = rep(seq_len(n), 4),
+        j = c(idx_Bc, idx_Bd, idx_I, idx_E),
+        x = c(rep(1, n), rep(-1, n), rep(-1, n), rep(1, n)),
+        dims = c(n, 5 * n)
+      )
+
+      # Incremental SOC: S_t - S_{t-1} - \u03b7_c*B_c_t + (1/\u03b7_d)*B_d_t = 0
+      soc_rows <- c(seq_len(n), seq_len(n), seq_len(n), seq(2, n))
+      soc_cols <- c(idx_Bc, idx_Bd, idx_S, idx_S[seq_len(n - 1)])
+      soc_vals <- c(
+        rep(-charge_eff, n),
+        rep(1 / discharge_eff, n),
+        rep(1, n),
+        rep(-1, n - 1)
+      )
+      A_soc_incr <- Matrix::sparseMatrix(
+        i = soc_rows,
+        j = soc_cols,
+        x = soc_vals,
+        dims = c(n, 5 * n)
+      )
+
+      # Energy conservation: S_n = 0 (battery returns to initial SOC)
+      A_energy_5n <- Matrix::sparseMatrix(
+        i = 1L,
+        j = idx_S[n],
+        x = 1.0,
+        dims = c(1, 5 * n)
+      )
+
+      A_osqp <- rbind(
+        Matrix::Diagonal(n = 5 * n), # variable bounds
+        A_bal,
+        A_soc_incr,
+        A_energy_5n
+      )
+      lower_osqp <- c(
+        rep(0, n),
+        rep(0, n),
+        rep(0, n),
+        rep(0, n),
+        lb_soc,
+        G - L,
+        rep(0, n),
+        0
+      )
+      upper_osqp <- c(
+        rep(Bc, n),
+        rep(Bd, n),
+        ub_I,
+        ub_E,
+        ub_soc,
+        G - L,
+        rep(0, n),
+        0
+      )
+
+      # Normalize objective so OSQP's ADMM rho is well-matched regardless of w.
+      q_osqp <- c(q_Bc, rep(cycle_coef, n) + q_Bd, PI, -PE_clipped, rep(0, n))
+      obj_scale <- max(max(abs(P_5n@x)), max(abs(q_osqp)), 1e-6)
+      sol <- solve_osqp(
+        P_5n / obj_scale,
+        q_osqp / obj_scale,
+        A_osqp,
+        lower_osqp,
+        upper_osqp
+      )
+
+      if (!is.null(sol$x)) {
+        x <- as.numeric(sol$x)
+        B_c <- x[idx_Bc]
+        B_d <- x[idx_Bd]
+        return(round(B_c * charge_eff - B_d / discharge_eff, 10))
+      }
+
+      # Fallback to HiGHS LP on OSQP failure (loses quadratic grid term)
+      message_once(
+        "\u26a0\ufe0f Optimization warning: OSQP failed for cost/combined. Falling back to HiGHS."
+      )
+    }
+
     result <- highs::highs_solve(
-      Q = Q_full,
+      Q = NULL,
       L = c(q_Bc, rep(cycle_coef, n) + q_Bd, PI, -PE),
       lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n)),
-      upper = c(rep(Bc, n), rep(Bd, n), import_capacity, export_capacity),
+      upper = c(rep(Bc, n), rep(Bd, n), pmin(import_capacity, import_mode_ub), pmin(export_capacity, export_mode_ub)),
       A = A_vars,
       lhs = lb_vars,
       rhs = ub_vars,
@@ -592,107 +539,6 @@ battery_solve_cost_unified_window <- function(
 }
 
 
-battery_solve_cost_osqp_window <- function(
-  G,
-  L,
-  PI,
-  PE,
-  P_B,
-  q_B,
-  Bcap,
-  Bc,
-  Bd,
-  SOCmin,
-  SOCmax,
-  SOCini,
-  import_capacity,
-  export_capacity
-) {
-  G <- round(G, 2)
-  L <- round(L, 2)
-  d <- battery_cost_build_constraints(
-    G,
-    L,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity
-  )
-  n <- d$n
-
-  # Clip PE to PI to keep the QP bounded when export price exceeds import price
-  PE_clipped <- pmin(PE, PI)
-  if (any(PE_clipped != PE)) {
-    message_once(
-      "\u26a0\ufe0f Optimization: export price exceeds import price; clipping for bounded QP."
-    )
-  }
-
-  # Quadratic term for X = [B, I, E] (3n x 3n)
-  P_full <- Matrix::sparseMatrix(
-    i = integer(),
-    j = integer(),
-    x = numeric(),
-    dims = c(3 * n, 3 * n)
-  )
-  if (!is.null(P_B)) {
-    P_full[seq_len(n), seq_len(n)] <- P_B
-  }
-  P_full <- (P_full + Matrix::t(P_full)) / 2
-
-  q_full <- c(
-    if (!is.null(q_B)) q_B else rep(0, n),
-    PI,
-    -PE_clipped
-  )
-
-  # Variable bounds \u2014 cap I and E to prevent unbounded QP when PE_clipped == PI
-  ub_I <- pmin(d$ub_I, d$import_mode_ub)
-  ub_E <- pmin(d$ub_E, d$export_mode_ub)
-
-  # OSQP constraint matrix: identity rows for variable bounds + problem constraints
-  A_osqp <- rbind(
-    cbind(diag(n), matrix(0, n, 2 * n)), # B identity
-    cbind(matrix(0, n, n), diag(n), matrix(0, n, n)), # I identity
-    cbind(matrix(0, n, 2 * n), diag(n)), # E identity
-    d$A # balance + SOC + energy
-  )
-  lower_osqp <- c(d$lb_B, d$lb_I, d$lb_E, d$lb)
-  upper_osqp <- c(d$ub_B, ub_I, ub_E, d$ub)
-
-  sol <- solve_osqp(P_full, q_full, A_osqp, lower_osqp, upper_osqp)
-
-  if (!is.null(sol$x)) {
-    return(as.numeric(sol$x[seq_len(n)]))
-  }
-
-  # Fallback: MILP without quadratic term
-  message_once(
-    "\u26a0\ufe0f Optimization warning: OSQP failed for cost/combined. Falling back to MILP."
-  )
-  battery_solve_cost_milp_window(
-    G,
-    L,
-    PI,
-    PE,
-    NULL,
-    NULL,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity
-  )
-}
-
-
 #' @keywords internal
 battery_cost_window <- function(
   G,
@@ -714,69 +560,32 @@ battery_cost_window <- function(
 ) {
   n <- length(G)
 
-  if (cycle_cost > 0) {
-    if (lambda > 0) {
-      message_once(
-        "\u26a0\ufe0f Optimization: cycle_cost > 0 uses LP solver; lambda smoothing is not applied."
-      )
-    }
-    battery_solve_cost_unified_window(
-      G,
-      L,
-      PI,
-      PE,
-      Bcap,
-      Bc,
-      Bd,
-      SOCmin,
-      SOCmax,
-      SOCini,
-      import_capacity,
-      export_capacity,
-      charge_eff = charge_eff,
-      discharge_eff = discharge_eff,
-      cycle_cost = cycle_cost
-    )
-  } else if (lambda == 0) {
-    battery_solve_cost_unified_window(
-      G,
-      L,
-      PI,
-      PE,
-      Bcap,
-      Bc,
-      Bd,
-      SOCmin,
-      SOCmax,
-      SOCini,
-      import_capacity,
-      export_capacity,
-      charge_eff = charge_eff,
-      discharge_eff = discharge_eff,
-      cycle_cost = 0
-    )
-  } else {
-    # lambda > 0, cycle_cost == 0: OSQP with smoothing term.
-    # Note: efficiency parameters are not applied in this path.
+  P_B <- if (lambda > 0) {
     lambdaMat <- get_lambda_matrix(n)
-    P_B <- 2 * lambda * (lambdaMat + 1e-6 * diag(n))
-    battery_solve_cost_osqp_window(
-      G,
-      L,
-      PI,
-      PE,
-      P_B,
-      rep(0, n),
-      Bcap,
-      Bc,
-      Bd,
-      SOCmin,
-      SOCmax,
-      SOCini,
-      import_capacity,
-      export_capacity
-    )
+    2 * lambda * (lambdaMat + 1e-6 * diag(n))
+  } else {
+    NULL
   }
+
+  battery_solve_cost_unified_window(
+    G,
+    L,
+    PI,
+    PE,
+    Bcap,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini,
+    import_capacity,
+    export_capacity,
+    charge_eff = charge_eff,
+    discharge_eff = discharge_eff,
+    cycle_cost = cycle_cost,
+    P_B = P_B,
+    q_B = if (!is.null(P_B)) rep(0, n) else NULL
+  )
 }
 
 
@@ -795,15 +604,14 @@ battery_combined_window <- function(
   import_capacity,
   export_capacity,
   w,
-  lambda = 0,
-  charge_eff = 1,
-  discharge_eff = 1,
-  cycle_cost = 0
+  lambda = 0
 ) {
+  G <- round(G, 2)
+  L <- round(L, 2)
   n <- length(G)
   scale <- mean(PI)^2
 
-  # Quadratic grid term on net battery power (B_c - B_d)
+  # Quadratic grid term on net battery power B
   P_grid <- 2 * w * scale * diag(n)
   q_grid <- 2 * w * scale * (L - G)
 
@@ -814,26 +622,64 @@ battery_combined_window <- function(
     P_B <- P_grid
   }
 
-  # Route through unified solver so efficiency is applied in all cases
-  battery_solve_cost_unified_window(
-    G,
-    L,
-    PI = (1 - w) * PI,
-    PE = (1 - w) * PE,
-    Bcap,
-    Bc,
-    Bd,
-    SOCmin,
-    SOCmax,
-    SOCini,
-    import_capacity,
-    export_capacity,
-    charge_eff = charge_eff,
-    discharge_eff = discharge_eff,
-    cycle_cost = cycle_cost,
-    P_B = if (max(abs(P_B)) < 1e-8) NULL else P_B,
-    q_B = if (max(abs(P_B)) < 1e-8) NULL else q_grid
+  # Clip PE so the QP stays bounded when export price >= import price.
+  PE_clipped <- pmin(PE, PI)
+  if (any(PE_clipped != PE)) {
+    message_once(
+      "\u26a0\ufe0f Optimization: export price exceeds import price; clipping for bounded QP."
+    )
+  }
+
+  lb_soc <- rep((SOCmin - SOCini) / 100 * Bcap, n)
+  ub_soc <- rep((SOCmax - SOCini) / 100 * Bcap, n)
+
+  import_capacity <- as.numeric(rep_len(import_capacity, n))
+  export_capacity <- as.numeric(rep_len(export_capacity, n))
+
+  ub_I <- pmin(import_capacity, pmax(L - G + Bc, 0))
+  ub_E <- pmin(export_capacity, pmax(G - L + Bd, 0))
+
+  cumsumMat <- triangulate_matrix(matrix(1, n, n), "l")
+  zeroMat <- matrix(0, n, n)
+
+  # Sparse P on [B, I, E]: quadratic only on B block (O(n) nnz)
+  P_3n <- Matrix::sparseMatrix(
+    i = integer(),
+    j = integer(),
+    x = numeric(),
+    dims = c(3 * n, 3 * n)
   )
+  P_3n[seq_len(n), seq_len(n)] <- P_B
+  P_3n <- (P_3n + Matrix::t(P_3n)) / 2
+
+  # OSQP constraint matrix: variable bounds + balance + SOC + energy conservation
+  A_osqp <- rbind(
+    cbind(diag(n), zeroMat, zeroMat),
+    cbind(zeroMat, diag(n), zeroMat),
+    cbind(zeroMat, zeroMat, diag(n)),
+    cbind(diag(n), -diag(n), diag(n)),
+    cbind(cumsumMat, zeroMat, zeroMat),
+    matrix(c(rep(1, n), rep(0, 2 * n)), nrow = 1)
+  )
+  lower_osqp <- c(rep(-Bd, n), rep(0, n), rep(0, n), G - L, lb_soc, 0)
+  upper_osqp <- c(rep(Bc, n), ub_I, ub_E, G - L, ub_soc, 0)
+
+  sol <- solve_osqp(
+    P_3n,
+    c(q_grid, (1 - w) * PI, -(1 - w) * PE_clipped),
+    A_osqp,
+    lower_osqp,
+    upper_osqp
+  )
+
+  if (!is.null(sol$x)) {
+    return(round(sol$x[seq_len(n)], 10))
+  }
+
+  message_once(
+    "\u26a0\ufe0f Optimization warning: OSQP failed for combined objective."
+  )
+  rep(0, n)
 }
 
 
@@ -1045,10 +891,7 @@ add_battery_optimization <- function(
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         w = opt_objective,
-        lambda = lambda,
-        charge_eff = charge_eff,
-        discharge_eff = discharge_eff,
-        cycle_cost = cycle_cost
+        lambda = lambda
       )
     )
   } else {

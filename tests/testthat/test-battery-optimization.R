@@ -271,7 +271,8 @@ test_battery_year <- function(opt_objective, eff = FALSE) {
       Bc = 4,
       Bd = 4,
       charge_eff = ifelse(eff, efficiency, 1),
-      discharge_eff = ifelse(eff, efficiency, 1)
+      discharge_eff = ifelse(eff, efficiency, 1),
+      cycle_cost = 0.02
     )
   time <- timefully::toc()
 

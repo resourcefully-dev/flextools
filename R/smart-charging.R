@@ -27,6 +27,12 @@
 #' - `export_capacity`: maximum exported power from the grid (in kW),
 #' for example the contracted power with the energy company.
 #'
+#' - `load_capacity`: maximum charging power (in kW) allowed for the flexible
+#' EV demand at every time slot. By default the algorithm already limits the
+#' optimized setpoint to the nominal power of the connected EVs (the physical
+#' charging envelope). This variable can be used to tighten that limit further
+#' (e.g. a charging point or transformer power limit).
+#'
 #' - `production`: local power generation (in kW).
 #' This is used when `opt_objective = "grid"`.
 #'
@@ -684,6 +690,29 @@ get_setpoints <- function(
       opt_idxs <- (dttm_seq >= window_prof_dttm[1]) &
         (dttm_seq <= window_prof_dttm[2])
 
+      # Maximum charging power of the flexible load at each time slot.
+      # The optimized setpoint can be reshaped in time but must never exceed
+      # the power that the connected EVs can physically draw, i.e. their
+      # nominal power while connected. This envelope is the sum of the nominal
+      # `Power` of the responsive sessions over their connection window,
+      # computed as the demand they would produce if charging at nominal power
+      # during the whole connection time. A user-supplied `load_capacity`
+      # column in `opt_data` can tighten this limit further.
+      if (nrow(sessions_window_prof_flex) > 0) {
+        LFmax_prof <- sessions_window_prof_flex %>%
+          mutate(
+            ChargingStartDateTime = .data$ConnectionStartDateTime,
+            ChargingEndDateTime = .data$ConnectionEndDateTime,
+            ChargingHours = .data$ConnectionHours,
+            Energy = .data$Power * .data$ConnectionHours
+          ) %>%
+          get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
+          pull(!!sym(profile))
+      } else {
+        LFmax_prof <- rep(Inf, length(dttm_seq))
+      }
+      LFmax_prof <- pmin(LFmax_prof, opt_data$load_capacity)
+
       if (opt_objective != "none") {
         # Optimize the flexible profile's load according to `opt_objective`
         if (opt_objective == "grid") {
@@ -693,7 +722,7 @@ get_setpoints <- function(
             LS = LS[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
-            LFmax = Inf,
+            LFmax = LFmax_prof[opt_idxs],
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda
@@ -709,7 +738,7 @@ get_setpoints <- function(
             PTD = opt_data$price_turn_down[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
-            LFmax = Inf,
+            LFmax = LFmax_prof[opt_idxs],
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda
@@ -721,7 +750,7 @@ get_setpoints <- function(
             LS = LS[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
-            LFmax = Inf,
+            LFmax = LFmax_prof[opt_idxs],
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda
@@ -737,7 +766,7 @@ get_setpoints <- function(
             PTD = opt_data$price_turn_down[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
-            LFmax = Inf,
+            LFmax = LFmax_prof[opt_idxs],
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             w = opt_objective,

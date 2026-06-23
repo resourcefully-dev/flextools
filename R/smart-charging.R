@@ -1652,6 +1652,11 @@ round_to_interval <- function(dbl, interval) {
 }
 
 get_window_not_outliers <- function(sessions, pct, time_resolution) {
+  # Outlier detection needs at least 2 sessions to estimate a spread.
+  # With a single session `sd()` is NA, so it cannot be an outlier: keep it.
+  if (nrow(sessions) < 2) {
+    return(rep(TRUE, nrow(sessions)))
+  }
   sd_factor <- get_sd_factor(pct)
   start_time_mean <- mean(as.numeric(sessions$ConnectionStartDateTime))
   start_time_sd <- sd(as.numeric(sessions$ConnectionStartDateTime))
@@ -1679,6 +1684,9 @@ get_window_not_outliers <- function(sessions, pct, time_resolution) {
         time_resolution * 60
       )
     )
+  # Guard against any remaining NA (e.g. missing connection times): an
+  # undefined bound means we cannot classify the session as an outlier.
+  not_outliers[is.na(not_outliers)] <- TRUE
   not_outliers
 }
 

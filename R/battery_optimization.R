@@ -93,14 +93,29 @@ battery_solve_grid_window <- function(
 
   lb_B <- pmax(-Bd, G - L - export_capacity)
   ub_B <- pmin(Bc, G - L + import_capacity)
-  relaxed_bounds <- FALSE
 
+  # Minimal, guaranteed-feasible relaxation of the grid caps. The do-nothing
+  # battery profile B = 0 leaves the site at its pre-battery net flow, so raise
+  # each cap only as far as that original flow already needs (import L - G,
+  # export G - L). Slots within their caps keep the true capacity, so the
+  # battery can never create a grid violation worse than the pre-battery
+  # profile. With these caps B = 0 is feasible by construction: lb_B <= 0 <=
+  # ub_B, cumsum(0) = 0 lies within the SOC band (SOCmin <= SOCini <= SOCmax),
+  # and sum(0) = 0 meets the energy-neutral constraint. A small tolerance
+  # absorbs the 2-decimal rounding of the bounds.
+  tol <- optimization_solution_tolerance()
+  import_cap_relaxed <- pmax(import_capacity, L - G) + tol
+  export_cap_relaxed <- pmax(export_capacity, G - L) + tol
+  lb_B_relaxed <- pmax(-Bd, G - L - export_cap_relaxed)
+  ub_B_relaxed <- pmin(Bc, G - L + import_cap_relaxed)
+
+  relaxed_bounds <- FALSE
   if (any(lb_B > ub_B + 1e-8)) {
     message_once(
-      "\u26a0\ufe0f Optimization warning: infeasible battery QP bounds. Removing grid constraints."
+      "\u26a0\ufe0f Optimization warning: infeasible battery grid bounds. Relaxing grid capacity to the pre-battery profile in the affected windows."
     )
-    lb_B <- rep(-Bd, time_slots)
-    ub_B <- rep(Bc, time_slots)
+    lb_B <- lb_B_relaxed
+    ub_B <- ub_B_relaxed
     relaxed_bounds <- TRUE
   }
 
@@ -138,10 +153,10 @@ battery_solve_grid_window <- function(
 
   if (!relaxed_bounds) {
     message_once(
-      "\u26a0\ufe0f Optimization warning: optimization not feasible for some windows. Removing grid constraints."
+      "\u26a0\ufe0f Optimization warning: optimization not feasible for some windows. Relaxing grid capacity to the pre-battery profile in the affected windows."
     )
-    lb_B <- rep(-Bd, time_slots)
-    ub_B <- rep(Bc, time_slots)
+    lb_B <- lb_B_relaxed
+    ub_B <- ub_B_relaxed
     lower <- round(c(lb_B, lb_cumsum, 0), 2)
     upper <- round(c(ub_B, ub_cumsum, 0), 2)
     solution <- battery_solve_osqp(P, q, Amat, lower, upper)
@@ -171,6 +186,9 @@ battery_solve_grid_window <- function(
     }
   }
 
+  # Unreachable for well-formed inputs: B = 0 is feasible under the relaxed
+  # bounds, so reaching here means the solver crashed. Surface it loudly and
+  # fall back to the do-nothing profile, which leaves the site untouched.
   message_once(paste0(
     "\u26a0\ufe0f Optimization warning: ",
     solution$result$info$status,

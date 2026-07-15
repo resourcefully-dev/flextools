@@ -82,6 +82,41 @@ test_that("battery optimization returns zero profile when bounds are infeasible"
 })
 
 
+test_that("battery relaxes grid caps minimally to the pre-battery profile", {
+  # A single 10 kW peak sits above the 3 kW import cap, so the window is
+  # infeasible under the true caps and the grid caps must be relaxed. The
+  # relaxation must be minimal: only the peak slot may exceed the cap (up to its
+  # pre-battery net flow), while every other slot stays hard-capped at 3 kW.
+  n <- 6
+  G <- rep(0, n)
+  L <- c(1, 1, 10, 1, 1, 1)
+  import_capacity <- rep(3, n)
+  export_capacity <- rep(3, n)
+
+  B <- suppressMessages(flextools:::battery_grid_window(
+    G = G, L = L, Bcap = 20, Bc = 5, Bd = 5,
+    SOCmin = 0, SOCmax = 100, SOCini = 50,
+    import_capacity = import_capacity, export_capacity = export_capacity
+  ))
+
+  relax_tol <- 0.02
+  net_import <- pmax(L + B - G, 0)
+  net_export <- pmax(G - L - B, 0)
+  orig_import <- pmax(L - G, 0)
+  orig_export <- pmax(G - L, 0)
+
+  # Never worse than the pre-battery profile.
+  expect_true(all(net_import <= pmax(import_capacity, orig_import) + relax_tol))
+  expect_true(all(net_export <= pmax(export_capacity, orig_export) + relax_tol))
+  # Slots within their cap stay hard-capped at the true capacity.
+  within <- orig_import <= import_capacity
+  expect_true(all(net_import[within] <= import_capacity[within] + relax_tol))
+  # The battery is energy-neutral and actually acts (not the do-nothing guard).
+  expect_equal(sum(B), 0, tolerance = 1e-6)
+  expect_true(any(abs(B) > 1e-6))
+})
+
+
 test_that("battery optimization falls back to a heuristic profile on solver failure", {
   testthat::local_mocked_bindings(
     battery_solve_osqp = function(P, q, A, lower, upper) {

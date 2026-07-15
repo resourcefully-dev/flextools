@@ -208,6 +208,71 @@ test_that("error when `opt_objective` is wrong in optimization demand", {
 })
 
 
+# Minimal-relaxation fallback invariant --------------------------
+# When a window is infeasible under its grid caps, the optimizer must relax the
+# per-slot caps only as far as the ORIGINAL (unshifted) profile needs. The
+# resulting invariant: per-slot net flow never exceeds
+# max(capacity, original net flow), so the result is never worse than the input
+# profile had, and slots that were within their caps stay hard-capped at the
+# true capacity. `tol` absorbs the 2-decimal rounding of the bounds.
+relax_tol <- 0.02
+
+test_that("capacity objective relaxes minimally when a window is infeasible", {
+  n <- 6
+  G <- rep(0, n)
+  LS <- rep(0, n)
+  LF <- c(10, 0, 0, 10, 0, 0)
+  import_capacity <- rep(2, n)
+  export_capacity <- rep(0, n)
+
+  # time_horizon = 1 leaves almost no room to shift the two 10 kW spikes below
+  # the 2 kW import cap, so the capacity slice LP is infeasible.
+  O <- suppressMessages(demand_capacity_window(
+    G = G, LF = LF, LS = LS, direction = "forward",
+    time_horizon = 1L, LFmax = rep(10, n),
+    import_capacity = import_capacity, export_capacity = export_capacity
+  ))
+
+  net_import <- pmax(O + LS - G, 0)
+  orig_import <- pmax(LF + LS - G, 0)
+
+  # Never worse than the input profile had.
+  expect_true(all(net_import <= pmax(import_capacity, orig_import) + relax_tol))
+  # Slots that were within their cap stay hard-capped at the true capacity.
+  within <- orig_import <= import_capacity
+  expect_true(all(net_import[within] <= import_capacity[within] + relax_tol))
+  # Flexible energy is preserved.
+  expect_equal(sum(O), sum(LF), tolerance = 1e-6)
+  # The relaxation actually optimizes; it does not hit the crash guard (LF).
+  expect_false(isTRUE(all.equal(as.numeric(O), LF)))
+})
+
+test_that("grid objective relaxes minimally and clamps ub_O when LFmax < LF", {
+  n <- 6
+  G <- rep(0, n)
+  LS <- rep(0, n)
+  LF <- c(10, 0, 0, 10, 0, 0)
+  import_capacity <- rep(2, n)
+  export_capacity <- rep(0, n)
+
+  # LFmax below the LF peak forces the ub_O clamp in the relaxation retry.
+  O <- suppressMessages(demand_grid_window(
+    G = G, LF = LF, LS = LS, direction = "forward",
+    time_horizon = 1L, LFmax = rep(5, n),
+    import_capacity = import_capacity, export_capacity = export_capacity
+  ))
+
+  net_import <- pmax(O + LS - G, 0)
+  orig_import <- pmax(LF + LS - G, 0)
+
+  expect_true(all(net_import <= pmax(import_capacity, orig_import) + relax_tol))
+  within <- orig_import <= import_capacity
+  expect_true(all(net_import[within] <= import_capacity[within] + relax_tol))
+  expect_equal(sum(O), sum(LF), tolerance = 1e-6)
+  expect_false(isTRUE(all.equal(as.numeric(O), LF)))
+})
+
+
 # Time benchmarking for demand optimization ----------------------
 test_demand_year <- function(opt_objective) {
   message(sprintf(

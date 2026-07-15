@@ -653,8 +653,18 @@ capacity_v2g_window <- function(
   )
 
   if (is.null(slice_solution)) {
+    # The capacity slice LP is infeasible under the true caps. Rather than
+    # dropping the grid constraints entirely, relax each cap only as far as the
+    # original, unshifted profile already needs (import LS + LF - G, export
+    # G - LS - LF). Slots within their caps keep the true capacity, so the
+    # result can never be worse than the input profile. demand_grid_v2g_window()
+    # (via solve_optimization_window_v2g) is feasible by construction with these
+    # caps because O = LF is a feasible point.
+    tol <- optimization_solution_tolerance()
+    import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
+    export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
     message_once(
-      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
     )
     return(
       demand_grid_v2g_window(
@@ -664,8 +674,8 @@ capacity_v2g_window <- function(
         direction = direction,
         time_horizon = time_horizon,
         LFmax = LFmax,
-        import_capacity = rep(Inf, time_slots),
-        export_capacity = rep(Inf, time_slots),
+        import_capacity = import_cap_relaxed,
+        export_capacity = export_cap_relaxed,
         lambda = lambda
       )
     )
@@ -750,41 +760,86 @@ solve_optimization_window_v2g <- function(
     time_horizon <- time_slots
   }
 
-  bounds <- get_bounds_v2g(
-    time_slots,
-    G,
-    LF,
-    LS,
-    direction,
-    time_horizon,
-    LFmax,
-    import_capacity,
-    export_capacity
-  )
+  solve_with_caps <- function(import_cap, export_cap, clamp_to_lf = FALSE) {
+    bounds <- get_bounds_v2g(
+      time_slots,
+      G,
+      LF,
+      LS,
+      direction,
+      time_horizon,
+      LFmax,
+      import_cap,
+      export_cap
+    )
 
-  constraint_mats <- list(bounds$Amat_O, bounds$Amat_cumsum, bounds$Amat_energy)
-  A <- Matrix::Matrix(do.call(rbind, constraint_mats), sparse = TRUE)
-  l_vec <- c(bounds$lb_O, bounds$lb_cumsum, bounds$lb_energy)
-  u_vec <- c(bounds$ub_O, bounds$ub_cumsum, bounds$ub_energy)
+    # Minimal-relaxation retry: guarantee the original profile O = LF is a
+    # feasible point. LFmax can sit below LF (e.g. when the caller pre-shrinks
+    # the max power for discharge conversion losses), which would pull ub_O
+    # under LF, so widen the optimized-load box to admit it.
+    if (clamp_to_lf) {
+      bounds$ub_O <- pmax(bounds$ub_O, LF)
+      bounds$lb_O <- pmin(bounds$lb_O, LF)
+    }
 
-  O <- solve_osqp(
-    P = P,
-    q = q,
-    A = A,
-    lb = l_vec,
-    ub = u_vec
-  )
+    constraint_mats <- list(
+      bounds$Amat_O,
+      bounds$Amat_cumsum,
+      bounds$Amat_energy
+    )
+    A <- Matrix::Matrix(do.call(rbind, constraint_mats), sparse = TRUE)
+    l_vec <- c(bounds$lb_O, bounds$lb_cumsum, bounds$lb_energy)
+    u_vec <- c(bounds$ub_O, bounds$ub_cumsum, bounds$ub_energy)
 
-  if (demand_highs_is_optimal(O$result)) {
-    round(O$x, 2)
-  } else {
-    message_once(paste0(
-      "\u26A0\uFE0F V2G optimisation warning: ",
-      O$status_message,
-      ". No optimisation provided."
-    ))
-    LF
+    solve_osqp(
+      P = P,
+      q = q,
+      A = A,
+      lb = l_vec,
+      ub = u_vec
+    )
   }
+
+  # First solve: keep the original grid limits.
+  O <- solve_with_caps(import_capacity, export_capacity)
+  if (demand_highs_is_optimal(O$result)) {
+    return(round(O$x, 2))
+  }
+
+  # Fallback solve: the original grid limits make the problem infeasible.
+  # Instead of removing the grid constraints entirely, raise the per-slot caps
+  # only as far as the ORIGINAL, unshifted profile already needs (import
+  # LS + LF - G, export G - LS - LF). Slots within their caps keep the true
+  # capacity, so the optimiser can never create a violation worse than the input
+  # profile had. This retry is feasible BY CONSTRUCTION: O = LF satisfies energy
+  # equality (sum(O) = sum(LF)) and cumsum bounds (derived from LF) trivially,
+  # the relaxed caps admit its net flows, and clamp_to_lf lifts ub_O to LF when
+  # LFmax would otherwise pull it below. A small tolerance absorbs the 2-decimal
+  # rounding of the bounds.
+  tol <- optimization_solution_tolerance()
+  import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
+  export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
+  message_once(
+    "\u26A0\uFE0F V2G optimisation warning: optimisation not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
+  )
+  O <- solve_with_caps(
+    import_cap_relaxed,
+    export_cap_relaxed,
+    clamp_to_lf = TRUE
+  )
+  if (demand_highs_is_optimal(O$result)) {
+    return(round(O$x, 2))
+  }
+
+  # Unreachable for well-formed inputs: the relaxation above is feasible by
+  # construction, so reaching here means the solver crashed. Surface it loudly
+  # and fall back to the untouched input profile as a last resort.
+  message_once(paste0(
+    "\u26A0\uFE0F V2G optimisation warning: ",
+    O$result$status_message,
+    ". No optimisation provided."
+  ))
+  LF
 }
 
 
@@ -802,7 +857,10 @@ get_bounds_v2g <- function(
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
 
-  LFmax_vct <- rep(LFmax, time_slots)
+  # `rep_len`, not `rep`: callers such as capacity_v2g_window pass a per-slot
+  # LFmax vector, and `rep(vec, time_slots)` would tile it to length
+  # time_slots^2 and silently corrupt every downstream bound.
+  LFmax_vct <- rep_len(LFmax, time_slots)
   LFmin_vct <- -LFmax_vct
 
   lb_O <- round(pmax(G - LS - export_capacity, LFmin_vct), 2)

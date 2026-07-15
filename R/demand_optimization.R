@@ -487,8 +487,18 @@ demand_capacity_window <- function(
   )
 
   if (is.null(slice_solution)) {
+    # The capacity slice LP is infeasible under the true caps. Rather than
+    # dropping the grid constraints entirely, relax each cap only as far as the
+    # original, unshifted profile already needs (import LS + LF - G, export
+    # G - LS - LF). Slots within their caps keep the true capacity, so the
+    # result can never be worse than the input profile. demand_grid_window()
+    # (via demand_solve_window) is feasible by construction with these caps
+    # because O = LF is a feasible point.
+    tol <- optimization_solution_tolerance()
+    import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
+    export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
     message_once(
-      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
     )
     return(
       demand_grid_window(
@@ -498,8 +508,8 @@ demand_capacity_window <- function(
         direction = direction,
         time_horizon = time_horizon,
         LFmax = LFmax,
-        import_capacity = rep(Inf, time_slots),
-        export_capacity = rep(Inf, time_slots),
+        import_capacity = import_cap_relaxed,
+        export_capacity = export_cap_relaxed,
         lambda = lambda
       )
     )
@@ -857,7 +867,11 @@ demand_solve_window <- function(
       Amat_energy
     )
 
-    bounds_with_capacities <- function(import_cap, export_cap) {
+    bounds_with_capacities <- function(
+      import_cap,
+      export_cap,
+      clamp_to_lf = FALSE
+    ) {
       import_cap <- as.numeric(rep_len(import_cap, time_slots))
       export_cap <- as.numeric(rep_len(export_cap, time_slots))
       L_bounds <- get_bounds(
@@ -871,6 +885,15 @@ demand_solve_window <- function(
         import_cap,
         export_cap
       )
+
+      # Minimal-relaxation retry: guarantee the original profile O = LF is a
+      # feasible point. LFmax can sit below LF (e.g. when a caller pre-shrinks
+      # the max power for conversion losses), which would pull ub_O under LF and
+      # make O = LF infeasible, so widen the optimized-load box to admit it.
+      if (clamp_to_lf) {
+        L_bounds$ub_O <- pmax(L_bounds$ub_O, LF)
+        L_bounds$lb_O <- pmin(L_bounds$lb_O, LF)
+      }
 
       # These are the tightest per-slot grid-flow bounds implied by the
       # optimized-load bounds and the site balance equation.
@@ -941,7 +964,11 @@ demand_solve_window <- function(
 
     Amat <- rbind(Amat_O, Amat_cumsum, Amat_energy)
 
-    bounds_with_capacities <- function(import_cap, export_cap) {
+    bounds_with_capacities <- function(
+      import_cap,
+      export_cap,
+      clamp_to_lf = FALSE
+    ) {
       L_bounds <- get_bounds(
         time_slots,
         G,
@@ -953,6 +980,13 @@ demand_solve_window <- function(
         import_cap,
         export_cap
       )
+
+      # Minimal-relaxation retry: guarantee O = LF is a feasible point even when
+      # LFmax sits below LF (see the grid-flow branch for the full argument).
+      if (clamp_to_lf) {
+        L_bounds$ub_O <- pmax(L_bounds$ub_O, LF)
+        L_bounds$lb_O <- pmin(L_bounds$lb_O, LF)
+      }
 
       list(
         lb = round(c(L_bounds$lb_O, lb_cumsum, lb_energy), 2),
@@ -974,8 +1008,12 @@ demand_solve_window <- function(
 
   solve_window_problem <- demand_select_window_solver(solver_data)
 
-  solve_with_capacities <- function(import_cap, export_cap) {
-    bounds <- solver_data$bounds_with_capacities(import_cap, export_cap)
+  solve_with_capacities <- function(import_cap, export_cap, clamp_to_lf = FALSE) {
+    bounds <- solver_data$bounds_with_capacities(
+      import_cap,
+      export_cap,
+      clamp_to_lf
+    )
     solve_window_problem(solver_data, bounds)
   }
 
@@ -985,17 +1023,43 @@ demand_solve_window <- function(
     return(demand_extract_solution(O$x, solver_data))
   }
 
-  # Fallback solve: if the original grid limits make the problem infeasible,
-  # the legacy implementation removed them and retried. The same fallback is
-  # preserved here so public behavior remains stable.
+  # Fallback solve: the original grid limits make the problem infeasible.
+  # Instead of removing the grid constraints entirely (an unconstrained solve
+  # that could shift energy into new, worse violations), raise the per-slot
+  # caps only as far as the ORIGINAL, unshifted profile already needs. Slots
+  # that were within their caps keep the true capacity, so the optimizer can
+  # never create a violation worse than the input profile had.
+  #
+  # This retry is feasible BY CONSTRUCTION: the do-nothing point O = LF (with
+  # the induced grid flows I = pmax(LS + LF - G, 0), E = pmax(G - LS - LF, 0))
+  # satisfies every constraint:
+  #   * energy equality: sum(O) = sum(LF) trivially;
+  #   * cumsum bounds: they are derived from LF itself, so cumsum(LF) lies
+  #     inside [lb_cumsum, ub_cumsum] (one side is exactly cumsum(LF));
+  #   * grid balance: O - I + E = LF - (LS + LF - G) = G - LS by definition;
+  #   * capacity: the relaxed caps equal at least the original net flows, so
+  #     I <= import_cap_relaxed and E <= export_cap_relaxed;
+  #   * optimized-load box: lb_O <= LF is always true, and clamp_to_lf lifts
+  #     ub_O up to LF when LFmax would otherwise pull it below.
+  # A small tolerance absorbs the 2-decimal rounding of the bounds.
+  tol <- optimization_solution_tolerance()
+  import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
+  export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
   message_once(
-    "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Removing grid constraints."
+    "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
   )
-  O <- solve_with_capacities(rep(Inf, time_slots), rep(Inf, time_slots))
+  O <- solve_with_capacities(
+    import_cap_relaxed,
+    export_cap_relaxed,
+    clamp_to_lf = TRUE
+  )
   if (demand_highs_is_optimal(O$result)) {
     return(demand_extract_solution(O$x, solver_data))
   }
 
+  # Unreachable for well-formed inputs: the relaxation above is feasible by
+  # construction, so reaching here means the solver crashed. Surface it loudly
+  # and fall back to the untouched input profile as a last resort.
   message_once(paste0(
     "\u26A0\uFE0F Optimization warning: ",
     O$result$status_message,

@@ -257,6 +257,39 @@ test_that("capacity objective works in v2g", {
     )
 })
 
+test_that("capacity_v2g_window relaxes minimally when a window is infeasible", {
+    # Two 10 kW spikes above the 2 kW import cap with no room to shift
+    # (time_horizon = 1) make the capacity slice LP infeasible, forcing the
+    # minimal-relaxation fallback. LFmax below the LF peak also exercises the
+    # ub_O clamp in the v2g solver retry.
+    n <- 6
+    G <- rep(0, n)
+    LS <- rep(0, n)
+    LF <- c(10, 0, 0, 10, 0, 0)
+    import_capacity <- rep(2, n)
+    export_capacity <- rep(0, n)
+
+    O <- suppressMessages(flextools:::capacity_v2g_window(
+        G = G, LF = LF, LS = LS, direction = "forward",
+        time_horizon = 1L, LFmax = 5,
+        import_capacity = import_capacity, export_capacity = export_capacity
+    ))
+
+    relax_tol <- 0.02
+    net_import <- pmax(O + LS - G, 0)
+    orig_import <- pmax(LF + LS - G, 0)
+
+    # Never worse than the input profile had.
+    expect_true(all(net_import <= pmax(import_capacity, orig_import) + relax_tol))
+    # Slots within their cap stay hard-capped at the true capacity.
+    within <- orig_import <= import_capacity
+    expect_true(all(net_import[within] <= import_capacity[within] + relax_tol))
+    # Flexible energy is preserved.
+    expect_equal(sum(O), sum(LF), tolerance = 1e-6)
+    # The relaxation actually optimizes; it does not hit the crash guard (LF).
+    expect_false(isTRUE(all.equal(as.numeric(O), LF)))
+})
+
 test_that("cost objective currently reuses grid objective in v2g", {
     opt_data_prices <- opt_data %>%
         mutate(

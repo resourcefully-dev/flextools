@@ -60,3 +60,5 @@
   : Plot of the load duration curve
 - [`summarise_energy_charged()`](https://resourcefully-dev.github.io/flextools/reference/summarise_energy_charged.md)
   : Get a summary of the energy charged per session
+- [`evaluate_cost()`](https://resourcefully-dev.github.io/flextools/reference/evaluate_cost.md)
+  : Evaluate total grid cost for an optimized demand profile

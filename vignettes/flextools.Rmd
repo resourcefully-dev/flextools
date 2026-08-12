@@ -3,7 +3,7 @@ title: "Introduction to flextools"
 output: html_document
 ---
 
-```{r setup, echo=FALSE, message=F, fig.width=12}
+```{r setup, echo=FALSE, message=F, fig.width=9}
 library(flextools)
 library(dplyr)
 library(lubridate)

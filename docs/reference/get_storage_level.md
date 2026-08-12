@@ -1,12 +1,7 @@
 # Accumulated storage level (energy)
 
 Each value represents the energy level at the beginning of the time
-slot, starting from the provided initial State-of-Charge. When the
-`power` vector carries `charge` and `discharge` attributes (as provided
-by
-[`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)),
-those are used internally to compute the storage evolution when
-efficiencies are below 1.
+slot, starting from the provided initial State-of-Charge.
 
 ## Usage
 
@@ -46,3 +41,15 @@ get_storage_level(
 ## Value
 
 numeric vector of energy stored
+
+## Details
+
+`power` is interpreted as the **grid-side** battery power: positive when
+the grid is charging the battery, negative when the battery is supplying
+the grid. Pass `charge_eff` / `discharge_eff` to convert grid-side power
+to actual stored energy (grid draws `power / charge_eff` when charging;
+storage releases `|power| / discharge_eff` when discharging).
+
+If `power` is already **storage-side** (e.g. from
+[`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)),
+call with the default efficiencies of 1.

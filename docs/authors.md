@@ -10,14 +10,14 @@
 Source:
 [`DESCRIPTION`](https://github.com/resourcefully-dev/flextools/blob/HEAD/DESCRIPTION)
 
-Cañigueral M (2025). *flextools: Tools For Demand-Response Simulations*.
-R package version 1.2.0,
+Cañigueral M (2026). *flextools: Tools For Demand-Response Simulations*.
+R package version 1.3.0,
 <https://github.com/resourcefully-dev/flextools/>.
 
     @Manual{,
       title = {flextools: Tools For Demand-Response Simulations},
       author = {Marc Cañigueral},
-      year = {2025},
-      note = {R package version 1.2.0},
+      year = {2026},
+      note = {R package version 1.3.0},
       url = {https://github.com/resourcefully-dev/flextools/},
     }

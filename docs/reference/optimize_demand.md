@@ -46,23 +46,28 @@ optimize_demand(
   - `production`: local power generation (in kW). This is used when
     `opt_objective = "grid"`.
 
-  - `price_imported`: price for imported energy (€/kWh). This is used
+  - `price_imported`: price for imported energy (Euro/kWh). This is used
     when `opt_objective = "cost"`.
 
-  - `price_exported`: price for exported energy (€/kWh). This is used
+  - `price_exported`: price for exported energy (Euro/kWh). This is used
     when `opt_objective = "cost"`.
 
-  - `price_turn_down`: price for turn-down energy use (€/kWh). This is
+  - `price_turn_down`: price for turn-down energy use (Euro/kWh). This
+    is used when `opt_objective = "cost"`.
+
+  - `price_turn_up`: price for turn-up energy use (Euro/kWh). This is
     used when `opt_objective = "cost"`.
-
-  - `price_turn_up`: price for turn-up energy use (€/kWh). This is used
-    when `opt_objective = "cost"`.
 
 - opt_objective:
 
-  character or numeric. Optimization objective can be `"grid"` (default)
-  or `"cost"`, or a number between `0` and `1` to perform combined
-  optimization where `0 == "cost"` and `1 == "grid"`.
+  character or numeric. Optimization objective can be `"grid"`
+  (default), `"cost"` or `"capacity"`, or a number between `0` and `1`
+  to perform combined optimization where `0 == "cost"` and
+  `1 == "grid"`. The `"capacity"` objective minimizes the amount of
+  flexible demand that needs to be moved to respect `import_capacity`
+  and `export_capacity`, then applies the grid-minimizing formulation
+  only to that moved slice. If that constrained problem is infeasible,
+  grid limits are removed for the affected optimization window.
 
 - direction:
 

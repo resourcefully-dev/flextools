@@ -20,7 +20,8 @@ add_battery_optimization(
   flex_window_hours = 24,
   lambda = 0,
   charge_eff = 1,
-  discharge_eff = 1
+  discharge_eff = 1,
+  cycle_cost = 0
 )
 ```
 
@@ -29,91 +30,84 @@ add_battery_optimization(
 - opt_data:
 
   tibble, optimization contextual data. The first column must be named
-  `datetime` (mandatory) containing the date time sequence where the
-  optimization algorithm is applied. The other columns can be
-  (optional):
+  `datetime` (mandatory). Optional columns:
 
-  - `static`: static power demand (in kW) from other sectors like
-    buildings, offices, etc.
+  - `static`: static power demand (kW)
 
-  - `import_capacity`: maximum imported power from the grid (in kW), for
-    example the contracted power with the energy company.
+  - `production`: local generation (kW)
 
-  - `export_capacity`: maximum exported power from the grid (in kW), for
-    example the contracted power with the energy company.
+  - `import_capacity`: max grid import (kW)
 
-  - `production`: local power generation (in kW). This is used when
-    `opt_objective = "grid"`.
+  - `export_capacity`: max grid export (kW)
 
-  - `price_imported`: price for imported energy (€/kWh). This is used
-    when `opt_objective = "cost"`.
+  - `price_imported`: energy import price (required for cost/combined)
 
-  - `price_exported`: price for exported energy (€/kWh). This is used
-    when `opt_objective = "cost"`.
-
-  - `price_turn_down`: price for turn-down energy use (€/kWh). This is
-    used when `opt_objective = "cost"`.
-
-  - `price_turn_up`: price for turn-up energy use (€/kWh). This is used
-    when `opt_objective = "cost"`.
+  - `price_exported`: energy export price (required for cost/combined)
 
 - opt_objective:
 
-  character or numeric. Optimization objective can be `"grid"`
-  (default), `"cost"` or `"curtail"`, or a number between `0` and `1` to
-  perform combined optimization where `0 == "cost"` and `1 == "grid"`.
+  character or numeric. `"grid"` (default), `"capacity"`, `"cost"`, or a
+  numeric weight `w` where `w=1` is pure grid and `w=0` is pure cost.
 
 - Bcap:
 
-  numeric, capacity of the battery (in kWh)
+  numeric, battery capacity (kWh)
 
 - Bc:
 
-  numeric, maximum charging power (in kW)
+  numeric, maximum charging power (kW)
 
 - Bd:
 
-  numeric, maximum discharging power (in kW)
+  numeric, maximum discharging power (kW)
 
 - SOCmin:
 
-  numeric, minimum State-of-Charge of the battery
+  numeric, minimum State-of-Charge (%)
 
 - SOCmax:
 
-  numeric, maximum State-of-Charge of the battery
+  numeric, maximum State-of-Charge (%)
 
 - SOCini:
 
-  numeric, required State-of-Charge at the beginning/end of optimization
-  window
+  numeric, initial State-of-Charge (%). Defaults to `SOCmin`.
 
 - window_days:
 
-  integer, number of days to consider as optimization window.
+  integer, optimization window length in days.
 
 - window_start_hour:
 
-  integer, starting hour of the optimization window.
+  integer, start hour of each optimization window.
 
 - flex_window_hours:
 
-  integer, flexibility window length, in hours. This optional feature
-  lets you apply flexibility only during few hours from the
-  `window_start_hour`. It must be lower than `window_days*24` hours.
+  numeric, flexibility window length (hours).
 
 - lambda:
 
-  numeric, penalty on change for the battery compared to the previous
-  time slot.
+  numeric, ramping penalty weight. Penalises rapid changes in battery
+  power between consecutive time slots.
 
 - charge_eff:
 
-  numeric, battery charging efficiency (from 0 to 1, default 1).
+  numeric, charging efficiency in (0, 1\]. Default 1 (lossless). Embeds
+  round-trip losses in the SOC constraints for accurate energy
+  accounting.
 
 - discharge_eff:
 
-  numeric, battery discharging efficiency (from 0 to 1, default 1).
+  numeric, discharging efficiency in (0, 1\]. Default 1 (lossless). See
+  `charge_eff`.
+
+- cycle_cost:
+
+  numeric, degradation cost per kWh cycled (Euro/kWh). Default 0. Adds a
+  linear penalty on battery discharge so the optimizer trades off energy
+  cost savings against battery wear. When positive, the problem is
+  solved as a pure LP (no binary variables) which is substantially
+  faster than the default MILP.
 
 ## Value
 
@@ -133,21 +127,14 @@ library(dplyr)
 #>     intersect, setdiff, setequal, union
 opt_data <- flextools::energy_profiles %>%
   filter(lubridate::isoweek(datetime) == 18) %>%
-  rename(
-    production = "solar"
-  ) %>%
+  rename(production = "solar", static = "building") %>%
   select(any_of(c(
-    "datetime", "production", "building", "price_imported", "price_exported"
-  ))) %>%
-  mutate(
-    static = .data$building
+    "datetime", "production", "static", "price_imported", "price_exported"
+  )))
+opt_battery <- opt_data %>%
+  add_battery_optimization(
+    opt_objective = "grid",
+    Bcap = 50, Bc = 4, Bd = 4,
+    window_start_hour = 5
   )
-  opt_battery <- opt_data %>%
-    add_battery_optimization(
-      opt_objective = 0.5,
-      Bcap = 50, Bc = 4, Bd = 4,
-      window_start_hour = 5
-    )
-#> ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-#> ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
 ```

@@ -1,6 +1,6 @@
 # Storage losses over time
 
-Storage losses over time
+Standing loss proportional to stored energy each time step.
 
 ## Usage
 

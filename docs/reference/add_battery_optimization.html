@@ -9,7 +9,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -43,7 +43,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
       <img src="../logo.png" class="logo" alt=""><h1>Battery optimal charging/discharging profile</h1>
-      <small class="dont-index">Source: <a href="https://github.com/resourcefully-dev/flextools/blob/HEAD/R/optimization.R" class="external-link"><code>R/optimization.R</code></a></small>
+      <small class="dont-index">Source: <a href="https://github.com/resourcefully-dev/flextools/blob/HEAD/R/battery_optimization.R" class="external-link"><code>R/battery_optimization.R</code></a></small>
       <div class="d-none name"><code>add_battery_optimization.Rd</code></div>
     </div>
 
@@ -68,7 +68,8 @@ documentation website."><meta property="og:image" content="https://resourcefully
 <span>  flex_window_hours <span class="op">=</span> <span class="fl">24</span>,</span>
 <span>  lambda <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  charge_eff <span class="op">=</span> <span class="fl">1</span>,</span>
-<span>  discharge_eff <span class="op">=</span> <span class="fl">1</span></span>
+<span>  discharge_eff <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  cycle_cost <span class="op">=</span> <span class="fl">0</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -78,82 +79,78 @@ documentation website."><meta property="og:image" content="https://resourcefully
 
 <dl><dt id="arg-opt-data">opt_data<a class="anchor" aria-label="anchor" href="#arg-opt-data"></a></dt>
 <dd><p>tibble, optimization contextual data.
-The first column must be named <code>datetime</code> (mandatory) containing the
-date time sequence where the optimization algorithm is applied.
-The other columns can be (optional):</p><ul><li><p><code>static</code>: static power demand (in kW) from other sectors like buildings,
-offices, etc.</p></li>
-<li><p><code>import_capacity</code>: maximum imported power from the grid (in kW),
-for example the contracted power with the energy company.</p></li>
-<li><p><code>export_capacity</code>: maximum exported power from the grid (in kW),
-for example the contracted power with the energy company.</p></li>
-<li><p><code>production</code>: local power generation (in kW).
-This is used when <code>opt_objective = "grid"</code>.</p></li>
-<li><p><code>price_imported</code>: price for imported energy (€/kWh).
-This is used when <code>opt_objective = "cost"</code>.</p></li>
-<li><p><code>price_exported</code>: price for exported energy (€/kWh).
-This is used when <code>opt_objective = "cost"</code>.</p></li>
-<li><p><code>price_turn_down</code>: price for turn-down energy use (€/kWh).
-This is used when <code>opt_objective = "cost"</code>.</p></li>
-<li><p><code>price_turn_up</code>: price for turn-up energy use (€/kWh).
-This is used when <code>opt_objective = "cost"</code>.</p></li>
+The first column must be named <code>datetime</code> (mandatory).
+Optional columns:</p><ul><li><p><code>static</code>: static power demand (kW)</p></li>
+<li><p><code>production</code>: local generation (kW)</p></li>
+<li><p><code>import_capacity</code>: max grid import (kW)</p></li>
+<li><p><code>export_capacity</code>: max grid export (kW)</p></li>
+<li><p><code>price_imported</code>: energy import price (required for cost/combined)</p></li>
+<li><p><code>price_exported</code>: energy export price (required for cost/combined)</p></li>
 </ul></dd>
 
 
 <dt id="arg-opt-objective">opt_objective<a class="anchor" aria-label="anchor" href="#arg-opt-objective"></a></dt>
 <dd><p>character or numeric.
-Optimization objective can be <code>"grid"</code> (default), <code>"cost"</code> or <code>"curtail"</code>, or
-a number between <code>0</code> and <code>1</code> to perform combined optimization
-where <code>0 == "cost"</code> and <code>1 == "grid"</code>.</p></dd>
+<code>"grid"</code> (default), <code>"capacity"</code>, <code>"cost"</code>, or a numeric weight <code>w</code>
+where <code>w=1</code> is pure grid and <code>w=0</code> is pure cost.</p></dd>
 
 
 <dt id="arg-bcap">Bcap<a class="anchor" aria-label="anchor" href="#arg-bcap"></a></dt>
-<dd><p>numeric, capacity of the battery (in kWh)</p></dd>
+<dd><p>numeric, battery capacity (kWh)</p></dd>
 
 
 <dt id="arg-bc">Bc<a class="anchor" aria-label="anchor" href="#arg-bc"></a></dt>
-<dd><p>numeric, maximum charging power (in kW)</p></dd>
+<dd><p>numeric, maximum charging power (kW)</p></dd>
 
 
 <dt id="arg-bd">Bd<a class="anchor" aria-label="anchor" href="#arg-bd"></a></dt>
-<dd><p>numeric, maximum discharging power (in kW)</p></dd>
+<dd><p>numeric, maximum discharging power (kW)</p></dd>
 
 
 <dt id="arg-socmin">SOCmin<a class="anchor" aria-label="anchor" href="#arg-socmin"></a></dt>
-<dd><p>numeric, minimum State-of-Charge of the battery</p></dd>
+<dd><p>numeric, minimum State-of-Charge (%)</p></dd>
 
 
 <dt id="arg-socmax">SOCmax<a class="anchor" aria-label="anchor" href="#arg-socmax"></a></dt>
-<dd><p>numeric, maximum State-of-Charge of the battery</p></dd>
+<dd><p>numeric, maximum State-of-Charge (%)</p></dd>
 
 
 <dt id="arg-socini">SOCini<a class="anchor" aria-label="anchor" href="#arg-socini"></a></dt>
-<dd><p>numeric, required State-of-Charge at the beginning/end of optimization window</p></dd>
+<dd><p>numeric, initial State-of-Charge (%). Defaults to <code>SOCmin</code>.</p></dd>
 
 
 <dt id="arg-window-days">window_days<a class="anchor" aria-label="anchor" href="#arg-window-days"></a></dt>
-<dd><p>integer, number of days to consider as optimization window.</p></dd>
+<dd><p>integer, optimization window length in days.</p></dd>
 
 
 <dt id="arg-window-start-hour">window_start_hour<a class="anchor" aria-label="anchor" href="#arg-window-start-hour"></a></dt>
-<dd><p>integer, starting hour of the optimization window.</p></dd>
+<dd><p>integer, start hour of each optimization window.</p></dd>
 
 
 <dt id="arg-flex-window-hours">flex_window_hours<a class="anchor" aria-label="anchor" href="#arg-flex-window-hours"></a></dt>
-<dd><p>integer, flexibility window length, in hours.
-This optional feature lets you apply flexibility only during few hours from the <code>window_start_hour</code>.
-It must be lower than <code>window_days*24</code> hours.</p></dd>
+<dd><p>numeric, flexibility window length (hours).</p></dd>
 
 
 <dt id="arg-lambda">lambda<a class="anchor" aria-label="anchor" href="#arg-lambda"></a></dt>
-<dd><p>numeric, penalty on change for the battery compared to the previous time slot.</p></dd>
+<dd><p>numeric, ramping penalty weight. Penalises rapid changes in
+battery power between consecutive time slots.</p></dd>
 
 
 <dt id="arg-charge-eff">charge_eff<a class="anchor" aria-label="anchor" href="#arg-charge-eff"></a></dt>
-<dd><p>numeric, battery charging efficiency (from 0 to 1, default 1).</p></dd>
+<dd><p>numeric, charging efficiency in (0, 1]. Default 1 (lossless).
+Embeds round-trip losses in the SOC constraints for accurate energy accounting.</p></dd>
 
 
 <dt id="arg-discharge-eff">discharge_eff<a class="anchor" aria-label="anchor" href="#arg-discharge-eff"></a></dt>
-<dd><p>numeric, battery discharging efficiency (from 0 to 1, default 1).</p></dd>
+<dd><p>numeric, discharging efficiency in (0, 1]. Default 1 (lossless).
+See <code>charge_eff</code>.</p></dd>
+
+
+<dt id="arg-cycle-cost">cycle_cost<a class="anchor" aria-label="anchor" href="#arg-cycle-cost"></a></dt>
+<dd><p>numeric, degradation cost per kWh cycled (Euro/kWh). Default 0.
+Adds a linear penalty on battery discharge so the optimizer trades off energy
+cost savings against battery wear. When positive, the problem is solved as a
+pure LP (no binary variables) which is substantially faster than the default MILP.</p></dd>
 
 </dl></div>
     <div class="section level2">
@@ -174,23 +171,16 @@ It must be lower than <code>window_days*24</code> hours.</p></dd>
 <span class="r-msg co"><span class="r-pr">#&gt;</span>     intersect, setdiff, setequal, union</span>
 <span class="r-in"><span><span class="va">opt_data</span> <span class="op">&lt;-</span> <span class="fu">flextools</span><span class="fu">::</span><span class="va"><a href="energy_profiles.html">energy_profiles</a></span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/filter.html" class="external-link">filter</a></span><span class="op">(</span><span class="fu">lubridate</span><span class="fu">::</span><span class="fu"><a href="https://lubridate.tidyverse.org/reference/week.html" class="external-link">isoweek</a></span><span class="op">(</span><span class="va">datetime</span><span class="op">)</span> <span class="op">==</span> <span class="fl">18</span><span class="op">)</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/rename.html" class="external-link">rename</a></span><span class="op">(</span></span></span>
-<span class="r-in"><span>    production <span class="op">=</span> <span class="st">"solar"</span></span></span>
-<span class="r-in"><span>  <span class="op">)</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
+<span class="r-in"><span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/rename.html" class="external-link">rename</a></span><span class="op">(</span>production <span class="op">=</span> <span class="st">"solar"</span>, static <span class="op">=</span> <span class="st">"building"</span><span class="op">)</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
 <span class="r-in"><span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/select.html" class="external-link">select</a></span><span class="op">(</span><span class="fu"><a href="https://tidyselect.r-lib.org/reference/all_of.html" class="external-link">any_of</a></span><span class="op">(</span><span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span></span></span>
-<span class="r-in"><span>    <span class="st">"datetime"</span>, <span class="st">"production"</span>, <span class="st">"building"</span>, <span class="st">"price_imported"</span>, <span class="st">"price_exported"</span></span></span>
-<span class="r-in"><span>  <span class="op">)</span><span class="op">)</span><span class="op">)</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
-<span class="r-in"><span>  <span class="fu"><a href="https://dplyr.tidyverse.org/reference/mutate.html" class="external-link">mutate</a></span><span class="op">(</span></span></span>
-<span class="r-in"><span>    static <span class="op">=</span> <span class="va">.data</span><span class="op">$</span><span class="va">building</span></span></span>
+<span class="r-in"><span>    <span class="st">"datetime"</span>, <span class="st">"production"</span>, <span class="st">"static"</span>, <span class="st">"price_imported"</span>, <span class="st">"price_exported"</span></span></span>
+<span class="r-in"><span>  <span class="op">)</span><span class="op">)</span><span class="op">)</span></span></span>
+<span class="r-in"><span><span class="va">opt_battery</span> <span class="op">&lt;-</span> <span class="va">opt_data</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
+<span class="r-in"><span>  <span class="fu">add_battery_optimization</span><span class="op">(</span></span></span>
+<span class="r-in"><span>    opt_objective <span class="op">=</span> <span class="st">"grid"</span>,</span></span>
+<span class="r-in"><span>    Bcap <span class="op">=</span> <span class="fl">50</span>, Bc <span class="op">=</span> <span class="fl">4</span>, Bd <span class="op">=</span> <span class="fl">4</span>,</span></span>
+<span class="r-in"><span>    window_start_hour <span class="op">=</span> <span class="fl">5</span></span></span>
 <span class="r-in"><span>  <span class="op">)</span></span></span>
-<span class="r-in"><span>  <span class="va">opt_battery</span> <span class="op">&lt;-</span> <span class="va">opt_data</span> <span class="op"><a href="https://magrittr.tidyverse.org/reference/pipe.html" class="external-link">%&gt;%</a></span></span></span>
-<span class="r-in"><span>    <span class="fu">add_battery_optimization</span><span class="op">(</span></span></span>
-<span class="r-in"><span>      opt_objective <span class="op">=</span> <span class="fl">0.5</span>,</span></span>
-<span class="r-in"><span>      Bcap <span class="op">=</span> <span class="fl">50</span>, Bc <span class="op">=</span> <span class="fl">4</span>, Bd <span class="op">=</span> <span class="fl">4</span>,</span></span>
-<span class="r-in"><span>      window_start_hour <span class="op">=</span> <span class="fl">5</span></span></span>
-<span class="r-in"><span>    <span class="op">)</span></span></span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.</span>
-<span class="r-msg co"><span class="r-pr">#&gt;</span> ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.</span>
 <span class="r-in"><span></span></span>
 </code></pre></div>
     </div>

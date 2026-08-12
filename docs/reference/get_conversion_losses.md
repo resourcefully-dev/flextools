@@ -5,7 +5,7 @@ Losses due to charging/discharging process
 ## Usage
 
 ``` r
-get_conversion_losses(power, loss_charge, loss_discharge)
+get_conversion_losses(power, charge_eff = 1, discharge_eff = 1)
 ```
 
 ## Arguments
@@ -15,13 +15,13 @@ get_conversion_losses(power, loss_charge, loss_discharge)
   numeric vector, being positive when charging and negative when
   discharging
 
-- loss_charge:
+- charge_eff:
 
-  numeric, the charging loss in percentage (%)
+  numeric, charging efficiency (from 0 to 1, default to 1)
 
-- loss_discharge:
+- discharge_eff:
 
-  numeric, the discharging loss in percentage (%)
+  numeric, discharging efficiency (from 0 to 1, default to 1)
 
 ## Value
 

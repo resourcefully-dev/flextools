@@ -15,7 +15,7 @@ untouched."><meta property="og:image" content="https://resourcefully-dev.github.
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -73,6 +73,7 @@ untouched.</p>
 <span>  power_th <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  charging_power_min <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  energy_min <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  discharge_eff <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  include_log <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  show_progress <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  lambda <span class="op">=</span> <span class="fl">0</span></span>
@@ -115,10 +116,9 @@ and no optimization is performed for the corresponding user profiles.</p></dd>
 
 
 <dt id="arg-opt-objective">opt_objective<a class="anchor" aria-label="anchor" href="#arg-opt-objective"></a></dt>
-<dd><p>character, optimisation objective being
-<code>"none"</code>, <code>"grid"</code>, <code>"cost"</code> or a value between 0 (cost)
-and 1 (grid). Only the <code>"grid"</code> mode is currently supported
-by the V2G prototype.</p></dd>
+<dd><p>character, optimization objective being <code>"none"</code>,
+<code>"grid"</code>, <code>"cost"</code>, <code>"capacity"</code> or a value between 0 (cost) and 1 (grid).
+See details section for more information about the different objectives.</p></dd>
 
 
 <dt id="arg-window-days">window_days<a class="anchor" aria-label="anchor" href="#arg-window-days"></a></dt>
@@ -144,8 +144,8 @@ then sessions' demand can reach a value of <code>110</code> without needing to s
 
 <dt id="arg-charging-power-min">charging_power_min<a class="anchor" aria-label="anchor" href="#arg-charging-power-min"></a></dt>
 <dd><p>numeric. It can be configured in two ways:
-(1) minimum allowed ratio (between 0 and 1) of nominal power (i.e. <code>Power</code> column in <code>sessions</code>), or
-(2) specific value of minimum power (in kW) higher than 1 kW.</p>
+(1) minimum allowed ratio (between 0 and 0.999) of nominal power (i.e. <code>Power</code> column in <code>sessions</code>), or
+(2) specific value of minimum power (in kW) from 1 kW or higher.</p>
 <p>For example, if <code>charging_power_min = 0.5</code> and <code>method = 'curtail'</code>, sessions' charging power can only
 be curtailed until the 50% of the nominal charging power.
 And if <code>charging_power_min = 2</code>, sessions' charging power can be curtailed until 2 kW.</p></dd>
@@ -153,6 +153,12 @@ And if <code>charging_power_min = 2</code>, sessions' charging power can be curt
 
 <dt id="arg-energy-min">energy_min<a class="anchor" aria-label="anchor" href="#arg-energy-min"></a></dt>
 <dd><p>numeric, minimum allowed ratio (between 0 and 1) of required energy.</p></dd>
+
+
+<dt id="arg-discharge-eff">discharge_eff<a class="anchor" aria-label="anchor" href="#arg-discharge-eff"></a></dt>
+<dd><p>numeric, discharge efficiency (0, 1], applied to energy
+losses when discharging. For example, 0.9 means that for every 1 kWh
+discharged, 1/0.9 kWh must be recharged.</p></dd>
 
 
 <dt id="arg-include-log">include_log<a class="anchor" aria-label="anchor" href="#arg-include-log"></a></dt>

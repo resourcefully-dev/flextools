@@ -43,6 +43,7 @@ reference:
     - get_load_duration_curve
     - plot_load_duration_curve
     - summarise_energy_charged
+    - evaluate_cost
 
 articles:
   - title: Articles

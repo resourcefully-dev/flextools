@@ -9,7 +9,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -43,7 +43,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
 <div class="row">
   <main id="main" class="col-md-9"><div class="page-header">
       <img src="../logo.png" class="logo" alt=""><h1>Optimize a vector of flexible demand</h1>
-      <small class="dont-index">Source: <a href="https://github.com/resourcefully-dev/flextools/blob/HEAD/R/optimization.R" class="external-link"><code>R/optimization.R</code></a></small>
+      <small class="dont-index">Source: <a href="https://github.com/resourcefully-dev/flextools/blob/HEAD/R/demand_optimization.R" class="external-link"><code>R/demand_optimization.R</code></a></small>
       <div class="d-none name"><code>optimize_demand.Rd</code></div>
     </div>
 
@@ -86,22 +86,27 @@ for example the contracted power with the energy company.</p></li>
 can consume (in kW).</p></li>
 <li><p><code>production</code>: local power generation (in kW).
 This is used when <code>opt_objective = "grid"</code>.</p></li>
-<li><p><code>price_imported</code>: price for imported energy (€/kWh).
+<li><p><code>price_imported</code>: price for imported energy (Euro/kWh).
 This is used when <code>opt_objective = "cost"</code>.</p></li>
-<li><p><code>price_exported</code>: price for exported energy (€/kWh).
+<li><p><code>price_exported</code>: price for exported energy (Euro/kWh).
 This is used when <code>opt_objective = "cost"</code>.</p></li>
-<li><p><code>price_turn_down</code>: price for turn-down energy use (€/kWh).
+<li><p><code>price_turn_down</code>: price for turn-down energy use (Euro/kWh).
 This is used when <code>opt_objective = "cost"</code>.</p></li>
-<li><p><code>price_turn_up</code>: price for turn-up energy use (€/kWh).
+<li><p><code>price_turn_up</code>: price for turn-up energy use (Euro/kWh).
 This is used when <code>opt_objective = "cost"</code>.</p></li>
 </ul></dd>
 
 
 <dt id="arg-opt-objective">opt_objective<a class="anchor" aria-label="anchor" href="#arg-opt-objective"></a></dt>
 <dd><p>character or numeric.
-Optimization objective can be <code>"grid"</code> (default) or <code>"cost"</code>, or
+Optimization objective can be <code>"grid"</code> (default), <code>"cost"</code> or <code>"capacity"</code>, or
 a number between <code>0</code> and <code>1</code> to perform combined optimization
-where <code>0 == "cost"</code> and <code>1 == "grid"</code>.</p></dd>
+where <code>0 == "cost"</code> and <code>1 == "grid"</code>.
+The <code>"capacity"</code> objective minimizes the amount of flexible demand that
+needs to be moved to respect <code>import_capacity</code> and <code>export_capacity</code>,
+then applies the grid-minimizing formulation only to that moved slice.
+If that constrained problem is infeasible, grid limits are removed for the
+affected optimization window.</p></dd>
 
 
 <dt id="arg-direction">direction<a class="anchor" aria-label="anchor" href="#arg-direction"></a></dt>

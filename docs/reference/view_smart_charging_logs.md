@@ -1,8 +1,7 @@
 # Interactive Log Viewer
 
 Launches an interactive Shiny app to explore smart charging logs by
-window and profile. This function requires the `shiny` package to be
-installed.
+window. This function requires the `shiny` package to be installed.
 
 ## Usage
 

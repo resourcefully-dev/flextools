@@ -1,5 +1,6 @@
 ^renv$
 ^renv\.lock$
+^dev$
 ^flextools\.Rproj$
 ^\.Rproj\.user$
 ^LICENSE\.md$

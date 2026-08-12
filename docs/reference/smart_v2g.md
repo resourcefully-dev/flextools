@@ -20,6 +20,7 @@ smart_v2g(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0
@@ -72,9 +73,9 @@ smart_v2g(
 
 - opt_objective:
 
-  character, optimisation objective being `"none"`, `"grid"`, `"cost"`
-  or a value between 0 (cost) and 1 (grid). Only the `"grid"` mode is
-  currently supported by the V2G prototype.
+  character, optimization objective being `"none"`, `"grid"`, `"cost"`,
+  `"capacity"` or a value between 0 (cost) and 1 (grid). See details
+  section for more information about the different objectives.
 
 - window_days:
 
@@ -101,9 +102,9 @@ smart_v2g(
 - charging_power_min:
 
   numeric. It can be configured in two ways: (1) minimum allowed ratio
-  (between 0 and 1) of nominal power (i.e. `Power` column in
-  `sessions`), or (2) specific value of minimum power (in kW) higher
-  than 1 kW.
+  (between 0 and 0.999) of nominal power (i.e. `Power` column in
+  `sessions`), or (2) specific value of minimum power (in kW) from 1 kW
+  or higher.
 
   For example, if `charging_power_min = 0.5` and `method = 'curtail'`,
   sessions' charging power can only be curtailed until the 50% of the
@@ -113,6 +114,12 @@ smart_v2g(
 - energy_min:
 
   numeric, minimum allowed ratio (between 0 and 1) of required energy.
+
+- discharge_eff:
+
+  numeric, discharge efficiency (0, 1\], applied to energy losses when
+  discharging. For example, 0.9 means that for every 1 kWh discharged,
+  1/0.9 kWh must be recharged.
 
 - include_log:
 

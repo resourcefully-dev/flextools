@@ -1,24 +1,29 @@
 # Combined optimization
 
-Function
-[`optimize_demand()`](https://resourcefully-dev.github.io/flextools/reference/optimize_demand.md)
-and
+Functions
+[`optimize_demand()`](https://resourcefully-dev.github.io/flextools/reference/optimize_demand.md),
 [`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)
-makes use of Quadratic programming in order to obtain the optimal power
-load given certain conditions. The Quadratic programming problem can be
-formulated according to multiple objectives. Currently, `flextools`
-package allows to optimize a time-series power load considering two
-different goals:
+and
+[`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md)
+solve one independent optimization problem per **optimization window**
+(typically one day). Depending on the objective and the variables
+involved, the window problem is solved either as a quadratic program
+(QP) with the [OSQP](https://osqp.org/) backend, or as a linear or
+mixed-integer linear program (LP/MILP) with the
+[HiGHS](https://highs.dev/) backend. Currently, the `flextools` package
+allows to optimize a time-series power load considering the following
+objectives:
 
 - [Minimize the power exchanged with the grid (net
   power)](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html)
 - [Minimize the energy
   cost](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html)
+- A weighted combination of both
 
 In this article, we’ll cover the optimization problem for the
-combination of both objectives, **net power minimization** and
-**energy_cost minimization**, for both the **flexible demand**
-(e.g. heatpumps, electric vehicles, etc.) and the **battery**.
+combination of both objectives, **net power minimization** and **energy
+cost minimization**, for both the **flexible demand** (e.g. heatpumps,
+electric vehicles, etc.) and the **battery**.
 
 Below, the problem formulations are described, similarly to the
 corresponding articles for net power and costs minimization, but with an
@@ -29,49 +34,94 @@ minimization over the cost optimization, so:
 - If $`w = 1`$, the net power is minimized
 - If $`0 \lt w \lt 1`$, both net power and cost are minimized
 
-## Demand optimization
+Note that the endpoints are aliases of the pure objectives:
+`opt_objective = 0` is routed directly to the [cost
+formulation](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html)
+and `opt_objective = 1` to the [net power
+formulation](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html).
+The combined formulation described in this article is only used strictly
+inside $`(0, 1)`$.
 
-To minimize the energy cost using the **flexibility from a power demand
-profile**, the objective function of the optimization problem has been
-raised in the following way:
+In both the demand and the battery case, the net power term is
+multiplied by the **average imported energy price** of the window to
+convert power units into cost units, so that the two terms of the
+objective have comparable value ranges:
 
 ``` math
-min \sum_{t=1}^{T} w·((LS_t + O_t - G_t)· \frac{\sum_{t=1}^{T}PI_t}{T})^2 + (1-w)·(I_t·PI_t - E_t·PE_t - PTU_t(O_t-LF_t)  - PTD_t(LF_t-O_t)) + \lambda (O_t-LF_t)^{2}
+\overline{PI} = \frac{1}{T}\sum_{t=1}^{T} PI_t
 ```
 
-Note that, in contrast to the Net power optimization problem, here we
-add the average imported energy price $`\frac{\sum_{t=1}^{T}PI_t}{T}`$
-in the equation to convert the power units to cost units and balance the
-value ranges of the multiple terms in the equation.
+## Demand optimization
 
-The objective function and constraints of this optimization problem are
-represented below, where:
+To minimize both the net power and the energy cost using the
+**flexibility from a power demand profile**, the objective function of
+the optimization problem has been raised in the following way:
+
+``` math
+\min_{O_t,\, I_t,\, E_t} \; \sum_{t=1}^{T} \Big[ w \cdot \big((O_t + LS_t - G_t) \cdot \overline{PI}\big)^2 + (1-w) \cdot \big(I_t \cdot PI_t - E_t \cdot PE_t + (PTD_t - PTU_t)\, O_t \big) \Big] + \lambda \sum_{t=1}^{T-1}\left(O_{t+1} - O_t\right)^{2}
+```
+
+Where:
 
 - $`T`$ : Number of time intervals within the optimization window
 - $`G_t`$ : Local power generation time-series vector
-- $`LS_t`$ : Non-flexible load time-series vector
+- $`LS_t`$ : Non-flexible (static) load time-series vector
 - $`LF_t`$ : Flexible load time-series vector (if not optimized)
-- $`O_t`$ : Optimal flexible load time-series vector
-- $`I_t`$ : imported energy
-- $`E_t`$ : exported energy
-- $`PI_t`$ : imported energy price
-- $`PE_t`$ : exported energy price
-- $`PTU_t`$ : balancing price for turn-up power
-- $`PTD_t`$ : balancing price for turn-down power
-- $`\lambda`$ : penalty on change for the flexible load
+- $`O_t`$ : Optimal flexible load time-series vector (decision variable)
+- $`I_t`$ : Imported power (decision variable, non-negative)
+- $`E_t`$ : Exported power (decision variable, non-negative)
+- $`PI_t`$ : Imported energy price
+- $`PE_t`$ : Exported energy price
+- $`PTU_t`$ : Balancing price for turn-up power
+- $`PTD_t`$ : Balancing price for turn-down power
+- $`w`$ : Weight of the net power objective over the cost objective
+- $`\lambda`$ : Ramping penalty weight
 
-Moreover, this optimization problem has the constraints described in
-[Energy cost optimization article (demand
-section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#demand-optimization).
+As in the [cost
+article](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#demand-optimization),
+the balancing term $`(PTD_t - PTU_t)\,O_t`$ is the equivalent linear
+form of $`- PTU_t(O_t-LF_t) - PTD_t(LF_t-O_t)`$, both differing only by
+a constant. Note also that $`\lambda`$ penalizes slot-to-slot changes in
+the optimal load (**ramping**) and is **not** scaled by $`w`$ or
+$`(1-w)`$.
+
+Moreover, this optimization problem has exactly the constraints
+described in the [Energy cost optimization article (demand
+section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#demand-optimization):
+energy conservation of the flexible load, the behind-the-meter balance
+$`I_t - E_t = O_t + LS_t - G_t`$, the combined load and grid capacity
+box bound on $`O_t`$, the import and export capacity bounds, and the
+forward/backward time horizon constraints.
+
+**Solver.** The decision variables are $`X = [O_t, I_t, E_t]`$,
+i.e. $`3T`$ continuous variables. Because the quadratic net power term
+is always present for $`0 \lt w \lt 1`$, the combined demand problem is
+**always** solved as a QP with OSQP, for any value of `lambda`. This has
+two consequences with respect to the pure cost objective with
+`lambda = 0`:
+
+- There is **no binary grid mode variable**, so per-slot exclusivity of
+  import and export is not enforced as a hard constraint. Only the net
+  flow $`I_t - E_t`$ is physically meaningful and it is always
+  preserved, so the reported import and export profiles are collapsed to
+  a single direction per slot afterwards.
+- Export prices are clipped to $`PE_t \leftarrow \min(PE_t, PI_t)`$ and
+  the import and export upper bounds are tightened to their physically
+  achievable per-slot values, which keeps the QP bounded below. A
+  warning is emitted once when clipping occurs.
+
+The same minimal grid capacity relaxation described in the [net power
+article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#demand-optimization)
+applies to infeasible windows.
 
 ## Battery optimization
 
-To minimize the energy cost using the **flexibility from a battery**,
-the objective function of the optimization problem has been raised in
-the following way:
+To minimize both the net power and the energy cost using the
+**flexibility from a battery**, the objective function of the
+optimization problem has been raised in the following way:
 
 ``` math
-\min_{C_t, D_t, I_t, E_t} \sum_{t=1}^{T} \left[ w\left((L_t + C_t - D_t - G_t) \cdot \frac{\sum_{k=1}^{T}PI_k}{T}\right)^2 + (1-w)\left(I_t \cdot PI_t - E_t \cdot PE_t + (PTD_t - PTU_t)(C_t - D_t)\right) \right] + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
+\min_{B_t,\, I_t,\, E_t} \; \sum_{t=1}^{T} \Big[ w \cdot \big((L_t + B_t - G_t) \cdot \overline{PI}\big)^2 + (1-w) \cdot \big(I_t \cdot PI_t - E_t \cdot PE_t\big) \Big] + \lambda \sum_{t=1}^{T-1}\left(B_{t+1} - B_t\right)^{2}
 ```
 
 Where:
@@ -79,20 +129,89 @@ Where:
 - $`T`$ : Number of time intervals within the optimization window
 - $`G_t`$ : Local power generation time-series vector
 - $`L_t`$ : Power load time-series vector
-- $`C_t`$ : Battery charging power (decision variable, non-negative)
-- $`D_t`$ : Battery discharging power (decision variable, non-negative)
-- $`B_t = C_t - D_t`$ : Net battery exchange with the grid (positive =
-  charging)
-- $`I_t`$ : imported energy
-- $`E_t`$ : exported energy
-- $`PI_t`$ : imported energy price
-- $`PE_t`$ : exported energy price
-- $`PTU_t`$ : balancing price for turn-up power
-- $`PTD_t`$ : balancing price for turn-down power
-- $`\lambda`$ : penalty on change for the flexible load
+- $`B_t`$ : Net battery power exchange (decision variable, positive =
+  charging, negative = discharging)
+- $`I_t`$ : Imported power (decision variable, non-negative)
+- $`E_t`$ : Exported power (decision variable, non-negative)
+- $`PI_t`$ : Imported energy price
+- $`PE_t`$ : Exported energy price
+- $`w`$ : Weight of the net power objective over the cost objective
+- $`\lambda`$ : Ramping penalty weight
 
-Moreover, this optimization problem has the constraints described in
-[Energy cost optimization article (battery
-section)](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization),
-including the charging and discharging efficiencies ($`\eta_c`$,
-$`\eta_d`$).
+Additionally, this optimization problem also counts with the following
+parameters used in the constraints below:
+
+- $`B_{cap}`$ : Battery capacity
+- $`B_c`$ : Maximum charging power
+- $`B_d`$ : Maximum discharging power
+- $`SOC_{min}`$ : Minimum state of charge of the battery (%)
+- $`SOC_{max}`$ : Maximum state of charge of the battery (%)
+- $`SOC_{ini}`$ : State of charge at the beginning/end of the
+  optimization window (%)
+- $`IC_t`$, $`EC_t`$ : Grid import and export capacity
+
+Like the [net power
+objective](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization)
+and unlike the cost objective, the combined battery problem uses a
+**single net battery variable** $`B_t`$ rather than separate charging
+and discharging variables. The decision variables are
+$`X = [B_t, I_t, E_t]`$, i.e. $`3T`$ continuous variables, solved as a
+QP with OSQP with **no binary variables** of any kind.
+
+Optimization constraints:
+
+- Energy balance behind-the-meter:
+
+``` math
+I_t - E_t = B_t + L_t - G_t \quad t \in T
+```
+
+- Battery power limits:
+
+``` math
+-B_d \;\le\; B_t \;\le\; B_c \quad t \in T
+```
+
+- State of charge limits:
+
+``` math
+SOC_{min} \le SOC_{ini} + \frac{100}{B_{cap}} \sum_{k=1}^t B_k \, \Delta t \le SOC_{max} \quad t = 1, \dots, T
+```
+
+- The balance of stored energy must be 0 at the end of the optimization
+  window to keep the same initial state of charge:
+
+``` math
+\sum_{t=1}^T B_t \, \Delta t = 0
+```
+
+- The imported and exported power must remain between 0 and the grid
+  import and export capacity, tightened to the maximum physically
+  achievable flow in each slot:
+
+``` math
+0 \le I_t \le \min\!\left(IC_t,\; \max\!\left(L_t - G_t + B_c,\; 0\right)\right) \quad t \in T
+```
+
+``` math
+0 \le E_t \le \min\!\left(EC_t,\; \max\!\left(G_t - L_t + B_d,\; 0\right)\right) \quad t \in T
+```
+
+These tightened bounds are what keep the QP bounded below when import
+prices are negative. As on the other QP paths, export prices are also
+clipped to $`PE_t \leftarrow \min(PE_t, PI_t)`$, with a warning emitted
+once when clipping occurs.
+
+**Unsupported parameters.** For $`0 \lt w \lt 1`$ the battery is
+modelled as **lossless and without degradation cost**: the `charge_eff`,
+`discharge_eff` and `cycle_cost` parameters of
+[`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)
+are ignored, consistently with the net power objective. Note that this
+creates a discontinuity at the endpoints, since `opt_objective = 0` is
+routed to the cost formulation, which *does* apply all three. If
+round-trip efficiencies or a cycle cost are essential for your use case,
+use `opt_objective = "cost"`.
+
+**Infeasible windows.** There is no fallback for this objective: if OSQP
+does not converge, the battery is disabled for that window (a zero
+profile is returned) and a warning is emitted.

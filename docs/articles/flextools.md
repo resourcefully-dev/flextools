@@ -159,12 +159,6 @@ opt_building <- opt_data %>%
   )
 ```
 
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. No optimization provided.
-
-    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
-
 We see that a lot of power demand is concentrated when the price has
 lower values to obtain the minimum energy cost. This behavior can be
 constrained by multiple ways:
@@ -196,9 +190,7 @@ opt_building <- opt_data %>%
   )
 ```
 
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
+    ## ⚠️ Optimization: export price exceeds import price in some slots; clipping for bounded QP.
 
 ### Battery flexibility
 
@@ -219,12 +211,6 @@ opt_battery <- opt_data %>%
     window_start_hour = 5
   )
 ```
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
 
 Since this example considers constant exported energy price, we can
 appreciate that battery discharges when the imported price goes up, and
@@ -255,11 +241,7 @@ opt_battery <- opt_data %>%
   )
 ```
 
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
 
 To find the optimal lambda, we can apply an iteration over multiple
 values and calculate two significant indicators: the **energy cost**
@@ -269,127 +251,26 @@ the battery shifted from charging to discharging (the lower the better).
 The following plot shows the normalized values (between 0 and 1) from
 these two indicators according to the `lambda` value:
 
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: maximum iterations reached. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
 
 We could consider the optimal lambda the “knee” of the curves, so
 approximately `lamda=0.1` as we have used before.
@@ -415,9 +296,7 @@ opt_battery <- opt_data %>%
   )
 ```
 
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
 
 ## Combined objectives
 
@@ -458,17 +337,9 @@ opt_building <- purrr::map(
   as_tibble()
 ```
 
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. No optimization provided.
+    ## ⚠️ Optimization: export price exceeds import price in some slots; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price in some slots; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price in some slots; clipping for bounded QP.
 
 We see that during production hours all three profiles follow the PV
 production as much as possible, but they differ in the periods where the
@@ -500,17 +371,9 @@ opt_battery <- purrr::map(
   as_tibble()
 ```
 
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
-
-    ## ⚠️ Optimization warning: optimization not feasible in some windows. Removing grid constraints.
-
-    ## ⚠️ Optimization warning: dual infeasible. Disabling battery for some windows.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
+    ## ⚠️ Optimization: export price exceeds import price; clipping for bounded QP.
 
 An interesting outcome of this simulation is that combining both
 objectives also smoothes out the effect of the price fluctuation in the

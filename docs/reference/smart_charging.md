@@ -73,9 +73,9 @@ smart_charging(
 
 - opt_objective:
 
-  character, optimization objective being `"none"`, `"grid"`, `"cost"`
-  or a value between 0 (cost) and 1 (grid). See details section for more
-  information about the different objectives.
+  character, optimization objective being `"none"`, `"grid"`, `"cost"`,
+  `"capacity"` or a value between 0 (cost) and 1 (grid). See details
+  section for more information about the different objectives.
 
 - method:
 
@@ -109,9 +109,9 @@ smart_charging(
 - charging_power_min:
 
   numeric. It can be configured in two ways: (1) minimum allowed ratio
-  (between 0 and 1) of nominal power (i.e. `Power` column in
-  `sessions`), or (2) specific value of minimum power (in kW) higher
-  than 1 kW.
+  (between 0 and 0.999) of nominal power (i.e. `Power` column in
+  `sessions`), or (2) specific value of minimum power (in kW) from 1 kW
+  or higher.
 
   For example, if `charging_power_min = 0.5` and `method = 'curtail'`,
   sessions' charging power can only be curtailed until the 50% of the
@@ -138,21 +138,28 @@ smart_charging(
 ## Value
 
 a list with three elements: optimal setpoints (tibble), sessions
-schedule (tibble) and log messages (list with character strings). The
-date-time values in the log list are in the time zone of the `opt_data`.
+schedule (tibble) and log messages (list of character vectors, one per
+window). The date-time values in the log list are in the time zone of
+the `opt_data`.
 
 ## Details
 
 An important parameter of this function is `opt_data`, which defines the
 time sequence of the smart charging algorithm and the optimization
 variables. The `opt_data` parameter is directly related with the
-`opt_objective` parameter. There are three different optimization
+`opt_objective` parameter. There are four different optimization
 objectives implemented by this function:
 
 - Minimize grid interaction (`opt_objective = "grid"`): minimizes the
   peak of the flexible load and the amount of imported power from the
   grid. If `production` is not found in `opt_data`, only a peak shaving
   objective will be considered.
+
+- Minimize capacity violations (`opt_objective = "capacity"`): minimizes
+  only the load slices that exceed the grid capacity limits
+  (`import_capacity` or `export_capacity` in `opt_data`), leaving the
+  rest of the load profile unchanged. Falls back to grid objective when
+  the capacity slice is infeasible.
 
 - Minimize the energy cost (`opt_objective = "cost"`): minimizes the
   energy cost. In this case, the columns `grid_capacity`,
@@ -169,8 +176,9 @@ objectives implemented by this function:
 - No optimization (`opt_objective = "none"`): this will skip
   optimization and at least one user profile name must be in an
   `opt_data` column to be considered as a setpoint for the scheduling
-  algorithm. The user profiles that don't appear in `opt_data` will not
-  be optimized.
+  algorithm, or a grid capacity variable such as `grid_capacity`,
+  `import_capacity`or `export_capacity`. The user profiles that don't
+  appear in `opt_data` will not be optimized.
 
 ## Examples
 

@@ -173,6 +173,10 @@ sc_results <- ev_sessions %>%
   )
 ```
 
+    ## Warning in check_optimization_data(opt_data, opt_objective): `production`
+    ## variable not found in `opt_data`. No local energy production will be
+    ## considered.
+
 ``` r
 
 ev_demand_opt <- sc_results$sessions %>% 
@@ -221,6 +225,10 @@ sc_results <- ev_sessions %>%
     )
   )
 ```
+
+    ## Warning in check_optimization_data(opt_data, opt_objective): `production`
+    ## variable not found in `opt_data`. No local energy production will be
+    ## considered.
 
 ``` r
 
@@ -310,6 +318,10 @@ sc_results <- ev_sessions %>%
     )
   )
 ```
+
+    ## Warning in check_optimization_data(opt_data, opt_objective): `production`
+    ## variable not found in `opt_data`. No local energy production will be
+    ## considered.
 
 ``` r
 

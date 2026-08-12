@@ -479,7 +479,7 @@ function:
 
 &nbsp;
 
-    ## [1] 162.2664
+    ## [1] 157.6218
 
 ### Energy cost with grid constraints
 
@@ -535,7 +535,7 @@ function:
 
 &nbsp;
 
-    ## [1] 175.217
+    ## [1] 172.0701
 
 In this case, **the cost optimization is not possible if the grid is
 constrained**.

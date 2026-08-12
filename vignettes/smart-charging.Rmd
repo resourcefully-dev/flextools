@@ -5,7 +5,7 @@ output: html_document
 
 
 ```{r setup, include = FALSE}
-knitr::opts_chunk$set(echo=FALSE, message=F, warning=FALSE, fig.width=12)
+knitr::opts_chunk$set(echo=FALSE, message=F, warning=FALSE, fig.width=9)
 library(flextools)
 library(dplyr)
 library(lubridate)
@@ -171,7 +171,11 @@ ev_demand <- ev_sessions %>%
   get_demand(by = "Session") 
 
 ev_demand %>% 
-  plot_ts(ylab = "Power demand (kW)", stackedGraph = T, fillGraph = T)
+  plot_ts(
+    ylab = "Power demand (kW)", 
+    stackedGraph = TRUE, fillGraph = TRUE,
+    legend_show = "onmouseover"
+  )
 ```
 
 

@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.2.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -78,29 +78,46 @@
     
     
 <p>Functions <code><a href="../reference/optimize_demand.html">optimize_demand()</a></code>,
-<code><a href="../reference/add_battery_optimization.html">add_battery_optimization()</a></code> or <code><a href="../reference/smart_charging.html">smart_charging()</a></code>
-make use of Quadratic programming in order to obtain the optimal power
-load given certain conditions. The Quadratic programming problem can be
-formulated according to multiple objectives. Currently,
+<code><a href="../reference/add_battery_optimization.html">add_battery_optimization()</a></code> and
+<code><a href="../reference/smart_charging.html">smart_charging()</a></code> solve one independent optimization problem
+per <strong>optimization window</strong> (typically one day). Depending
+on the objective and the variables involved, the window problem is
+solved either as a quadratic program (QP) with the <a href="https://osqp.org/" class="external-link">OSQP</a> backend, or as a linear or
+mixed-integer linear program (LP/MILP) with the <a href="https://highs.dev/" class="external-link">HiGHS</a> backend. Currently, the
 <code>flextools</code> package allows to optimize a time-series power
-load considering multiple objectives:</p>
+load considering the following objectives:</p>
 <ul>
-<li>Minimize the power exchanged with the grid (net power)</li>
-<li>Minimize the energy cost</li>
+<li>Minimize the power exchanged with the grid (net power), with
+<code>opt_objective = "grid"</code>
+</li>
+<li>Minimize only the power that exceeds the grid connection capacity,
+with <code>opt_objective = "capacity"</code>
+</li>
+<li>Minimize the energy cost, with
+<code>opt_objective = "cost"</code>
+</li>
+<li>Minimize a weighted combination of net power and cost, with a
+numeric <code>opt_objective</code> between <code>0</code> and
+<code>1</code>
+</li>
 </ul>
 <p>In this article, we’ll cover the optimization problem for the first
-objective, <strong>net power minimization</strong>, for both the
-<strong>flexible demand</strong> (e.g. heatpumps, electric vehicles,
-etc.) and the <strong>battery</strong>.</p>
+two objectives, <strong>net power minimization</strong> and <strong>grid
+capacity minimization</strong>, for both the <strong>flexible
+demand</strong> (e.g. heatpumps, electric vehicles, etc.) and the
+<strong>battery</strong>.</p>
 <div class="section level2">
 <h2 id="demand-optimization">Demand optimization<a class="anchor" aria-label="anchor" href="#demand-optimization"></a>
 </h2>
+<div class="section level3">
+<h3 id="net-power-objective">Net power objective<a class="anchor" aria-label="anchor" href="#net-power-objective"></a>
+</h3>
 <p>To minimize the energy exchanged with the distribution grid while
 maximizing the use of local generation, using the <strong>flexibility
 from a power demand profile</strong>, the objective function of the
 optimization problem has been raised in the following way:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>m</mi><mi>i</mi><mi>n</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mo stretchy="false" form="prefix">(</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>+</mo><msub><mi>O</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><msup><mo stretchy="false" form="postfix">)</mo><mn>2</mn></msup><mo>+</mo><mi>λ</mi><mo stretchy="false" form="prefix">(</mo><msub><mi>O</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><msup><mo stretchy="false" form="postfix">)</mo><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
-min \sum_{t=1}^{T} (LS_t + O_t - G_t)^2 + \lambda (O_t-LF_t)^{2}
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munder><mi mathvariant="normal">min</mi><msub><mi>O</mi><mi>t</mi></msub></munder><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msup><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>O</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup><mo>+</mo><mi>λ</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mrow><mi>T</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>O</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>O</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
+\min_{O_t} \; \sum_{t=1}^{T} \left(O_t + LS_t - G_t\right)^2 + \lambda \sum_{t=1}^{T-1}\left(O_{t+1} - O_t\right)^{2}
 </annotation></semantics></math></p>
 <p>Where:</p>
 <ul>
@@ -112,20 +129,41 @@ min \sum_{t=1}^{T} (LS_t + O_t - G_t)^2 + \lambda (O_t-LF_t)^{2}
 : Local power generation time-series vector</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">LS_t</annotation></semantics></math>
-: Non-flexible load time-series vector</li>
+: Non-flexible (static) load time-series vector</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">LF_t</annotation></semantics></math>
 : Flexible load time-series vector (if not optimized)</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>O</mi><mi>t</mi></msub><annotation encoding="application/x-tex">O_t</annotation></semantics></math>
-: Optimal flexible load time-series vector</li>
+: Optimal flexible load time-series vector (decision variable)</li>
+<li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mi>F</mi><mi>m</mi><mi>a</mi><msub><mi>x</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">LFmax_t</annotation></semantics></math>
+: Maximum power that the flexible load can consume
+(<code>load_capacity</code>)</li>
+<li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>,
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>
+: Grid import and export capacity</li>
+<li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>h</mi><annotation encoding="application/x-tex">h</annotation></semantics></math>
+: Time horizon, in number of time slots</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math>
-: penalty on change for the flexible load</li>
+: Ramping penalty weight</li>
 </ul>
-<p>Moreover, the squared term penalizes high values of net power, so the
+<p>The squared term penalizes high values of net power, so the
 optimization always results in the most flat as possible net power
-profile (<strong>peak shaving</strong>).</p>
+profile (<strong>peak shaving</strong>). The second term penalizes
+slot-to-slot changes in the optimal load, so a positive
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math>
+results in a smoother flexible load profile.</p>
+<p>The only decision variable is the optimal load
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>O</mi><mi>t</mi></msub><annotation encoding="application/x-tex">O_t</annotation></semantics></math>,
+so this objective is solved as a QP over
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>T</mi><annotation encoding="application/x-tex">T</annotation></semantics></math>
+variables. Grid import and export are not explicit variables here: they
+are fully determined by the energy balance
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>O</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">O_t + LS_t - G_t</annotation></semantics></math>.</p>
 <p>This optimization problem has the following constraints:</p>
 <ul>
 <li>The energy consumed by the flexible load must remain the same than
@@ -135,20 +173,28 @@ the expected behavior:</li>
 \sum_{t=1}^T O_t \Delta t = \sum_{t=1}^T LF_t \Delta t
 </annotation></semantics></math></p>
 <ul>
-<li>Optimal flexible load must be lower than a certain maximum power
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><msub><mi>F</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub></mrow><annotation encoding="application/x-tex">LF_{max}</annotation></semantics></math>:</li>
+<li>The optimal flexible load must respect both its own maximum power
+and the grid connection capacity. Since
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>O</mi><mi>t</mi></msub><annotation encoding="application/x-tex">O_t</annotation></semantics></math>
+is the only decision variable, the grid limits</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>O</mi><mi>t</mi></msub><mo>≤</mo><mi>L</mi><mi>F</mi><mi>m</mi><mi>a</mi><msub><mi>x</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le O_t \le LFmax_t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mi>O</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+-EC_t \;\le\; O_t + LS_t - G_t \;\le\; IC_t \quad t \in T
 </annotation></semantics></math></p>
-<ul>
-<li>The energy balance between generation and loads must be lower than
-the grid import capacity
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>:</li>
-</ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>O</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-O_t + LS_t - G_t \le IC_t \quad t \in T
+<p>are combined with
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>O</mi><mi>t</mi></msub><mo>≤</mo><mi>L</mi><mi>F</mi><mi>m</mi><mi>a</mi><msub><mi>x</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">0 \le O_t \le LFmax_t</annotation></semantics></math>
+into a single box bound:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><munder><mi>O</mi><mo accent="true">_</mo></munder><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mi>O</mi><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mover><mrow><mi>L</mi><mi>F</mi></mrow><mo accent="true">¯</mo></mover><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+\underline{O}_t \;\le\; O_t \;\le\; \overline{LF}_t \quad t \in T
 </annotation></semantics></math></p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mover><mrow><mi>L</mi><mi>F</mi></mrow><mo accent="true">¯</mo></mover><mi>t</mi></msub><mo>=</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>+</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mi>L</mi><mi>F</mi><mi>m</mi><mi>a</mi><msub><mi>x</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><msub><munder><mi>O</mi><mo accent="true">_</mo></munder><mi>t</mi></msub><mo>=</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><msub><mover><mrow><mi>L</mi><mi>F</mi></mrow><mo accent="true">¯</mo></mover><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+\overline{LF}_t = \min\!\left(\max\!\left(G_t - LS_t + IC_t,\; 0\right),\; LFmax_t\right), \qquad
+\underline{O}_t = \min\!\left(\max\!\left(G_t - LS_t - EC_t,\; 0\right),\; \overline{LF}_t\right)
+</annotation></semantics></math></p>
+<p>Note the lower bound: when the local generation exceeds the static
+load by more than the export capacity, the flexible load is
+<strong>forced</strong> to consume the surplus that cannot be
+exported.</p>
 <p>At the same time, we can optimize the flexible energy demand with two
 opposite approaches:</p>
 <ol style="list-style-type: lower-alpha">
@@ -216,16 +262,86 @@ will depend on the time horizon
 <p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>O</mi><mi>u</mi></msub><mo>≤</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mi>u</mi></mrow><mrow><mi>u</mi><mo>+</mo><mi>h</mi></mrow></munderover><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>u</mi><mo>=</mo><mn>1</mn><mi>…</mi><mi>T</mi></mrow><annotation encoding="application/x-tex">
 O_u \le \sum_{t = u}^{u+h} LF_t \quad u = 1 \dots T
 </annotation></semantics></math></p>
+<p>In both cases these horizon caps are intersected with the box bound
+above, so the effective upper bound on
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>O</mi><mi>t</mi></msub><annotation encoding="application/x-tex">O_t</annotation></semantics></math>
+is the minimum of the horizon cap and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mover><mrow><mi>L</mi><mi>F</mi></mrow><mo accent="true">¯</mo></mover><mi>t</mi></msub><annotation encoding="application/x-tex">\overline{LF}_t</annotation></semantics></math>.</p>
+<p><strong>Infeasible windows.</strong> When the grid capacities make a
+window infeasible, the grid limits are not simply dropped. Instead each
+capacity is raised only as far as the <em>original, unshifted</em>
+profile already requires,
+i.e. <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>+</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(IC_t,\; LS_t + LF_t - G_t)</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>S</mi><mi>t</mi></msub><mo>−</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(EC_t,\; G_t - LS_t - LF_t)</annotation></semantics></math>.
+Slots that were within their capacity keep the true limit, so the
+optimizer can never create a violation worse than the input profile
+already had. With these limits the do-nothing point
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>O</mi><mo>=</mo><mi>L</mi><mi>F</mi></mrow><annotation encoding="application/x-tex">O = LF</annotation></semantics></math>
+is feasible by construction. If the solver still fails, the original
+profile
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><mi>F</mi></mrow><annotation encoding="application/x-tex">LF</annotation></semantics></math>
+is returned unchanged.</p>
+</div>
+<div class="section level3">
+<h3 id="grid-capacity-objective">Grid capacity objective<a class="anchor" aria-label="anchor" href="#grid-capacity-objective"></a>
+</h3>
+<p>The <code>"capacity"</code> objective does not flatten the whole net
+power profile. Instead, it minimizes the <strong>amount of flexible
+energy that has to be moved</strong> in order to respect the grid
+connection limits, and only that moved energy is then reshaped. This is
+useful when the flexible load should be disturbed as little as possible
+and the only real requirement is to stay within the grid connection
+capacity.</p>
+<p>It is solved in two stages:</p>
+<p><strong>Stage 1 — select the minimal slice (LP, HiGHS).</strong> With
+decision variables
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>M</mi><mi>t</mi></msub><annotation encoding="application/x-tex">M_t</annotation></semantics></math>
+(the slice of flexible load removed from slot
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>t</mi><annotation encoding="application/x-tex">t</annotation></semantics></math>)
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msubsup><mi>O</mi><mi>t</mi><mi>M</mi></msubsup><annotation encoding="application/x-tex">O^M_t</annotation></semantics></math>
+(where that slice is placed):</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munder><mi mathvariant="normal">min</mi><mrow><msub><mi>M</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.167em"></mspace><msubsup><mi>O</mi><mi>t</mi><mi>M</mi></msubsup></mrow></munder><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>M</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">
+\min_{M_t,\, O^M_t} \; \sum_{t=1}^{T} M_t
+</annotation></semantics></math></p>
+<p>subject to
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>M</mi><mi>t</mi></msub><mo>≤</mo><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">0 \le M_t \le LF_t</annotation></semantics></math>,
+the same forward/backward horizon and energy conservation constraints as
+above applied to the pair
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false" form="prefix">(</mo><mi>M</mi><mo>,</mo><msup><mi>O</mi><mi>M</mi></msup><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">(M, O^M)</annotation></semantics></math>,
+and the requirement that the resulting profile respects the grid
+connection box:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><munder><mi>O</mi><mo accent="true">_</mo></munder><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo>−</mo><msub><mi>M</mi><mi>t</mi></msub><mo>+</mo><msubsup><mi>O</mi><mi>t</mi><mi>M</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mover><mrow><mi>L</mi><mi>F</mi></mrow><mo accent="true">¯</mo></mover><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+\underline{O}_t \;\le\; LF_t - M_t + O^M_t \;\le\; \overline{LF}_t \quad t \in T
+</annotation></semantics></math></p>
+<p>If the optimal slice is zero (the original profile already respects
+the grid limits), the flexible load is returned unchanged.</p>
+<p><strong>Stage 2 — reshape only that slice (QP, OSQP).</strong> The
+untouched part
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>L</mi><msub><mi>F</mi><mi>t</mi></msub><mo>−</mo><msub><mi>M</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">LF_t - M_t</annotation></semantics></math>
+is added to the static load, and the net power formulation of the
+previous section is applied to the slice
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>M</mi><mi>t</mi></msub><annotation encoding="application/x-tex">M_t</annotation></semantics></math>
+alone, with its maximum power reduced accordingly. The final result is
+the sum of the fixed part and the optimized slice.</p>
+<p>If Stage 1 is infeasible under the true capacities, the same minimal
+relaxation described above is applied and the plain net power
+formulation is used on the full flexible load.</p>
+</div>
 </div>
 <div class="section level2">
 <h2 id="battery-optimization">Battery optimization<a class="anchor" aria-label="anchor" href="#battery-optimization"></a>
 </h2>
+<div class="section level3">
+<h3 id="net-power-objective-1">Net power objective<a class="anchor" aria-label="anchor" href="#net-power-objective-1"></a>
+</h3>
 <p>To minimize the energy exchanged with the distribution grid while
 maximizing the use of local generation, using the <strong>flexibility
 from a battery</strong>, the objective function of the optimization
 problem has been raised in the following way:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munder><mi mathvariant="normal">min</mi><mrow><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><msub><mi>D</mi><mi>t</mi></msub></mrow></munder><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mo stretchy="false" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><msup><mo stretchy="false" form="postfix">)</mo><mn>2</mn></msup><mo>+</mo><mi>λ</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mrow><mi>T</mi><mo>−</mo><mn>1</mn></mrow></munderover><mo minsize="180%" maxsize="180%" stretchy="true" form="prefix">(</mo><mo stretchy="false" form="prefix">(</mo><msub><mi>C</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>D</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mo stretchy="false" form="prefix">(</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><msup><mo minsize="180%" maxsize="180%" stretchy="true" form="postfix">)</mo><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
-\min_{C_t, D_t} \sum_{t=1}^{T} (L_t + C_t - D_t - G_t)^2 + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munder><mi mathvariant="normal">min</mi><msub><mi>B</mi><mi>t</mi></msub></munder><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msup><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup><mo>+</mo><mi>λ</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mrow><mi>T</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>B</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>B</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
+\min_{B_t} \; \sum_{t=1}^{T} \left(L_t + B_t - G_t\right)^2 + \lambda \sum_{t=1}^{T-1}\left(B_{t+1} - B_t\right)^{2}
 </annotation></semantics></math></p>
 <p>Where:</p>
 <ul>
@@ -239,17 +355,12 @@ problem has been raised in the following way:</p>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>L</mi><mi>t</mi></msub><annotation encoding="application/x-tex">L_t</annotation></semantics></math>
 : Power load time-series vector</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>C</mi><mi>t</mi></msub><annotation encoding="application/x-tex">C_t</annotation></semantics></math>
-: Battery charging power (decision variable, non-negative)</li>
-<li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>D</mi><mi>t</mi></msub><annotation encoding="application/x-tex">D_t</annotation></semantics></math>
-: Battery discharging power (decision variable, non-negative)</li>
-<li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>B</mi><mi>t</mi></msub><mo>=</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">B_t = C_t - D_t</annotation></semantics></math>
-: Net battery exchange with the grid (positive = charging)</li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>B</mi><mi>t</mi></msub><annotation encoding="application/x-tex">B_t</annotation></semantics></math>
+: Net battery power exchange (decision variable, positive = charging,
+negative = discharging)</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>λ</mi><annotation encoding="application/x-tex">\lambda</annotation></semantics></math>
-: penalty on change for the flexible load</li>
+: Ramping penalty weight</li>
 </ul>
 <p>Additionally, this optimization problem also counts with the
 following parameters used in the constraints below:</p>
@@ -265,51 +376,95 @@ following parameters used in the constraints below:</p>
 : Maximum discharging power</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>i</mi><mi>n</mi></mrow></msub></mrow><annotation encoding="application/x-tex">SOC_{min}</annotation></semantics></math>
-: Minimum state of charge of the battery</li>
+: Minimum state of charge of the battery (%)</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub></mrow><annotation encoding="application/x-tex">SOC_{max}</annotation></semantics></math>
-: Maximum state of charge of the battery</li>
+: Maximum state of charge of the battery (%)</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub></mrow><annotation encoding="application/x-tex">SOC_{ini}</annotation></semantics></math>
-: State of charge at the beginning/end of the optimization window</li>
+: State of charge at the beginning/end of the optimization window
+(%)</li>
 <li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>η</mi><mi>c</mi></msub><annotation encoding="application/x-tex">\eta_c</annotation></semantics></math>
-: Battery charging efficiency</li>
-<li>
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>η</mi><mi>d</mi></msub><annotation encoding="application/x-tex">\eta_d</annotation></semantics></math>
-: Battery discharging efficiency</li>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>,
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>
+: Grid import and export capacity</li>
 </ul>
+<p>Note that, unlike the cost objective, the net power objective uses a
+<strong>single net battery variable</strong>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>B</mi><mi>t</mi></msub><annotation encoding="application/x-tex">B_t</annotation></semantics></math>
+instead of separate charging and discharging variables. The problem is
+therefore a QP over
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>T</mi><annotation encoding="application/x-tex">T</annotation></semantics></math>
+continuous variables, with <strong>no binary variables</strong>: since
+charging and discharging are the two signs of one variable, they cannot
+happen simultaneously by construction.</p>
 <p>Optimization constraints:</p>
 <ul>
-<li>Battery charging and discharging limits:</li>
+<li>Battery power limits, combined with the grid connection capacity.
+The battery power is bounded by its own charging and discharging limits
+and, at the same time, the net site power must respect the grid
+connection:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>C</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>c</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msub><mi>D</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>B</mi><mi>d</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le C_t \le B_c \quad t \in T \qquad 0 \le D_t \le B_d \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+-EC_t \;\le\; L_t + B_t - G_t \;\le\; IC_t \quad t \in T
+</annotation></semantics></math></p>
+<p>Both restrictions are imposed as a single box bound:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>−</mi><msub><mi>B</mi><mi>d</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mi>B</mi><mi>t</mi></msub><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>B</mi><mi>c</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+\max\!\left(-B_d,\; G_t - L_t - EC_t\right) \;\le\; B_t \;\le\; \min\!\left(B_c,\; G_t - L_t + IC_t\right) \quad t \in T
 </annotation></semantics></math></p>
 <ul>
-<li>State of charge limits, accounting for non-ideal charging and
-discharging:</li>
+<li>State of charge limits:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>i</mi><mi>n</mi></mrow></msub><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub><mo>+</mo><mfrac><mn>1</mn><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub></mfrac><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>t</mi></munderover><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>η</mi><mi>c</mi></msub><msub><mi>C</mi><mi>k</mi></msub><mo>−</mo><mfrac><msub><mi>D</mi><mi>k</mi></msub><msub><mi>η</mi><mi>d</mi></msub></mfrac><mo stretchy="true" form="postfix">)</mo></mrow><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>=</mo><mn>1</mn><mo>,</mo><mi>…</mi><mo>,</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-SOC_{min} \le SOC_{ini} + \frac{1}{B_{cap}} \sum_{k=1}^t \left(\eta_c C_k - \frac{D_k}{\eta_d}\right) \Delta t \le SOC_{max} \quad t = 1, \dots, T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>i</mi><mi>n</mi></mrow></msub><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub><mo>+</mo><mfrac><mn>100</mn><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub></mfrac><munderover><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>t</mi></munderover><msub><mi>B</mi><mi>k</mi></msub><mspace width="0.167em"></mspace><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>≤</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>=</mo><mn>1</mn><mo>,</mo><mi>…</mi><mo>,</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+SOC_{min} \le SOC_{ini} + \frac{100}{B_{cap}} \sum_{k=1}^t B_k \, \Delta t \le SOC_{max} \quad t = 1, \dots, T
 </annotation></semantics></math></p>
 <ul>
 <li>The balance of stored energy must be 0 at the end of the
 optimization window to keep the same initial state of charge:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>η</mi><mi>c</mi></msub><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><mfrac><msub><mi>D</mi><mi>t</mi></msub><msub><mi>η</mi><mi>d</mi></msub></mfrac><mo stretchy="true" form="postfix">)</mo></mrow><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">
-\sum_{t=1}^T \left(\eta_c C_t - \frac{D_t}{\eta_d}\right) \Delta t = 0
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msub><mi>B</mi><mi>t</mi></msub><mspace width="0.167em"></mspace><mi mathvariant="normal">Δ</mi><mi>t</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">
+\sum_{t=1}^T B_t \, \Delta t = 0
 </annotation></semantics></math></p>
-<ul>
-<li>The energy balance of generation and loads must be between the
-import capacity
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>
-and export capacity
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>:</li>
-</ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>C</mi><mi>t</mi></msub><mo>−</mo><msub><mi>D</mi><mi>t</mi></msub><mo>+</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
--EC_t \le C_t - D_t + L_t - G_t \le IC_t \quad t \in T
+<p><strong>Efficiencies.</strong> The <code>charge_eff</code> and
+<code>discharge_eff</code> parameters of
+<code><a href="../reference/add_battery_optimization.html">add_battery_optimization()</a></code> are <strong>not</strong> applied
+by the net power and grid capacity objectives, which assume a lossless
+battery
+(<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>η</mi><mi>c</mi></msub><mo>=</mo><msub><mi>η</mi><mi>d</mi></msub><mo>=</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">\eta_c = \eta_d = 1</annotation></semantics></math>).
+Round-trip losses are only embedded in the state-of-charge constraints
+of the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization">cost
+objective</a>.</p>
+<p><strong>Infeasible windows.</strong> As in the demand case, when the
+grid capacities make a window infeasible each capacity is raised only as
+far as the <em>pre-battery</em> profile already requires,
+i.e. <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(IC_t,\; L_t - G_t)</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(EC_t,\; G_t - L_t)</annotation></semantics></math>,
+which guarantees that
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">B = 0</annotation></semantics></math>
+is a feasible point. If OSQP does not converge, a greedy forward-pass
+heuristic clipped to the feasible box is used, and as a last resort the
+battery is disabled for that window.</p>
+</div>
+<div class="section level3">
+<h3 id="grid-capacity-objective-1">Grid capacity objective<a class="anchor" aria-label="anchor" href="#grid-capacity-objective-1"></a>
+</h3>
+<p>Like for the demand, the <code>"capacity"</code> objective for the
+battery only targets the power that exceeds the grid connection
+capacity, rather than flattening the whole net power profile. It reuses
+exactly the net power formulation above, but first <strong>curtails the
+usable battery capacity</strong> to the amount of energy that actually
+has to be displaced:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mo>=</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>1.01</mn><mo>⋅</mo><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+B_{cap}^{curtail} = \min\!\left(1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(G_t - L_t - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(L_t - G_t - IC_t,\; 0\right)\right),\;\; B_{cap}\right)
 </annotation></semantics></math></p>
+<p>The two sums are the total energy exported above the export capacity
+and imported above the import capacity by the original (pre-battery)
+profile. The 1% headroom ensures the resulting problem is strictly
+feasible. If the original profile causes no violation at all,
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">B_{cap}^{curtail} = 0</annotation></semantics></math>
+and the battery is left idle for that window.</p>
+</div>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>
     </nav></aside>

@@ -5,6 +5,8 @@ output: html_document
 
 This document is a technical reference for the battery optimization internals in `flextools`. It describes every solver formulation, the branching logic that selects between them, known performance bottlenecks, and directions for future improvement. It is intended for developers working on this codebase, not end users.
 
+> **Internal document.** This file deliberately lives in `dev/` rather than `vignettes/` so that `pkgdown` never builds or publishes it. Do not move it into `vignettes/` — that would deploy it to the public website. Render it locally with `rmarkdown::render("dev/solvers.Rmd")`. The public-facing formulations live in `vignettes/minimize_net_power.Rmd`, `vignettes/minimize_cost.Rmd` and `vignettes/combined_optimization.Rmd`, and should be kept in sync with this document whenever a solver changes.
+
 The public entry point is `add_battery_optimization()`. It dispatches to one of four objective-specific window solvers. Each solver operates independently on a contiguous block of time slots (one optimization **window**, typically one day). The outer loop in `add_battery_optimization()` applies the solver to each window via `purrr::map`.
 
 **Time scaling.** Battery capacity `Bcap` is converted internally as `Bcap_scaled = Bcap * 60 / time_resolution`, which converts from kWh to kW·slots so that energy and power share the same units inside every solver.

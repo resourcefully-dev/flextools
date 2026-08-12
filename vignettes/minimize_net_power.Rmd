@@ -3,53 +3,68 @@ title: "Net power optimization"
 output: html_document
 ---
 
-Functions `optimize_demand()`, `add_battery_optimization()` or `smart_charging()` make use of the `HiGHS` optimization backend in order to obtain the optimal power load given certain conditions. Depending on the objective and the variables involved, the problem is solved as a quadratic program (QP), mixed-integer linear program (MILP) or mixed-integer quadratic program (MIQP). Currently, `flextools` package allows to optimize a time-series power load considering multiple objectives:
+Functions `optimize_demand()`, `add_battery_optimization()` and `smart_charging()` solve one independent optimization problem per **optimization window** (typically one day). Depending on the objective and the variables involved, the window problem is solved either as a quadratic program (QP) with the [OSQP](https://osqp.org/) backend, or as a linear or mixed-integer linear program (LP/MILP) with the [HiGHS](https://highs.dev/) backend. Currently, the `flextools` package allows to optimize a time-series power load considering the following objectives:
 
-* Minimize the power exchanged with the grid (net power)
-* Minimize the energy cost
+* Minimize the power exchanged with the grid (net power), with `opt_objective = "grid"`
+* Minimize only the power that exceeds the grid connection capacity, with `opt_objective = "capacity"`
+* Minimize the energy cost, with `opt_objective = "cost"`
+* Minimize a weighted combination of net power and cost, with a numeric `opt_objective` between `0` and `1`
 
-In this article, we'll cover the optimization problem for the first objective, **net power minimization**, for both the **flexible demand** (e.g. heatpumps, electric vehicles, etc.) and the **battery**.
+In this article, we'll cover the optimization problem for the first two objectives, **net power minimization** and **grid capacity minimization**, for both the **flexible demand** (e.g. heatpumps, electric vehicles, etc.) and the **battery**.
 
 
 # Demand optimization
 
+## Net power objective
+
 To minimize the energy exchanged with the distribution grid while maximizing the use of local generation, using the **flexibility from a power demand profile**, the objective function of the optimization problem has been raised in the following way:
 
 $$
-min \sum_{t=1}^{T} (LS_t + O_t - G_t)^2 + \lambda (O_t-LF_t)^{2}
+\min_{O_t} \; \sum_{t=1}^{T} \left(O_t + LS_t - G_t\right)^2 + \lambda \sum_{t=1}^{T-1}\left(O_{t+1} - O_t\right)^{2}
 $$
 
 Where:
 
 - $T$ : Number of time intervals within the optimization window
 - $G_t$ : Local power generation time-series vector
-- $LS_t$ : Non-flexible load time-series vector
+- $LS_t$ : Non-flexible (static) load time-series vector
 - $LF_t$ : Flexible load time-series vector (if not optimized)
-- $O_t$ : Optimal flexible load time-series vector
-- $\lambda$ : penalty on change for the flexible load
+- $O_t$ : Optimal flexible load time-series vector (decision variable)
+- $LFmax_t$ : Maximum power that the flexible load can consume (`load_capacity`)
+- $IC_t$, $EC_t$ : Grid import and export capacity
+- $h$ : Time horizon, in number of time slots
+- $\lambda$ : Ramping penalty weight
 
-Moreover, the squared term penalizes high values of net power, so the optimization always results in the most flat as possible net power profile (**peak shaving**).
+The squared term penalizes high values of net power, so the optimization always results in the most flat as possible net power profile (**peak shaving**). The second term penalizes slot-to-slot changes in the optimal load, so a positive $\lambda$ results in a smoother flexible load profile.
 
+The only decision variable is the optimal load $O_t$, so this objective is solved as a QP over $T$ variables. Grid import and export are not explicit variables here: they are fully determined by the energy balance $O_t + LS_t - G_t$.
 
 This optimization problem has the following constraints:
-  
+
 * The energy consumed by the flexible load must remain the same than the expected behavior:
 
 $$
 \sum_{t=1}^T O_t \Delta t = \sum_{t=1}^T LF_t \Delta t
 $$
 
-* Optimal flexible load must be lower than a certain maximum power $LF_{max}$:
+* The optimal flexible load must respect both its own maximum power and the grid connection capacity. Since $O_t$ is the only decision variable, the grid limits
 
 $$
-0 \le O_t \le LFmax_t \quad t \in T
+-EC_t \;\le\; O_t + LS_t - G_t \;\le\; IC_t \quad t \in T
 $$
 
-* The energy balance between generation and loads must be lower than the grid import capacity $IC_t$:
+are combined with $0 \le O_t \le LFmax_t$ into a single box bound:
 
 $$
-O_t + LS_t - G_t \le IC_t \quad t \in T
+\underline{O}_t \;\le\; O_t \;\le\; \overline{LF}_t \quad t \in T
 $$
+
+$$
+\overline{LF}_t = \min\!\left(\max\!\left(G_t - LS_t + IC_t,\; 0\right),\; LFmax_t\right), \qquad
+\underline{O}_t = \min\!\left(\max\!\left(G_t - LS_t - EC_t,\; 0\right),\; \overline{LF}_t\right)
+$$
+
+Note the lower bound: when the local generation exceeds the static load by more than the export capacity, the flexible load is **forced** to consume the surplus that cannot be exported.
 
 At the same time, we can optimize the flexible energy demand with two opposite approaches:
 
@@ -61,7 +76,7 @@ We consider both approaches for different objectives or applications. The energy
 If the energy can only be shifted **forward**:
 
 * The cumulative sum of the optimal load $O$ must be higher than the cumulative sum of the original flexible load $LF$ except the last $h$ time slots, and lower than the total cumulative sum of the original flexible load $LF$ (energy can only be shifted forwards):
-    
+
 $$
 \sum_{t = 1}^{u-h} LF_t \le \sum_{t=1}^u O_t \le \sum_{t=1}^u LF_t \quad u = 1 \dots T
 $$
@@ -72,11 +87,10 @@ $$
 O_u \le \sum_{t = u-h}^u LF_t \quad u = 1 \dots T
 $$
 
-
 If the energy can only be shifted **backward**:
 
 * The cumulative sum of the optimal demand $O$ must be higher than the total cumulative sum of the original demand $LF$ (energy can only be shifted backwards), and lower than the cumulative sum of the original demand $LF$ except the following $h$ time slots:
-    
+
 $$
 \sum_{t=1}^u LF_t \le \sum_{t=1}^u O_t \le \sum_{t=1}^{u+h} LF_t \quad u = 1 \dots T
 $$
@@ -87,64 +101,103 @@ $$
 O_u \le \sum_{t = u}^{u+h} LF_t \quad u = 1 \dots T
 $$
 
+In both cases these horizon caps are intersected with the box bound above, so the effective upper bound on $O_t$ is the minimum of the horizon cap and $\overline{LF}_t$.
+
+**Infeasible windows.** When the grid capacities make a window infeasible, the grid limits are not simply dropped. Instead each capacity is raised only as far as the *original, unshifted* profile already requires, i.e. $\max(IC_t,\; LS_t + LF_t - G_t)$ and $\max(EC_t,\; G_t - LS_t - LF_t)$. Slots that were within their capacity keep the true limit, so the optimizer can never create a violation worse than the input profile already had. With these limits the do-nothing point $O = LF$ is feasible by construction. If the solver still fails, the original profile $LF$ is returned unchanged.
+
+
+## Grid capacity objective
+
+The `"capacity"` objective does not flatten the whole net power profile. Instead, it minimizes the **amount of flexible energy that has to be moved** in order to respect the grid connection limits, and only that moved energy is then reshaped. This is useful when the flexible load should be disturbed as little as possible and the only real requirement is to stay within the grid connection capacity.
+
+It is solved in two stages:
+
+**Stage 1 — select the minimal slice (LP, HiGHS).** With decision variables $M_t$ (the slice of flexible load removed from slot $t$) and $O^M_t$ (where that slice is placed):
+
+$$
+\min_{M_t,\, O^M_t} \; \sum_{t=1}^{T} M_t
+$$
+
+subject to $0 \le M_t \le LF_t$, the same forward/backward horizon and energy conservation constraints as above applied to the pair $(M, O^M)$, and the requirement that the resulting profile respects the grid connection box:
+
+$$
+\underline{O}_t \;\le\; LF_t - M_t + O^M_t \;\le\; \overline{LF}_t \quad t \in T
+$$
+
+If the optimal slice is zero (the original profile already respects the grid limits), the flexible load is returned unchanged.
+
+**Stage 2 — reshape only that slice (QP, OSQP).** The untouched part $LF_t - M_t$ is added to the static load, and the net power formulation of the previous section is applied to the slice $M_t$ alone, with its maximum power reduced accordingly. The final result is the sum of the fixed part and the optimized slice.
+
+If Stage 1 is infeasible under the true capacities, the same minimal relaxation described above is applied and the plain net power formulation is used on the full flexible load.
+
+
 # Battery optimization
+
+## Net power objective
 
 To minimize the energy exchanged with the distribution grid while maximizing the use of local generation, using the **flexibility from a battery**, the objective function of the optimization problem has been raised in the following way:
 
 $$
-\min_{C_t, D_t} \sum_{t=1}^{T} (L_t + C_t - D_t - G_t)^2 + \lambda \sum_{t=1}^{T-1}\Big((C_{t+1} - D_{t+1}) - (C_t - D_t)\Big)^{2}
+\min_{B_t} \; \sum_{t=1}^{T} \left(L_t + B_t - G_t\right)^2 + \lambda \sum_{t=1}^{T-1}\left(B_{t+1} - B_t\right)^{2}
 $$
-
 
 Where:
 
 - $T$ : Number of time intervals within the optimization window
 - $G_t$ : Local power generation time-series vector
 - $L_t$ : Power load time-series vector
-- $C_t$ : Battery charging power (decision variable, non-negative)
-- $D_t$ : Battery discharging power (decision variable, non-negative)
-- $B_t = C_t - D_t$ : Net battery exchange with the grid (positive = charging)
-- $z_t$ : binary battery mode (1 = charging, 0 = discharging)
-- $\lambda$ : penalty on change for the flexible load
-
+- $B_t$ : Net battery power exchange (decision variable, positive = charging, negative = discharging)
+- $\lambda$ : Ramping penalty weight
 
 Additionally, this optimization problem also counts with the following parameters used in the constraints below:
 
 - $B_{cap}$ : Battery capacity
 - $B_c$ : Maximum charging power
 - $B_d$ : Maximum discharging power
-- $SOC_{min}$ : Minimum state of charge of the battery
-- $SOC_{max}$ : Maximum state of charge of the battery
-- $SOC_{ini}$ : State of charge at the beginning/end of the optimization window
-- $\eta_c$ : Battery charging efficiency
-- $\eta_d$ : Battery discharging efficiency
-  
+- $SOC_{min}$ : Minimum state of charge of the battery (%)
+- $SOC_{max}$ : Maximum state of charge of the battery (%)
+- $SOC_{ini}$ : State of charge at the beginning/end of the optimization window (%)
+- $IC_t$, $EC_t$ : Grid import and export capacity
+
+Note that, unlike the cost objective, the net power objective uses a **single net battery variable** $B_t$ instead of separate charging and discharging variables. The problem is therefore a QP over $T$ continuous variables, with **no binary variables**: since charging and discharging are the two signs of one variable, they cannot happen simultaneously by construction.
 
 Optimization constraints:
-  
-* Battery charging and discharging limits:
+
+* Battery power limits, combined with the grid connection capacity. The battery power is bounded by its own charging and discharging limits and, at the same time, the net site power must respect the grid connection:
 
 $$
-0 \le C_t \le B_c z_t \qquad 0 \le D_t \le B_d (1-z_t) \qquad z_t \in \{0,1\} \quad t \in T
+-EC_t \;\le\; L_t + B_t - G_t \;\le\; IC_t \quad t \in T
 $$
 
-* State of charge limits, accounting for non-ideal charging and discharging:
+Both restrictions are imposed as a single box bound:
 
 $$
-SOC_{min} \le SOC_{ini} + \frac{1}{B_{cap}} \sum_{k=1}^t \left(\eta_c C_k - \frac{D_k}{\eta_d}\right) \Delta t \le SOC_{max} \quad t = 1, \dots, T
+\max\!\left(-B_d,\; G_t - L_t - EC_t\right) \;\le\; B_t \;\le\; \min\!\left(B_c,\; G_t - L_t + IC_t\right) \quad t \in T
+$$
+
+* State of charge limits:
+
+$$
+SOC_{min} \le SOC_{ini} + \frac{100}{B_{cap}} \sum_{k=1}^t B_k \, \Delta t \le SOC_{max} \quad t = 1, \dots, T
 $$
 
 * The balance of stored energy must be 0 at the end of the optimization window to keep the same initial state of charge:
 
 $$
-\sum_{t=1}^T \left(\eta_c C_t - \frac{D_t}{\eta_d}\right) \Delta t = 0
+\sum_{t=1}^T B_t \, \Delta t = 0
 $$
 
-* The energy balance of generation and loads must be between the import capacity $IC_t$ and export capacity $EC_t$:
+**Efficiencies.** The `charge_eff` and `discharge_eff` parameters of `add_battery_optimization()` are **not** applied by the net power and grid capacity objectives, which assume a lossless battery ($\eta_c = \eta_d = 1$). Round-trip losses are only embedded in the state-of-charge constraints of the [cost objective](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization).
+
+**Infeasible windows.** As in the demand case, when the grid capacities make a window infeasible each capacity is raised only as far as the *pre-battery* profile already requires, i.e. $\max(IC_t,\; L_t - G_t)$ and $\max(EC_t,\; G_t - L_t)$, which guarantees that $B = 0$ is a feasible point. If OSQP does not converge, a greedy forward-pass heuristic clipped to the feasible box is used, and as a last resort the battery is disabled for that window.
+
+
+## Grid capacity objective
+
+Like for the demand, the `"capacity"` objective for the battery only targets the power that exceeds the grid connection capacity, rather than flattening the whole net power profile. It reuses exactly the net power formulation above, but first **curtails the usable battery capacity** to the amount of energy that actually has to be displaced:
 
 $$
--EC_t \le C_t - D_t + L_t - G_t \le IC_t \quad t \in T
+B_{cap}^{curtail} = \min\!\left(1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(G_t - L_t - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(L_t - G_t - IC_t,\; 0\right)\right),\;\; B_{cap}\right)
 $$
 
-
-
+The two sums are the total energy exported above the export capacity and imported above the import capacity by the original (pre-battery) profile. The 1% headroom ensures the resulting problem is strictly feasible. If the original profile causes no violation at all, $B_{cap}^{curtail} = 0$ and the battery is left idle for that window.

@@ -52,12 +52,12 @@ $$
 Both `"grid"` and `"capacity"` objectives use a single net battery variable $B_t$ (no import/export split), solved with OSQP as a QP. The objective minimises the squared net power exchanged with the grid, with an optional smoothness penalty:
 
 $$
-\min_{B_t} \; \sum_{t=1}^{T} \Big(B_t - (L_t - G_t)\Big)^2 + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
+\min_{B_t} \; \sum_{t=1}^{T} \Big(L_t + B_t - G_t\Big)^2 + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
 $$
 
 The first term drives the net grid flow $(L_t + B_t - G_t)$ towards zero (self-sufficiency / peak shaving). The second term penalises ramps in battery power when $\lambda > 0$.
 
-In matrix form: $\min_B \; B^\top P B + q^\top B$ with
+Expanding the first term gives $\sum_t B_t^2 + 2\sum_t (L_t - G_t) B_t + \sum_t (L_t - G_t)^2$, where the last sum is constant in $B$ and is dropped. In matrix form: $\min_B \; B^\top P B + q^\top B$ with
 
 $$
 P = 2\,(I + \lambda\,\Lambda), \qquad q = 2\,(L - G)
@@ -107,13 +107,27 @@ $$
 
 The 1% headroom ensures strict feasibility. If $B_{cap,curtail} = 0$ (no grid violations), the solver is skipped and a zero vector is returned.
 
+## Bound relaxation (grid/capacity only)
+
+Grid capacities are never *removed* when a window is infeasible. Instead each cap is raised only as far as the **pre-battery profile already requires**:
+
+$$
+IC^{rel}_t = \max(IC_t,\; L_t - G_t) + \epsilon, \qquad
+EC^{rel}_t = \max(EC_t,\; G_t - L_t) + \epsilon
+$$
+
+with $\epsilon = 10^{-5}$ (`optimization_solution_tolerance()`) absorbing the 2-decimal rounding of the bounds. Slots already within their cap keep the true capacity, so the battery can never create a grid violation worse than the pre-battery profile. These caps make $B = 0$ feasible **by construction**: $lb_B \le 0 \le ub_B$, $\text{cumsum}(0) = 0$ lies inside the SOC band (since $SOC_{min} \le SOC_{ini} \le SOC_{max}$), and $\sum_t 0 = 0$ satisfies energy neutrality.
+
 ## Fallback chain (grid/capacity only)
 
-1. OSQP QP on original bounds
+0. **Pre-solve check** — if the true bounds give an empty box ($lb_{B,t} > ub_{B,t}$ for any $t$), the relaxed caps are substituted before the first solve and steps 3–4 are skipped
+1. OSQP QP on the current bounds
 2. Greedy heuristic (`battery_qp_try_heuristic`) — forward-pass clipped to feasible box
-3. OSQP QP with relaxed bounds (grid capacity constraints removed)
+3. OSQP QP with relaxed bounds (only if step 0 did not already relax them)
 4. Heuristic again on relaxed bounds
 5. Zero vector (battery disabled for this window)
+
+Because of the feasibility-by-construction argument above, step 5 is unreachable for well-formed inputs — reaching it means the solver itself crashed, and the warning says so.
 
 ---
 
@@ -268,7 +282,7 @@ This keeps the quadratic and linear magnitudes comparable, which helps OSQP's AD
 **Variables:** $B_t,\, I_t,\, E_t$ (continuous), $3T$ total.
 
 $$
-\min_{B_t,\, I_t,\, E_t} \; w \cdot \sigma \sum_{t=1}^{T} \Big(B_t - (L_t - G_t)\Big)^2 + (1-w) \sum_{t=1}^{T} \left(\pi^I_t \cdot I_t - \pi^E_t \cdot E_t\right) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
+\min_{B_t,\, I_t,\, E_t} \; w \cdot \sigma \sum_{t=1}^{T} \Big(L_t + B_t - G_t\Big)^2 + (1-w) \sum_{t=1}^{T} \left(\pi^I_t \cdot I_t - \pi^E_t \cdot E_t\right) + \lambda \sum_{t=1}^{T-1}(B_{t+1} - B_t)^2
 $$
 
 where $\sigma = \bar{\pi}^2$ (squared mean import price over the window) is a scaling factor that makes the grid term dimensionally comparable to the cost term.

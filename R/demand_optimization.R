@@ -70,7 +70,7 @@ get_bounds <- function(
     ub_cumsum <- horizonMat_cumsum %*% LF
 
     ub_shift <- horizonMat_identity %*% LF
-    ub_O <- pmin(pmax(ub_shift, lb_O), LFmax)
+    ub_O <- pmin(pmax(ub_shift, lb_O), LFmax_vct)
   }
 
   list(
@@ -1008,7 +1008,11 @@ demand_solve_window <- function(
 
   solve_window_problem <- demand_select_window_solver(solver_data)
 
-  solve_with_capacities <- function(import_cap, export_cap, clamp_to_lf = FALSE) {
+  solve_with_capacities <- function(
+    import_cap,
+    export_cap,
+    clamp_to_lf = FALSE
+  ) {
     bounds <- solver_data$bounds_with_capacities(
       import_cap,
       export_cap,

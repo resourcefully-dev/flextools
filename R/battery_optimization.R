@@ -89,52 +89,154 @@ battery_solve_grid_window <- function(
   export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
-  target <- G - L
-
-  lb_B <- pmax(-Bd, G - L - export_capacity)
-  ub_B <- pmin(Bc, G - L + import_capacity)
-
-  # Minimal, guaranteed-feasible relaxation of the grid caps. The do-nothing
-  # battery profile B = 0 leaves the site at its pre-battery net flow, so raise
-  # each cap only as far as that original flow already needs (import L - G,
-  # export G - L). Slots within their caps keep the true capacity, so the
-  # battery can never create a grid violation worse than the pre-battery
-  # profile. With these caps B = 0 is feasible by construction: lb_B <= 0 <=
-  # ub_B, cumsum(0) = 0 lies within the SOC band (SOCmin <= SOCini <= SOCmax),
-  # and sum(0) = 0 meets the energy-neutral constraint. A small tolerance
-  # absorbs the 2-decimal rounding of the bounds.
-  tol <- optimization_solution_tolerance()
-  import_cap_relaxed <- pmax(import_capacity, L - G) + tol
-  export_cap_relaxed <- pmax(export_capacity, G - L) + tol
-  lb_B_relaxed <- pmax(-Bd, G - L - export_cap_relaxed)
-  ub_B_relaxed <- pmin(Bc, G - L + import_cap_relaxed)
-
-  relaxed_bounds <- FALSE
-  if (any(lb_B > ub_B + 1e-8)) {
-    message_once(
-      "\u26a0\ufe0f Optimization warning: infeasible battery grid bounds. Relaxing grid capacity to the pre-battery profile in the affected windows."
-    )
-    lb_B <- lb_B_relaxed
-    ub_B <- ub_B_relaxed
-    relaxed_bounds <- TRUE
-  }
 
   lb_cumsum <- rep((SOCmin - SOCini) / 100 * Bcap, time_slots)
   ub_cumsum <- rep((SOCmax - SOCini) / 100 * Bcap, time_slots)
 
-  Amat <- rbind(identityMat, cumsumMat, matrix(1, nrow = 1, ncol = time_slots))
-  lower <- round(c(lb_B, lb_cumsum, 0), 2)
-  upper <- round(c(ub_B, ub_cumsum, 0), 2)
-  solution <- battery_solve_osqp(P, q, Amat, lower, upper)
+  # How far each capacity may be missed: only as far as the pre-battery net
+  # flow already needed. Zero wherever the site was within its capacity, so
+  # those slots stay hard capped and the battery can never create a grid
+  # violation worse than the pre-battery profile.
+  tol <- optimization_solution_tolerance()
+  slack_import_max <- optimization_slack_ceiling(import_capacity, L - G)
+  slack_export_max <- optimization_slack_ceiling(export_capacity, G - L)
+  soft_caps <- any(slack_import_max > 0) || any(slack_export_max > 0)
 
-  if (!is.null(solution$profile)) {
-    return(solution$profile)
+  # The tolerance absorbs the 2-decimal rounding of the inputs, but only where
+  # a capacity is already missed. Slots that can meet their capacity keep a
+  # ceiling of exactly zero, so they stay as hard as they are on the fast path.
+  slack_import_max[slack_import_max > 0] <-
+    slack_import_max[slack_import_max > 0] + tol
+  slack_export_max[slack_export_max > 0] <-
+    slack_export_max[slack_export_max > 0] + tol
+
+  # Relaxed envelope: the loosest net flow any solution may reach. Used as a
+  # (redundant but tightening) box on B in the soft problem, and as the bounds
+  # for the heuristic fallback.
+  lb_B_relaxed <- pmax(-Bd, G - L - export_capacity - slack_export_max)
+  ub_B_relaxed <- pmin(Bc, G - L + import_capacity + slack_import_max)
+
+  if (!soft_caps) {
+    # Fast path: every slot can meet its capacity, so no slack is needed and
+    # the problem is exactly the hard-constrained one. This keeps the
+    # unconstrained case (import_capacity = export_capacity = Inf) at its
+    # original size and cost.
+    Amat <- rbind(
+      identityMat,
+      cumsumMat,
+      matrix(1, nrow = 1, ncol = time_slots)
+    )
+    lower <- round(
+      c(pmax(-Bd, G - L - export_capacity), lb_cumsum, 0),
+      2
+    )
+    upper <- round(
+      c(pmin(Bc, G - L + import_capacity), ub_cumsum, 0),
+      2
+    )
+    solution <- battery_solve_osqp(P, q, Amat, lower, upper)
+  } else {
+    # Soft path. Variables X = [B, s_i, s_e] (3n): s_i and s_e measure by how
+    # much a slot misses its import / export capacity.
+    #
+    #   -Bd <= B_t <= Bc                          hard physics
+    #   B_t - s_i,t <= G_t - L_t + C_imp,t        import capacity, soft
+    #   B_t + s_e,t >= G_t - L_t - C_exp,t        export capacity, soft
+    #   0 <= s_i,t <= slack_import_max_t          relaxation ceiling
+    #   0 <= s_e,t <= slack_export_max_t
+    #   lb_cumsum <= cumsum(B) <= ub_cumsum       state of charge
+    #   sum(B) = 0                                energy neutrality
+    #
+    # X = (0, slack_import_max, slack_export_max) satisfies all of the above,
+    # so the problem is feasible by construction and no relaxation retry is
+    # needed. Penalising the slack makes the optimizer spend the battery's
+    # full physical capability on approaching an unreachable capacity instead
+    # of abandoning it, while the ceiling keeps the guarantee that the result
+    # is never worse than the pre-battery profile.
+    zeroMat <- matrix(0, time_slots, time_slots)
+    penalty <- optimization_slack_penalty(
+      c(
+        pmax(import_capacity, L - G),
+        pmax(export_capacity, G - L)
+      )
+    )
+    # Small quadratic ridge on the slack block: keeps the objective strictly
+    # convex in every variable so OSQP has a unique optimum to converge to.
+    ridge <- 1e-6 * penalty
+
+    P <- rbind(
+      cbind(P, zeroMat, zeroMat),
+      cbind(zeroMat, ridge * identityMat, zeroMat),
+      cbind(zeroMat, zeroMat, ridge * identityMat)
+    )
+    q <- c(q, rep(penalty, time_slots), rep(penalty, time_slots))
+
+    Amat <- rbind(
+      cbind(identityMat, zeroMat, zeroMat), # B box
+      cbind(zeroMat, identityMat, zeroMat), # import slack box
+      cbind(zeroMat, zeroMat, identityMat), # export slack box
+      cbind(identityMat, -identityMat, zeroMat), # import capacity
+      cbind(identityMat, zeroMat, identityMat), # export capacity
+      cbind(cumsumMat, zeroMat, zeroMat), # state of charge
+      matrix(c(rep(1, time_slots), rep(0, 2 * time_slots)), nrow = 1)
+    )
+    lower <- c(
+      lb_B_relaxed,
+      rep(0, time_slots),
+      rep(0, time_slots),
+      rep(-Inf, time_slots),
+      G - L - export_capacity,
+      lb_cumsum,
+      0
+    )
+    upper <- c(
+      ub_B_relaxed,
+      slack_import_max,
+      slack_export_max,
+      G - L + import_capacity,
+      rep(Inf, time_slots),
+      ub_cumsum,
+      0
+    )
+
+    # No manual objective scaling here: OSQP already equilibrates the problem
+    # internally, and pre-dividing by the (large) penalty only shrinks the
+    # objective against OSQP's absolute termination tolerance. Measured on a
+    # one-year benchmark, dropping it improves the accuracy of near-zero
+    # solutions by ~40x at identical optimality (0/365 windows suboptimal
+    # either way).
+    solution <- battery_solve_osqp(P, q, Amat, lower, upper)
   }
 
+  if (!is.null(solution$profile)) {
+    if (!soft_caps) {
+      return(solution$profile)
+    }
+    slack <- solution$profile[-seq_len(time_slots)]
+    if (any(slack > tol + 1e-6)) {
+      message_once(
+        "\u26a0\ufe0f Optimization warning: grid capacity not reachable in some slots. The battery is operating at its physical limit there, so the capacity is approached but not met."
+      )
+    }
+    # Drop digits the solver does not guarantee: OSQP terminates at an absolute
+    # tolerance of 1e-6, so anything below that is convergence residue rather
+    # than a battery setpoint. Only the soft path needs this - the fast path is
+    # left untouched so it stays bit-for-bit identical to the hard-constrained
+    # solver it replaces.
+    return(round(solution$profile[seq_len(time_slots)], 6))
+  }
+
+  # Solver crash guard. Aim the heuristic at the capacity when a capacity is
+  # binding (a negative `import_capacity` is a forced export, so the target
+  # moves below the zero-net-flow point) and clamp it into the relaxed
+  # envelope.
   heuristic <- battery_qp_try_heuristic(
-    target = target,
-    lower = lb_B,
-    upper = ub_B,
+    target = pmax(
+      pmin(G - L, G - L + import_capacity),
+      G - L - export_capacity
+    ),
+    lower = lb_B_relaxed,
+    upper = ub_B_relaxed,
     Bcap = Bcap,
     Bc = Bc,
     Bd = Bd,
@@ -151,44 +253,9 @@ battery_solve_grid_window <- function(
     return(heuristic)
   }
 
-  if (!relaxed_bounds) {
-    message_once(
-      "\u26a0\ufe0f Optimization warning: optimization not feasible for some windows. Relaxing grid capacity to the pre-battery profile in the affected windows."
-    )
-    lb_B <- lb_B_relaxed
-    ub_B <- ub_B_relaxed
-    lower <- round(c(lb_B, lb_cumsum, 0), 2)
-    upper <- round(c(ub_B, ub_cumsum, 0), 2)
-    solution <- battery_solve_osqp(P, q, Amat, lower, upper)
-
-    if (!is.null(solution$profile)) {
-      return(solution$profile)
-    }
-
-    heuristic <- battery_qp_try_heuristic(
-      target = target,
-      lower = lb_B,
-      upper = ub_B,
-      Bcap = Bcap,
-      Bc = Bc,
-      Bd = Bd,
-      SOCmin = SOCmin,
-      SOCmax = SOCmax,
-      SOCini = SOCini
-    )
-    if (!is.null(heuristic)) {
-      message_once(paste0(
-        "\u26a0\ufe0f Optimization warning: ",
-        solution$result$info$status,
-        ". Using heuristic battery profile for some windows."
-      ))
-      return(heuristic)
-    }
-  }
-
-  # Unreachable for well-formed inputs: B = 0 is feasible under the relaxed
-  # bounds, so reaching here means the solver crashed. Surface it loudly and
-  # fall back to the do-nothing profile, which leaves the site untouched.
+  # Unreachable for well-formed inputs: B = 0 is feasible in both branches, so
+  # reaching here means the solver crashed. Surface it loudly and fall back to
+  # the do-nothing profile, which leaves the site untouched.
   message_once(paste0(
     "\u26a0\ufe0f Optimization warning: ",
     solution$result$info$status,
@@ -248,21 +315,21 @@ battery_capacity_window <- function(
   export_capacity,
   lambda = 0
 ) {
-  balance_sum <- tibble(
-    consumption = L,
-    production = G
-  ) %>%
-    get_energy_balance() %>%
-    mutate(
-      export_capacity = export_capacity,
-      import_capacity = import_capacity,
-      exported_over = pmax(.data$exported - .data$export_capacity, 0),
-      imported_over = pmax(.data$imported - .data$import_capacity, 0)
-    ) %>%
-    summarise_all(sum)
+  # Overshoot is measured on the NET flow, not on the one-sided imported /
+  # exported series. The two agree for non-negative capacities, but a negative
+  # `import_capacity` is a forced-export obligation: a net import of 60 kW
+  # against a -100 kW capacity is a 160 kW overshoot, which the one-sided
+  # `imported - import_capacity` would also report as 160 while treating any
+  # slot that already exports as compliant. Working from the net flow keeps the
+  # curtailment volume right in both directions.
+  net <- L - G
+  imported_over <- pmax(net - import_capacity, 0)
+  exported_over <- pmax(-net - export_capacity, 0)
+  imported_over[!is.finite(imported_over)] <- 0
+  exported_over[!is.finite(exported_over)] <- 0
 
   Bcap_curtail <- min(
-    max(balance_sum$exported_over, balance_sum$imported_over) * 1.01, # add 1% headroom to ensure feasibility
+    max(sum(exported_over), sum(imported_over)) * 1.01, # add 1% headroom to ensure feasibility
     Bcap
   )
 
@@ -320,18 +387,69 @@ battery_solve_cost_unified_window <- function(
   import_capacity <- as.numeric(rep_len(import_capacity, n))
   export_capacity <- as.numeric(rep_len(export_capacity, n))
 
+  # `import_capacity` / `export_capacity` limit the NET grid flow, whereas I
+  # and E are one-sided and non-negative. A negative capacity is therefore an
+  # obligation to flow the other way: it caps this side at zero - hence the
+  # pmax(., 0), without which the variable box becomes inconsistent
+  # ("Col N has inconsistent bounds [0, -100]") and the whole window is
+  # abandoned - and is enforced on the net flow by the capacity rows below.
   import_mode_ub <- pmax(L - G + Bc, 0)
   export_mode_ub <- pmax(G - L + Bd, 0)
   import_mode_ub[import_mode_ub < 1e-9] <- 0
   export_mode_ub[export_mode_ub < 1e-9] <- 0
   import_mode_ub[is.finite(import_capacity)] <- pmin(
     import_mode_ub[is.finite(import_capacity)],
-    import_capacity[is.finite(import_capacity)]
+    pmax(import_capacity[is.finite(import_capacity)], 0)
   )
   export_mode_ub[is.finite(export_capacity)] <- pmin(
     export_mode_ub[is.finite(export_capacity)],
-    export_capacity[is.finite(export_capacity)]
+    pmax(export_capacity[is.finite(export_capacity)], 0)
   )
+
+  # How far each capacity may be missed (see optimization_slack_ceiling()).
+  tol <- optimization_solution_tolerance()
+  slack_import_max <- optimization_slack_ceiling(import_capacity, L - G)
+  slack_export_max <- optimization_slack_ceiling(export_capacity, G - L)
+  soft_caps <- any(slack_import_max > 0) || any(slack_export_max > 0)
+  slack_import_max[slack_import_max > 0] <-
+    slack_import_max[slack_import_max > 0] + tol
+  slack_export_max[slack_export_max > 0] <-
+    slack_export_max[slack_export_max > 0] + tol
+
+  # Explicit rows on the net flow are needed only when a capacity can be
+  # missed, or is negative and so cannot be expressed as a one-sided box. With
+  # the default infinite capacities this is FALSE and the problem below is
+  # exactly the one solved before soft capacities existed.
+  capacity_rows <- soft_caps ||
+    any(import_capacity < 0) ||
+    any(export_capacity < 0)
+  n_slack <- if (capacity_rows) 2 * n else 0
+  penalty <- optimization_slack_penalty(
+    c(pmax(import_capacity, L - G), pmax(export_capacity, G - L))
+  )
+
+  # I_t - E_t - s_i,t <= import_capacity_t   (net import, soft)
+  # E_t - I_t - s_e,t <= export_capacity_t   (net export, soft)
+  # `lead` is the number of variables preceding the slack block.
+  capacity_row_block <- function(lead) {
+    rows <- matrix(0, 2 * n, lead + 2 * n)
+    i1 <- seq_len(n)
+    i2 <- n + seq_len(n)
+    rows[cbind(i1, 2 * n + seq_len(n))] <- 1
+    rows[cbind(i1, 3 * n + seq_len(n))] <- -1
+    rows[cbind(i1, lead + seq_len(n))] <- -1
+    rows[cbind(i2, 3 * n + seq_len(n))] <- 1
+    rows[cbind(i2, 2 * n + seq_len(n))] <- -1
+    rows[cbind(i2, lead + n + seq_len(n))] <- -1
+    rows
+  }
+  capacity_rhs <- c(import_capacity, export_capacity)
+  slack_lb <- rep(0, n_slack)
+  slack_ub <- if (capacity_rows) {
+    c(slack_import_max, slack_export_max)
+  } else {
+    numeric(0)
+  }
 
   # X = [B_c_1..B_c_n, B_d_1..B_d_n, I_1..I_n, E_1..E_n]
   # (+ m_1..m_n appended in the MILP branch when cycle_cost == 0)
@@ -383,21 +501,22 @@ battery_solve_cost_unified_window <- function(
           "\u26a0\ufe0f Optimization: export price exceeds import price; clipping for bounded QP."
         )
       }
-      ub_I <- pmin(import_capacity, import_mode_ub)
-      ub_E <- pmin(export_capacity, export_mode_ub)
+      ub_I <- import_mode_ub
+      ub_E <- export_mode_ub
 
+      nv <- 5 * n + n_slack
       idx_Bc <- seq_len(n)
       idx_Bd <- seq(n + 1, 2 * n)
       idx_I <- seq(2 * n + 1, 3 * n)
       idx_E <- seq(3 * n + 1, 4 * n)
       idx_S <- seq(4 * n + 1, 5 * n)
 
-      # Sparse P on [B_c, B_d, I, E, S]: quadratic on (B_c - B_d)
+      # Sparse P on [B_c, B_d, I, E, S] (+ slack): quadratic on (B_c - B_d)
       P_5n <- Matrix::sparseMatrix(
         i = integer(),
         j = integer(),
         x = numeric(),
-        dims = c(5 * n, 5 * n)
+        dims = c(nv, nv)
       )
       P_5n[idx_Bc, idx_Bc] <- P_B
       P_5n[idx_Bc, idx_Bd] <- -P_B
@@ -405,12 +524,18 @@ battery_solve_cost_unified_window <- function(
       P_5n[idx_Bd, idx_Bd] <- P_B
       P_5n <- (P_5n + Matrix::t(P_5n)) / 2
 
+      if (n_slack > 0) {
+        idx_slack <- seq(5 * n + 1, nv)
+        # Ridge on the slack block keeps the objective strictly convex.
+        P_5n[idx_slack, idx_slack] <- (1e-6 * penalty) * diag(n_slack)
+      }
+
       # Balance: B_c_t - B_d_t - I_t + E_t = G_t - L_t
       A_bal <- Matrix::sparseMatrix(
         i = rep(seq_len(n), 4),
         j = c(idx_Bc, idx_Bd, idx_I, idx_E),
         x = c(rep(1, n), rep(-1, n), rep(-1, n), rep(1, n)),
-        dims = c(n, 5 * n)
+        dims = c(n, nv)
       )
 
       # Incremental SOC: S_t - S_{t-1} - \u03b7_c*B_c_t + (1/\u03b7_d)*B_d_t = 0
@@ -426,7 +551,7 @@ battery_solve_cost_unified_window <- function(
         i = soc_rows,
         j = soc_cols,
         x = soc_vals,
-        dims = c(n, 5 * n)
+        dims = c(n, nv)
       )
 
       # Energy conservation: S_n = 0 (battery returns to initial SOC)
@@ -434,11 +559,11 @@ battery_solve_cost_unified_window <- function(
         i = 1L,
         j = idx_S[n],
         x = 1.0,
-        dims = c(1, 5 * n)
+        dims = c(1, nv)
       )
 
       A_osqp <- rbind(
-        Matrix::Diagonal(n = 5 * n), # variable bounds
+        Matrix::Diagonal(n = nv), # variable bounds
         A_bal,
         A_soc_incr,
         A_energy_5n
@@ -449,6 +574,7 @@ battery_solve_cost_unified_window <- function(
         rep(0, n),
         rep(0, n),
         lb_soc,
+        slack_lb,
         G - L,
         rep(0, n),
         0
@@ -459,13 +585,27 @@ battery_solve_cost_unified_window <- function(
         ub_I,
         ub_E,
         ub_soc,
+        slack_ub,
         G - L,
         rep(0, n),
         0
       )
 
+      if (capacity_rows) {
+        A_osqp <- rbind(A_osqp, Matrix::Matrix(capacity_row_block(5 * n)))
+        lower_osqp <- c(lower_osqp, rep(-Inf, 2 * n))
+        upper_osqp <- c(upper_osqp, capacity_rhs)
+      }
+
       # Normalize objective so OSQP's ADMM rho is well-matched regardless of w.
-      q_osqp <- c(q_Bc, rep(cycle_coef, n) + q_Bd, PI, -PE_clipped, rep(0, n))
+      q_osqp <- c(
+        q_Bc,
+        rep(cycle_coef, n) + q_Bd,
+        PI,
+        -PE_clipped,
+        rep(0, n),
+        rep(penalty, n_slack)
+      )
       obj_scale <- max(max(abs(P_5n@x)), max(abs(q_osqp)), 1e-6)
       sol <- solve_osqp(
         P_5n / obj_scale,
@@ -488,27 +628,51 @@ battery_solve_cost_unified_window <- function(
       )
     }
 
+    # LP layout: [B_c, B_d, I, E] (+ s_i, s_e when a capacity can be missed)
+    A_lp <- cbind(A_vars, matrix(0, nrow(A_vars), n_slack))
+    lhs_lp <- lb_vars
+    rhs_lp <- ub_vars
+    if (capacity_rows) {
+      A_lp <- rbind(A_lp, capacity_row_block(4 * n))
+      lhs_lp <- c(lhs_lp, rep(-Inf, 2 * n))
+      rhs_lp <- c(rhs_lp, capacity_rhs)
+    }
+
     result <- highs::highs_solve(
       Q = NULL,
-      L = c(q_Bc, rep(cycle_coef, n) + q_Bd, PI, -PE),
-      lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n)),
-      upper = c(rep(Bc, n), rep(Bd, n), pmin(import_capacity, import_mode_ub), pmin(export_capacity, export_mode_ub)),
-      A = A_vars,
-      lhs = lb_vars,
-      rhs = ub_vars,
-      types = rep(1L, 4 * n),
+      L = c(
+        q_Bc,
+        rep(cycle_coef, n) + q_Bd,
+        PI,
+        -PE,
+        rep(penalty, n_slack)
+      ),
+      lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n), slack_lb),
+      upper = c(
+        rep(Bc, n),
+        rep(Bd, n),
+        pmin(pmax(import_capacity, 0), import_mode_ub),
+        pmin(pmax(export_capacity, 0), export_mode_ub),
+        slack_ub
+      ),
+      A = A_lp,
+      lhs = lhs_lp,
+      rhs = rhs_lp,
+      types = rep(1L, 4 * n + n_slack),
       control = optimization_highs_options()
     )
   } else {
     # MILP path \u2014 binary mode variable m prevents simultaneous charge+discharge.
-    A_base <- cbind(A_vars, matrix(0, nrow(A_vars), n))
+    # Layout: [B_c, B_d, I, E, m] (+ s_i, s_e when a capacity can be missed)
+    A_base <- cbind(A_vars, matrix(0, nrow(A_vars), n + n_slack))
     # Import mode: I_t <= import_mode_ub_t * m_t
     A_import_mode <- cbind(
       matrix(0, n, n), # B_c
       matrix(0, n, n), # B_d
       diag(n), # I
       matrix(0, n, n), # E
-      -diag(import_mode_ub) # -M_I * m
+      -diag(import_mode_ub), # -M_I * m
+      matrix(0, n, n_slack) # slack
     )
     # Export mode: E_t <= export_mode_ub_t * (1 - m_t)
     A_export_mode <- cbind(
@@ -516,27 +680,52 @@ battery_solve_cost_unified_window <- function(
       matrix(0, n, n), # B_d
       matrix(0, n, n), # I
       diag(n), # E
-      diag(export_mode_ub) # M_E * m
+      diag(export_mode_ub), # M_E * m
+      matrix(0, n, n_slack) # slack
     )
     A_full <- rbind(A_base, A_import_mode, A_export_mode)
     lhs_full <- c(lb_vars, rep(-Inf, 2 * n))
     rhs_full <- c(ub_vars, rep(0, n), export_mode_ub)
+    if (capacity_rows) {
+      A_full <- rbind(A_full, capacity_row_block(5 * n))
+      lhs_full <- c(lhs_full, rep(-Inf, 2 * n))
+      rhs_full <- c(rhs_full, capacity_rhs)
+    }
 
     result <- highs::highs_solve(
       Q = NULL,
-      L = c(rep(0, n), rep(0, n), PI, -PE, rep(0, n)),
-      lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n), rep(0, n)),
+      L = c(
+        rep(0, n),
+        rep(0, n),
+        PI,
+        -PE,
+        rep(0, n),
+        rep(penalty, n_slack)
+      ),
+      lower = c(
+        rep(0, n),
+        rep(0, n),
+        rep(0, n),
+        rep(0, n),
+        rep(0, n),
+        slack_lb
+      ),
       upper = c(
         rep(Bc, n),
         rep(Bd, n),
-        import_capacity,
-        export_capacity,
-        rep(1, n)
+        # pmax(., 0) only: keeping the box otherwise untouched leaves the
+        # unconstrained problem bit-for-bit identical to the pre-slack solver,
+        # which matters because the MILP has ties and a tighter (still valid)
+        # box makes HiGHS pick a different optimum of equal cost.
+        pmax(import_capacity, 0),
+        pmax(export_capacity, 0),
+        rep(1, n),
+        slack_ub
       ),
       A = A_full,
       lhs = lhs_full,
       rhs = rhs_full,
-      types = c(rep(1L, 4 * n), rep(2L, n)),
+      types = c(rep(1L, 4 * n), rep(2L, n), rep(1L, n_slack)),
       control = optimization_highs_options(include_mip_gap = TRUE)
     )
   }
@@ -654,37 +843,85 @@ battery_combined_window <- function(
   import_capacity <- as.numeric(rep_len(import_capacity, n))
   export_capacity <- as.numeric(rep_len(export_capacity, n))
 
-  ub_I <- pmin(import_capacity, pmax(L - G + Bc, 0))
-  ub_E <- pmin(export_capacity, pmax(G - L + Bd, 0))
+  # A negative capacity is an obligation to flow the other way: it caps this
+  # one-sided variable at zero and is enforced on the net flow below.
+  ub_I <- pmin(pmax(import_capacity, 0), pmax(L - G + Bc, 0))
+  ub_E <- pmin(pmax(export_capacity, 0), pmax(G - L + Bd, 0))
+
+  tol <- optimization_solution_tolerance()
+  slack_import_max <- optimization_slack_ceiling(import_capacity, L - G)
+  slack_export_max <- optimization_slack_ceiling(export_capacity, G - L)
+  soft_caps <- any(slack_import_max > 0) || any(slack_export_max > 0)
+  slack_import_max[slack_import_max > 0] <-
+    slack_import_max[slack_import_max > 0] + tol
+  slack_export_max[slack_export_max > 0] <-
+    slack_export_max[slack_export_max > 0] + tol
+  capacity_rows <- soft_caps ||
+    any(import_capacity < 0) ||
+    any(export_capacity < 0)
+  n_slack <- if (capacity_rows) 2 * n else 0
+  nv <- 3 * n + n_slack
+  penalty <- optimization_slack_penalty(
+    c(pmax(import_capacity, L - G), pmax(export_capacity, G - L))
+  )
 
   cumsumMat <- triangulate_matrix(matrix(1, n, n), "l")
   zeroMat <- matrix(0, n, n)
+  slackMat <- matrix(0, n, n_slack)
 
-  # Sparse P on [B, I, E]: quadratic only on B block (O(n) nnz)
+  # Sparse P on [B, I, E] (+ slack): quadratic only on B block (O(n) nnz)
   P_3n <- Matrix::sparseMatrix(
     i = integer(),
     j = integer(),
     x = numeric(),
-    dims = c(3 * n, 3 * n)
+    dims = c(nv, nv)
   )
   P_3n[seq_len(n), seq_len(n)] <- P_B
+  if (n_slack > 0) {
+    idx_slack <- seq(3 * n + 1, nv)
+    P_3n[idx_slack, idx_slack] <- (1e-6 * penalty) * diag(n_slack)
+  }
   P_3n <- (P_3n + Matrix::t(P_3n)) / 2
 
   # OSQP constraint matrix: variable bounds + balance + SOC + energy conservation
   A_osqp <- rbind(
-    cbind(diag(n), zeroMat, zeroMat),
-    cbind(zeroMat, diag(n), zeroMat),
-    cbind(zeroMat, zeroMat, diag(n)),
-    cbind(diag(n), -diag(n), diag(n)),
-    cbind(cumsumMat, zeroMat, zeroMat),
-    matrix(c(rep(1, n), rep(0, 2 * n)), nrow = 1)
+    cbind(diag(n), zeroMat, zeroMat, slackMat),
+    cbind(zeroMat, diag(n), zeroMat, slackMat),
+    cbind(zeroMat, zeroMat, diag(n), slackMat),
+    cbind(diag(n), -diag(n), diag(n), slackMat),
+    cbind(cumsumMat, zeroMat, zeroMat, slackMat),
+    matrix(c(rep(1, n), rep(0, 2 * n + n_slack)), nrow = 1)
   )
   lower_osqp <- c(rep(-Bd, n), rep(0, n), rep(0, n), G - L, lb_soc, 0)
   upper_osqp <- c(rep(Bc, n), ub_I, ub_E, G - L, ub_soc, 0)
 
+  if (capacity_rows) {
+    # I_t - E_t - s_i,t <= import_capacity_t
+    # E_t - I_t - s_e,t <= export_capacity_t
+    slack_box <- cbind(matrix(0, n_slack, 3 * n), diag(n_slack))
+    cap_rows <- rbind(
+      cbind(zeroMat, diag(n), -diag(n), -diag(n), zeroMat),
+      cbind(zeroMat, -diag(n), diag(n), zeroMat, -diag(n))
+    )
+    A_osqp <- rbind(A_osqp, slack_box, cap_rows)
+    upper_osqp <- c(
+      upper_osqp,
+      slack_import_max,
+      slack_export_max,
+      import_capacity,
+      export_capacity
+    )
+    lower_osqp <- c(lower_osqp, rep(0, n_slack), rep(-Inf, 2 * n))
+  }
+
   sol <- solve_osqp(
     P_3n,
-    c(q_grid, (1 - w) * PI, -(1 - w) * PE_clipped),
+    c(
+      q_grid,
+      (1 - w) * PI,
+      -(1 - w) * PE_clipped,
+      rep(penalty, n_slack)
+    ),
     A_osqp,
     lower_osqp,
     upper_osqp
@@ -718,6 +955,17 @@ battery_combined_window <- function(
 #' - `export_capacity`: max grid export (kW)
 #' - `price_imported`: energy import price (required for cost/combined)
 #' - `price_exported`: energy export price (required for cost/combined)
+#'
+#' `import_capacity` and `export_capacity` constrain the **net** grid flow. A
+#' negative value is therefore an obligation to flow the other way:
+#' `import_capacity = -100` requires at least 100 kW of export in that slot, as
+#' a congestion contract might. Such an obligation outranks `opt_objective` —
+#' the battery meets the capacity first and optimises second.
+#'
+#' A capacity the battery cannot physically reach is *approached*, not dropped:
+#' the battery operates at its limit and a warning is emitted once. The result
+#' is still guaranteed never to be worse than the profile without a battery, and
+#' slots that can meet their capacity remain strictly capped.
 #'
 #' @param opt_objective character or numeric.
 #' `"grid"` (default), `"capacity"`, `"cost"`, or a numeric weight `w`

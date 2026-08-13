@@ -189,7 +189,26 @@ $$
 
 **Efficiencies.** The `charge_eff` and `discharge_eff` parameters of `add_battery_optimization()` are **not** applied by the net power and grid capacity objectives, which assume a lossless battery ($\eta_c = \eta_d = 1$). Round-trip losses are only embedded in the state-of-charge constraints of the [cost objective](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization).
 
-**Infeasible windows.** As in the demand case, when the grid capacities make a window infeasible each capacity is raised only as far as the *pre-battery* profile already requires, i.e. $\max(IC_t,\; L_t - G_t)$ and $\max(EC_t,\; G_t - L_t)$, which guarantees that $B = 0$ is a feasible point. If OSQP does not converge, a greedy forward-pass heuristic clipped to the feasible box is used, and as a last resort the battery is disabled for that window.
+**Unreachable capacities.** A capacity the battery cannot meet is *approached*, not dropped. Instead of a hard box, each direction carries a slack variable $s^I_t,\, s^E_t \ge 0$ measuring by how much the slot misses its capacity:
+
+$$
+B_t - s^I_t \;\le\; G_t - L_t + IC_t, \qquad B_t + s^E_t \;\ge\; G_t - L_t - EC_t \quad t \in T
+$$
+
+The slack is bounded by how far the *pre-battery* profile already missed the capacity,
+
+$$
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+$$
+
+and penalised in the objective. Three consequences follow: $B = 0$ with the slack at its ceiling is always feasible, so a window can never be infeasible; the result is never worse than the profile the battery started from; and slots that *can* meet their capacity have a ceiling of zero, so they stay hard capped. Where the capacity is out of reach, the penalty makes the battery spend its full physical capability approaching it instead of reverting to plain flattening.
+
+When no slot misses its capacity — including the default of no capacity limits at all — every ceiling is zero, the slack variables are dropped, and the problem reduces exactly to the box-constrained one above.
+
+**Forced flows.** A *negative* $IC_t$ is an obligation to export at least $|IC_t|$, and a negative $EC_t$ an obligation to import. The constraint $-EC_t \le L_t + B_t - G_t \le IC_t$ covers both without special casing. Because the slack penalty dominates the objective, such an obligation outranks it: the battery meets the capacity first and flattens second.
+
+If OSQP does not converge, a greedy forward-pass heuristic clipped to the feasible box is used, and as a last resort the battery is disabled for that window.
 
 
 ## Grid capacity objective

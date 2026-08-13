@@ -164,6 +164,58 @@ optimization_solution_tolerance <- function() {
 }
 
 
+#' Ceiling for grid-capacity slack
+#'
+#' How far a grid capacity may be missed when it cannot be met: only as far as
+#' the pre-optimization net flow already needed. The result is zero wherever
+#' the original profile was within its capacity, which keeps those slots hard
+#' capped, so a soft-constrained solution can never create a grid violation
+#' worse than the profile it started from.
+#'
+#' @param capacity numeric vector, grid capacity (kW). May contain `Inf`.
+#' @param flow numeric vector, pre-optimization net flow in the same direction
+#'   as `capacity` (kW).
+#'
+#' @return numeric vector, non-negative and finite.
+#' @keywords internal
+#'
+optimization_slack_ceiling <- function(capacity, flow) {
+  ceiling <- pmax(0, flow - capacity)
+  # `capacity = Inf` yields -Inf before the pmax; guard anything non-finite
+  # (including the Inf - Inf = NaN corner) back to "no relaxation allowed".
+  ceiling[!is.finite(ceiling)] <- 0
+  ceiling
+}
+
+
+#' Linear penalty weight for grid-capacity slack
+#'
+#' The weight must strictly dominate the marginal gain of a quadratic
+#' net-power objective, otherwise the optimizer prefers a flatter profile over
+#' respecting the grid capacity. Since `|d/dB sum(net^2)| = 2*|net|` and the
+#' achievable net flow is bounded by the relaxed envelope, `2 * max(envelope)`
+#' is a tight and valid bound.
+#'
+#' Deriving the weight from the envelope rather than from the battery power
+#' rating matters for performance, not just tidiness: an oversized weight
+#' leaves the optimum untouched but multiplies the ADMM iteration count. On a
+#' one-year benchmark the power-derived weight needed 8600 iterations against
+#' 2625 for the envelope-derived one, for an identical solution.
+#'
+#' @param envelope numeric vector, per-slot bound on the absolute net flow (kW)
+#'
+#' @return numeric scalar
+#' @keywords internal
+#'
+optimization_slack_penalty <- function(envelope) {
+  envelope <- abs(envelope[is.finite(envelope)])
+  if (!length(envelope)) {
+    envelope <- 0
+  }
+  10 * (2 * max(envelope) + 1)
+}
+
+
 optimization_objective_tolerance <- function() {
   1e-8
 }

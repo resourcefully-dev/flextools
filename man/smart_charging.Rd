@@ -37,6 +37,11 @@ offices, etc.
 for example the contracted power with the energy company.
 \item \code{export_capacity}: maximum exported power from the grid (in kW),
 for example the contracted power with the energy company.
+\item \code{load_capacity}: maximum charging power (in kW) allowed for the flexible
+EV demand at every time slot. By default the algorithm already limits the
+optimized setpoint to the nominal power of the connected EVs (the physical
+charging envelope). This variable can be used to tighten that limit further
+(e.g. a charging point or transformer power limit).
 \item \code{production}: local power generation (in kW).
 This is used when \code{opt_objective = "grid"}.
 \item \code{price_imported}: price for imported energy (Euro/kWh).

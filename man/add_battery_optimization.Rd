@@ -33,7 +33,18 @@ Optional columns:
 \item \code{export_capacity}: max grid export (kW)
 \item \code{price_imported}: energy import price (required for cost/combined)
 \item \code{price_exported}: energy export price (required for cost/combined)
-}}
+}
+
+\code{import_capacity} and \code{export_capacity} constrain the \strong{net} grid flow. A
+negative value is therefore an obligation to flow the other way:
+\code{import_capacity = -100} requires at least 100 kW of export in that slot, as
+a congestion contract might. Such an obligation outranks \code{opt_objective} —
+the battery meets the capacity first and optimises second.
+
+A capacity the battery cannot physically reach is \emph{approached}, not dropped:
+the battery operates at its limit and a warning is emitted once. The result
+is still guaranteed never to be worse than the profile without a battery, and
+slots that can meet their capacity remain strictly capped.}
 
 \item{opt_objective}{character or numeric.
 \code{"grid"} (default), \code{"capacity"}, \code{"cost"}, or a numeric weight \code{w}

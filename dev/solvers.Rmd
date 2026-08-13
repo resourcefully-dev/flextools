@@ -109,27 +109,61 @@ $$
 
 The 1% headroom ensures strict feasibility. If $B_{cap,curtail} = 0$ (no grid violations), the solver is skipped and a zero vector is returned.
 
-## Bound relaxation (grid/capacity only)
+## Soft grid capacities (grid/capacity only)
 
-Grid capacities are never *removed* when a window is infeasible. Instead each cap is raised only as far as the **pre-battery profile already requires**:
+Encoding the capacities purely as a box on $B_t$ has a failure mode: when a capacity is unreachable the box is empty ($lb_{B,t} > ub_{B,t}$) and there is nothing between "solve it exactly" and "give up". The solver now carries an explicit **slack** variable per direction, bounded by how far the pre-battery profile already misses its capacity:
 
 $$
-IC^{rel}_t = \max(IC_t,\; L_t - G_t) + \epsilon, \qquad
-EC^{rel}_t = \max(EC_t,\; G_t - L_t) + \epsilon
+\bar{s}^{I}_t = \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+\bar{s}^{E}_t = \max\!\left(0,\; (G_t - L_t) - EC_t\right)
 $$
 
-with $\epsilon = 10^{-5}$ (`optimization_solution_tolerance()`) absorbing the 2-decimal rounding of the bounds. Slots already within their cap keep the true capacity, so the battery can never create a grid violation worse than the pre-battery profile. These caps make $B = 0$ feasible **by construction**: $lb_B \le 0 \le ub_B$, $\text{cumsum}(0) = 0$ lies inside the SOC band (since $SOC_{min} \le SOC_{ini} \le SOC_{max}$), and $\sum_t 0 = 0$ satisfies energy neutrality.
+(plus $\epsilon = 10^{-5}$, `optimization_solution_tolerance()`, wherever the ceiling is non-zero, to absorb the 2-decimal rounding of the inputs). With $X = [B, s^I, s^E]$ the window problem becomes
+
+$$
+\min_X \; \tfrac{1}{2}X^\top P X + q^\top X + \mu \sum_t \left(s^I_t + s^E_t\right)
+$$
+
+$$
+\begin{aligned}
+-B_d &\le B_t \le B_c &&\text{hard physics}\\
+B_t - s^I_t &\le G_t - L_t + IC_t &&\text{import capacity, soft}\\
+B_t + s^E_t &\ge G_t - L_t - EC_t &&\text{export capacity, soft}\\
+0 &\le s^I_t \le \bar{s}^{I}_t, \quad 0 \le s^E_t \le \bar{s}^{E}_t &&\text{relaxation ceiling}\\
+lb^{soc} &\le \textstyle\sum_{k \le t} B_k \le ub^{soc}, \qquad \textstyle\sum_t B_t = 0
+\end{aligned}
+$$
+
+Four properties follow, and together they are why this replaces the old relaxation rather than sitting alongside it:
+
+1. **Feasible by construction.** $X = (0, \bar{s}^{I}, \bar{s}^{E})$ satisfies every constraint, so no relaxation retry is needed.
+2. **Never worse than the pre-battery profile.** The ceiling gives $L_t - G_t + B_t \le \max(IC_t,\, L_t - G_t) + \epsilon$ — exactly the guarantee the old relaxation provided, now structural rather than procedural.
+3. **Slots that can meet their capacity stay hard capped**, since $\bar{s} = 0$ there.
+4. **Unreachable capacities are approached, not abandoned.** Minimising $s$ drives $B_t$ to $-B_d$ (or to whatever the SOC band and energy neutrality allow) instead of to the flattening optimum.
+
+When $\bar{s} \equiv 0$ everywhere — which includes the default $IC_t = EC_t = \infty$ — the slack block is dropped entirely and the solver assembles the original $T$-variable problem. This **fast path** is what keeps unconstrained runs at their original cost.
+
+### Penalty weight
+
+$\mu$ must dominate the marginal gain of the quadratic term, otherwise flattening wins over respecting the capacity. Since $\left|\partial_{B_t} \sum_t \text{net}_t^2\right| = 2|\text{net}_t|$ and property 2 bounds the achievable net flow by the relaxed envelope,
+
+$$
+\mu = 10\left(2 \max_t \max\!\left(\left|\max(IC_t, L_t - G_t)\right|,\; \left|\max(EC_t, G_t - L_t)\right|\right) + 1\right)
+$$
+
+is tight and valid (`optimization_slack_penalty()`). Deriving it from the envelope rather than from $\max(B_c, B_d)$ is a performance decision, not a cosmetic one: on a one-year benchmark the power-derived weight needed 8600 ADMM iterations against 2625 for the envelope-derived one, for an identical solution. A ridge of $10^{-6}\mu$ on the slack block keeps the objective strictly convex. The objective is **not** pre-scaled before OSQP: the solver equilibrates internally, and dividing through by the (large) penalty only shrinks the problem against OSQP's absolute termination tolerance, degrading near-zero solutions by ~40x.
+
+### Negative capacities
+
+A negative $IC_t$ is an obligation to export at least $|IC_t|$, and a negative $EC_t$ an obligation to import. Nothing special is needed for the grid objective — the constraint above already reads $L_t - G_t + B_t \le IC_t < 0$ — but note that with a dominating $\mu$ the obligation outranks the stated objective: the solver meets the capacity first and optimises second.
 
 ## Fallback chain (grid/capacity only)
 
-0. **Pre-solve check** — if the true bounds give an empty box ($lb_{B,t} > ub_{B,t}$ for any $t$), the relaxed caps are substituted before the first solve and steps 3–4 are skipped
-1. OSQP QP on the current bounds
-2. Greedy heuristic (`battery_qp_try_heuristic`) — forward-pass clipped to feasible box
-3. OSQP QP with relaxed bounds (only if step 0 did not already relax them)
-4. Heuristic again on relaxed bounds
-5. Zero vector (battery disabled for this window)
+1. OSQP QP (fast path or soft path, as above)
+2. Greedy heuristic (`battery_qp_try_heuristic`) — forward pass clipped to the relaxed envelope, aimed at $\max(\min(G_t - L_t,\; G_t - L_t + IC_t),\; G_t - L_t - EC_t)$ so a binding capacity still pulls the target off the zero-net-flow point
+3. Zero vector (battery disabled for this window)
 
-Because of the feasibility-by-construction argument above, step 5 is unreachable for well-formed inputs — reaching it means the solver itself crashed, and the warning says so.
+Because of the feasibility-by-construction argument above, steps 2–3 are unreachable for well-formed inputs — reaching them means the solver itself crashed, and the warning says so.
 
 ---
 
@@ -157,15 +191,25 @@ $$
 \sum_{t=1}^{T} \left(\eta_c C_t - \frac{D_t}{\eta_d}\right) = 0
 $$
 
-* Grid import and export bounds:
+* Grid import and export bounds. $IC_t$ and $EC_t$ limit the **net** flow, while $I_t$ and $E_t$ are one sided and non-negative, so the capacity enters as a box only through its non-negative part:
 
 $$
-0 \le I_t \le IC_t \quad t \in T
+0 \le I_t \le \max(IC_t,\, 0) \quad 0 \le E_t \le \max(EC_t,\, 0) \quad t \in T
+$$
+
+  The $\max(\cdot,\,0)$ is load bearing. A negative capacity — an obligation to flow the other way — otherwise produces the box $[0,\, IC_t]$ with $IC_t < 0$, which HiGHS rejects (`Col N has inconsistent bounds`); the solve fails and the battery is disabled for the whole window.
+
+* Net capacity rows, with the same slack and ceiling as the [grid objective](#soft-grid-capacities-gridcapacity-only). These express what the one-sided boxes cannot — a negative $IC_t$ forcing $E_t \ge |IC_t|$ — and soften a capacity that cannot be met:
+
+$$
+I_t - E_t - s^I_t \;\le\; IC_t, \qquad E_t - I_t - s^E_t \;\le\; EC_t \quad t \in T
 $$
 
 $$
-0 \le E_t \le EC_t \quad t \in T
+0 \le s^I_t \le \bar{s}^{I}_t, \qquad 0 \le s^E_t \le \bar{s}^{E}_t
 $$
+
+  with $\mu \sum_t (s^I_t + s^E_t)$ added to the objective. These rows and variables are only assembled when a capacity can be missed ($\bar{s} \ne 0$) or is negative; with the default infinite capacities the problem is exactly the one solved before soft capacities existed, in all three paths below.
 
 * Charging and discharging power bounds:
 

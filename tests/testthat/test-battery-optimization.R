@@ -117,6 +117,147 @@ test_that("battery relaxes grid caps minimally to the pre-battery profile", {
 })
 
 
+# Negative capacities: forced flow -----------------------------------------
+# A negative `import_capacity` is an obligation to EXPORT at least that much.
+# When it cannot be met the battery must still spend everything it physically
+# has approaching it, rather than abandoning the constraint and falling back to
+# plain net-power flattening.
+
+test_that("unreachable forced export still discharges to the physical limit", {
+  # 60 kW of flat load and a -100 kW import capacity in the second half: the
+  # site would need ~160 kW of discharge, far beyond the battery. What limits
+  # the answer here is the charging headroom (100 - 60 = 40 kW per slot) plus
+  # energy neutrality, so the battery charges 40 and gives 40 back.
+  #
+  # Note the quadratic objective PREFERS doing nothing (sum(net^2) is 28 800 at
+  # a flat 60 kW against 41 600 for the answer below), so this test is also the
+  # check that the slack penalty dominates the objective.
+  n <- 8
+  G <- rep(0, n)
+  L <- rep(60, n)
+  import_capacity <- c(rep(100, 4), rep(-100, 4))
+  export_capacity <- rep(200, n)
+
+  B <- suppressMessages(flextools:::battery_grid_window(
+    G = G, L = L, Bcap = 400, Bc = 95, Bd = 105,
+    SOCmin = 0, SOCmax = 100, SOCini = 50,
+    import_capacity = import_capacity, export_capacity = export_capacity
+  ))
+  net <- L - G + B
+
+  expect_equal(B, c(40, 40, 40, 40, -40, -40, -40, -40), tolerance = 1e-3)
+  expect_equal(net, c(100, 100, 100, 100, 20, 20, 20, 20), tolerance = 1e-3)
+  # The point of the test: it exports harder than the do-nothing profile.
+  expect_true(all(net[5:8] < 60))
+  expect_equal(sum(B), 0, tolerance = 1e-6)
+  # Slots that can meet their capacity are still hard-capped.
+  expect_true(all(net[1:4] <= 100 + 1e-3))
+})
+
+
+test_that("reachable forced export meets the capacity exactly", {
+  n <- 8
+  G <- rep(0, n)
+  L <- rep(60, n)
+
+  B <- suppressMessages(flextools:::battery_grid_window(
+    G = G, L = L, Bcap = 800, Bc = 95, Bd = 105,
+    SOCmin = 0, SOCmax = 100, SOCini = 50,
+    import_capacity = c(rep(200, 4), rep(-20, 4)),
+    export_capacity = rep(200, n)
+  ))
+  net <- L - G + B
+
+  expect_true(all(net[5:8] <= -20 + 1e-3))
+  expect_equal(net[5:8], rep(-20, 4), tolerance = 1e-3)
+})
+
+
+test_that("cost and combined objectives accept a negative import capacity", {
+  # Regression: a negative capacity used to be pushed onto the one-sided import
+  # variable, producing the box [0, -100]. HiGHS reported "Col N has
+  # inconsistent bounds", the solve failed, and the battery was disabled for the
+  # whole window.
+  n <- 96
+  dttm <- seq(as.POSIXct("2025-01-01 00:00", tz = "UTC"), by = 900, length.out = n)
+  hour <- as.integer(format(dttm, "%H"))
+  opt_data <- dplyr::tibble(
+    datetime = dttm,
+    production = 0,
+    static = 60,
+    price_imported = 0.20,
+    price_exported = 0.10,
+    import_capacity = ifelse(hour >= 16 & hour < 20, -100, 100),
+    export_capacity = 200
+  )
+
+  for (objective in list("grid", "cost", 0.5)) {
+    B <- expect_no_warning(suppressMessages(add_battery_optimization(
+      opt_data, opt_objective = objective,
+      Bcap = 500, Bc = 95, Bd = 105,
+      SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+    )))
+    net <- opt_data$static - opt_data$production + B
+    window <- hour >= 16 & hour < 20
+
+    expect_false(all(abs(B) < 1e-9), label = paste("battery acts for", objective))
+    # Exports during the obligation instead of sitting at the +60 kW baseline.
+    expect_lt(median(net[window]), 0)
+  }
+})
+
+
+test_that("unconstrained results are unchanged by the soft-capacity machinery", {
+  # With no capacity limits every slack ceiling is zero, so the solver must take
+  # the fast path and reproduce the pre-soft-capacity results exactly. Baseline
+  # captured on the commit before soft capacities were introduced.
+  golden <- readRDS(test_path("golden-battery-unconstrained.rds"))
+
+  opt_data <- flextools::energy_profiles |>
+    filter(lubridate::isoweek(datetime) == 18) |>
+    select(
+      datetime,
+      production = solar,
+      static = building,
+      price_exported,
+      price_imported
+    )
+
+  for (objective in list("grid", "capacity", "cost", 0.5)) {
+    key <- if (is.numeric(objective)) paste0("w", objective) else objective
+    B <- suppressMessages(add_battery_optimization(
+      opt_data, opt_objective = objective,
+      Bcap = 50, Bc = 4, Bd = 4, window_start_hour = 5
+    ))
+    expect_equal(B, golden[[key]], label = paste("objective", key))
+  }
+
+  # A finite capacity that never binds must take the same path.
+  B_loose <- suppressMessages(
+    opt_data |>
+      mutate(import_capacity = 1e4, export_capacity = 1e4) |>
+      add_battery_optimization(
+        opt_objective = "grid",
+        Bcap = 50, Bc = 4, Bd = 4, window_start_hour = 5
+      )
+  )
+  expect_equal(B_loose, golden[["grid_loose_cap"]])
+})
+
+
+test_that("slack ceiling is zero exactly where the capacity can be met", {
+  expect_equal(
+    flextools:::optimization_slack_ceiling(c(10, 10, 10), c(4, 10, 25)),
+    c(0, 0, 15)
+  )
+  # Infinite capacity can never be missed, and must not produce NaN.
+  expect_equal(
+    flextools:::optimization_slack_ceiling(c(Inf, Inf), c(5, Inf)),
+    c(0, 0)
+  )
+})
+
+
 test_that("battery optimization falls back to a heuristic profile on solver failure", {
   testthat::local_mocked_bindings(
     battery_solve_osqp = function(P, q, A, lower, upper) {

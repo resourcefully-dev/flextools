@@ -216,6 +216,176 @@ optimization_slack_penalty <- function(envelope) {
 }
 
 
+#' Concentrate an unavoidable grid-capacity miss
+#'
+#' When a capacity cannot be met, the slack of
+#' [optimization_slack_ceiling()] is penalised linearly in the *volume* missed.
+#' Every way of spending the battery's limited energy across the affected slots
+#' therefore costs the objective exactly the same, and the quadratic net-power
+#' term breaks the tie by flattening: the miss is spread thinly so that every
+#' slot ends marginally over its capacity. That is the worst distribution for a
+#' capacity contract, whose cost is counted in slots (or hours) in violation —
+#' `congestion_time` in [get_energy_kpis()] — not in kWh: it keeps 100% of the
+#' window in violation whatever the battery size, so the metric only moves once
+#' the battery is large enough to clear the window entirely.
+#'
+#' This redistributes the *same* energy inside each run of violating slots so
+#' the capacity is met exactly for as many slots as it covers, in chronological
+#' order, and missed on the remainder.
+#'
+#' The redistribution is energy-preserving per run, which is what keeps it
+#' feasible: every `cumsum` outside a run is untouched, and inside a run both
+#' the flat and the front-loaded profile move in one direction only and end at
+#' the same value, so the extremum of the storage path is unchanged.
+#'
+#' Three things make it safe to call unconditionally. A run is skipped when its
+#' battery power does not consistently point the way the violation needs, when
+#' rearranging the energy cannot bring a single slot inside its capacity (a run
+#' the battery misses on *power*, where this would only spike the profile), and
+#' the whole result is dropped in favour of `B` if it turns out worse than `B`
+#' on any bound.
+#'
+#' @param B numeric vector, solved battery power (kW), positive when charging.
+#' @param net0 numeric vector, pre-battery net flow `L - G` (kW).
+#' @param import_capacity,export_capacity numeric vectors of capacities (kW),
+#'   constraining the net flow. May contain `Inf`.
+#' @param lb_B,ub_B numeric vectors, the box the solution must stay inside.
+#' @param lb_cumsum,ub_cumsum numeric vectors, the storage band on `cumsum(B)`.
+#' @param tol numeric, tolerance for both the violation test and the
+#'   feasibility check.
+#'
+#' @return numeric vector the same length as `B`: the concentrated profile, or
+#'   `B` unchanged when nothing could be improved feasibly.
+#' @keywords internal
+#'
+optimization_concentrate_slack <- function(
+  B,
+  net0,
+  import_capacity,
+  export_capacity,
+  lb_B,
+  ub_B,
+  lb_cumsum,
+  ub_cumsum,
+  tol = optimization_solution_tolerance()
+) {
+  n <- length(B)
+  import_capacity <- rep_len(import_capacity, n)
+  export_capacity <- rep_len(export_capacity, n)
+  net <- net0 + B
+
+  # +1: over the import capacity, needs more discharge. -1: over the export
+  # capacity, needs more charge. A slot cannot be both.
+  direction <- rep(0L, n)
+  direction[is.finite(import_capacity) & net > import_capacity + tol] <- 1L
+  direction[is.finite(export_capacity) & -net > export_capacity + tol] <- -1L
+  if (!any(direction != 0L)) {
+    return(B)
+  }
+
+  # Where the battery would have to sit for the violated capacity to be met
+  # exactly, kept inside the box and inside the capacity of the *other*
+  # direction so concentrating one miss can never open another.
+  target <- ifelse(
+    direction == 1L,
+    import_capacity - net0,
+    -export_capacity - net0
+  )
+  floor_other <- ifelse(
+    is.finite(export_capacity),
+    -export_capacity - net0,
+    -Inf
+  )
+  ceil_other <- ifelse(is.finite(import_capacity), import_capacity - net0, Inf)
+  target <- pmin(pmax(target, pmax(lb_B, floor_other)), pmin(ub_B, ceil_other))
+
+  runs <- rle(direction)
+  ends <- cumsum(runs$lengths)
+  starts <- ends - runs$lengths + 1L
+
+  out <- B
+  for (k in which(runs$values != 0L)) {
+    idx <- starts[k]:ends[k]
+    if (length(idx) < 2L) {
+      next
+    }
+    sign_needed <- if (runs$values[k] == 1L) -1 else 1
+    # The energy to redistribute, and the target it is redistributed towards,
+    # must both point the way the violation needs, or front-loading would not
+    # be a monotone rearrangement of the storage path and the argument above
+    # would not hold. The target can point the wrong way when the two
+    # capacities contradict each other, leaving an empty band.
+    if (any(sign_needed * B[idx] < -tol)) {
+      next
+    }
+    if (any(sign_needed * target[idx] < -tol)) {
+      next
+    }
+
+    budget <- sum(B[idx])
+    spent <- 0
+    repaired <- numeric(length(idx))
+    for (j in seq_along(idx)) {
+      remaining <- budget - spent
+      if (sign_needed < 0) {
+        step <- max(target[idx[j]], min(remaining, 0))
+      } else {
+        step <- min(target[idx[j]], max(remaining, 0))
+      }
+      repaired[j] <- step
+      spent <- spent + step
+    }
+
+    # Only worth it when it actually buys slots back. A run the battery misses
+    # on *power* rather than on energy cannot meet its capacity in any slot no
+    # matter how the energy is arranged: concentrating there would spike the
+    # profile for nothing, so leave the solver's flat answer alone. Every slot
+    # in the run is in violation by construction, so the count before is its
+    # length.
+    net_repaired <- net0[idx] + repaired
+    still_over <- if (runs$values[k] == 1L) {
+      sum(net_repaired > import_capacity[idx] + tol)
+    } else {
+      sum(-net_repaired > export_capacity[idx] + tol)
+    }
+    if (still_over < length(idx)) {
+      out[idx] <- repaired
+    }
+  }
+
+  if (isTRUE(all.equal(out, B))) {
+    return(B)
+  }
+
+  # Measured against the solved profile, not against the bounds alone: OSQP
+  # terminates at a tolerance, so its own answer can sit a whisker outside the
+  # storage band (1.2e-05 over the ceiling in the scenario this was written
+  # for). Checking absolutely would reject the redistribution over residue that
+  # is already in the input and has nothing to do with it. The question that
+  # matters is whether this made anything worse, so every bound is widened to
+  # whatever the input already used.
+  #
+  # The storage band is compared on its extremes rather than per slot: the
+  # redistribution deliberately moves the storage path *within* a run, and the
+  # guarantee is about how far it goes, not slot by slot.
+  storage_in <- cumsum(B)
+  storage_out <- cumsum(out)
+  storage_floor <- min(min(rep_len(lb_cumsum, n)), min(storage_in))
+  storage_ceiling <- max(max(rep_len(ub_cumsum, n)), max(storage_in))
+
+  feasible <- abs(sum(out) - sum(B)) <= tol &&
+    all(out >= pmin(lb_B, B) - tol) &&
+    all(out <= pmax(ub_B, B) + tol) &&
+    all(storage_out >= storage_floor - tol) &&
+    all(storage_out <= storage_ceiling + tol)
+  if (!feasible) {
+    return(B)
+  }
+
+  out
+}
+
+
 optimization_objective_tolerance <- function() {
   1e-8
 }

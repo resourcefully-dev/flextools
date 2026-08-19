@@ -1,3 +1,26 @@
+# flextools 1.5.0
+
+* A grid capacity the battery cannot fully meet is now **concentrated** rather
+  than spread: the capacity is met exactly for as many slots as the battery's
+  energy covers, and missed on the remainder. Both spend the same energy and
+  leave the same volume unserved, but the previous behaviour - a consequence of
+  the slack penalty being linear in the volume missed, so the quadratic term
+  chose the flattest of the equally-priced answers - left *every* affected slot
+  marginally over its capacity. `congestion_time` counts slots, not kWh, so it
+  stayed at 100% of the window for every battery size and only dropped once a
+  battery covered the window outright. **This changes results** for the `grid`,
+  `capacity` and combined objectives on windows where a capacity is out of
+  reach. Runs the battery misses on *power* rather than on energy are left
+  alone, since no arrangement of the energy meets the capacity there. The `cost`
+  objective is unaffected: being linear, it already concentrated.
+* Fixed: the `capacity` objective reserved exactly the overshoot volume as the
+  battery's capacity, but the SOC band is a *percentage* of that reserve - so
+  only a fraction of the volume was usable around `SOCini`, and the capacity
+  went unmet however much battery the caller actually had. At the common
+  `SOCini = 50` a 4-hour forced export reached -63 kW against its -100 kW
+  capacity, and doubling the battery changed nothing. The reserve is now sized
+  against the usable SOC band.
+
 # flextools 1.4.0
 
 * Grid capacities are now **soft constraints** for the battery: a capacity the

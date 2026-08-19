@@ -44,11 +44,22 @@ the battery meets the capacity first and optimises second.
 A capacity the battery cannot physically reach is \emph{approached}, not dropped:
 the battery operates at its limit and a warning is emitted once. The result
 is still guaranteed never to be worse than the profile without a battery, and
-slots that can meet their capacity remain strictly capped.}
+slots that can meet their capacity remain strictly capped. The unavoidable
+miss is \emph{concentrated}: the capacity is met exactly for as many slots as the
+battery's energy covers, rather than spread thinly so that every slot ends
+marginally over. Both leave the same volume unserved, but only the former
+reduces the number of slots in violation (see \code{get_energy_kpis()}'s
+\code{congestion_time}).}
 
 \item{opt_objective}{character or numeric.
 \code{"grid"} (default), \code{"capacity"}, \code{"cost"}, or a numeric weight \code{w}
-where \code{w=1} is pure grid and \code{w=0} is pure cost.}
+where \code{w=1} is pure grid and \code{w=0} is pure cost.
+
+\code{"capacity"} reserves only the part of the battery needed to clear the
+capacity overshoot, so a small overshoot does not cycle a large battery. The
+reserve is sized against the SOC band, not just the overshoot volume: the
+band is a percentage of the reserve, so a reserve equal to the volume would
+leave only a fraction of it usable around \code{SOCini}.}
 
 \item{Bcap}{numeric, battery capacity (kWh)}
 

@@ -281,13 +281,77 @@ assume a lossless battery ($`\eta_c = \eta_d = 1`$). Round-trip losses
 are only embedded in the state-of-charge constraints of the [cost
 objective](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization).
 
-**Infeasible windows.** As in the demand case, when the grid capacities
-make a window infeasible each capacity is raised only as far as the
-*pre-battery* profile already requires, i.e. $`\max(IC_t,\; L_t - G_t)`$
-and $`\max(EC_t,\; G_t - L_t)`$, which guarantees that $`B = 0`$ is a
-feasible point. If OSQP does not converge, a greedy forward-pass
-heuristic clipped to the feasible box is used, and as a last resort the
-battery is disabled for that window.
+**Unreachable capacities.** A capacity the battery cannot meet is
+*approached*, not dropped. Instead of a hard box, each direction carries
+a slack variable $`s^I_t,\, s^E_t \ge 0`$ measuring by how much the slot
+misses its capacity:
+
+``` math
+B_t - s^I_t \;\le\; G_t - L_t + IC_t, \qquad B_t + s^E_t \;\ge\; G_t - L_t - EC_t \quad t \in T
+```
+
+The slack is bounded by how far the *pre-battery* profile already missed
+the capacity,
+
+``` math
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+```
+
+and penalised in the objective. Three consequences follow: $`B = 0`$
+with the slack at its ceiling is always feasible, so a window can never
+be infeasible; the result is never worse than the profile the battery
+started from; and slots that *can* meet their capacity have a ceiling of
+zero, so they stay hard capped. Where the capacity is out of reach, the
+penalty makes the battery spend its full physical capability approaching
+it instead of reverting to plain flattening.
+
+When no slot misses its capacity — including the default of no capacity
+limits at all — every ceiling is zero, the slack variables are dropped,
+and the problem reduces exactly to the box-constrained one above.
+
+**Concentrating the miss.** The penalty above is linear in the volume
+missed, $`\sum_t \left(s^I_t + s^E_t\right)`$, so *every* way of
+spending the battery’s limited energy over the affected slots is worth
+exactly the same to it, and the quadratic net power term breaks the tie
+by flattening: the miss comes out spread thinly, with every affected
+slot marginally over its capacity. That is the worst distribution for a
+capacity contract, whose cost is counted in slots in violation —
+`congestion_time` in
+[`get_energy_kpis()`](https://resourcefully-dev.github.io/flextools/reference/get_energy_kpis.md)
+— and not in kWh. Spread thinly, the whole window stays in violation
+whatever the battery size, and the metric only moves once the battery is
+large enough to clear the window outright.
+
+The solved profile is therefore post-processed: inside each run of
+consecutive violating slots the *same* energy is redistributed
+chronologically, so the capacity is met exactly for as many slots as the
+energy covers and missed on the remainder. This is a rearrangement, not
+a re-solve — the energy per run is preserved, so every partial sum
+$`\sum_{k=1}^t B_k`$ outside a run is untouched, and inside a run both
+the flat and the front-loaded profile move in one direction only and end
+at the same value, leaving the extremes of the state of charge where the
+solver put them.
+
+A run is left as the solver returned it when rearranging cannot buy back
+a single slot — a run missed on *power* rather than on energy, where no
+arrangement meets the capacity and concentrating would only spike the
+profile — when its battery power does not consistently point the way the
+violation needs, or when the rearranged profile would come out worse
+than the solved one on any bound. Since a capacity that *can* be met
+carries no slack, none of this applies to the ordinary case: it changes
+only windows where a capacity is out of reach.
+
+**Forced flows.** A *negative* $`IC_t`$ is an obligation to export at
+least $`|IC_t|`$, and a negative $`EC_t`$ an obligation to import. The
+constraint $`-EC_t \le L_t + B_t - G_t \le IC_t`$ covers both without
+special casing. Because the slack penalty dominates the objective, such
+an obligation outranks it: the battery meets the capacity first and
+flattens second.
+
+If OSQP does not converge, a greedy forward-pass heuristic clipped to
+the feasible box is used, and as a last resort the battery is disabled
+for that window.
 
 ### Grid capacity objective
 
@@ -298,11 +362,30 @@ formulation above, but first **curtails the usable battery capacity** to
 the amount of energy that actually has to be displaced:
 
 ``` math
-B_{cap}^{curtail} = \min\!\left(1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(G_t - L_t - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(L_t - G_t - IC_t,\; 0\right)\right),\;\; B_{cap}\right)
+V = 1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(-\left(L_t - G_t\right) - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(\left(L_t - G_t\right) - IC_t,\; 0\right)\right)
 ```
 
-The two sums are the total energy exported above the export capacity and
-imported above the import capacity by the original (pre-battery)
-profile. The 1% headroom ensures the resulting problem is strictly
-feasible. If the original profile causes no violation at all,
-$`B_{cap}^{curtail} = 0`$ and the battery is left idle for that window.
+The two sums are the energy the original (pre-battery) profile pushes
+beyond its export and import capacity, measured on the **net** flow
+$`L_t - G_t`$ so that a negative capacity is accounted as the overshoot
+it really is. The 1% headroom ensures the resulting problem is strictly
+feasible.
+
+$`V`$ is a volume of energy, but $`B_{cap}^{curtail}`$ is a *nameplate*
+of which the state of charge band is a percentage: the storage band
+handed to the solver is
+$`\frac{SOC_{min} - SOC_{ini}}{100} B_{cap}^{curtail} \dots \frac{SOC_{max} - SOC_{ini}}{100} B_{cap}^{curtail}`$.
+Reserving exactly $`V`$ would therefore leave only a fraction of $`V`$
+usable around $`SOC_{ini}`$, and the capacity would go unmet however
+much battery the caller has. The reserve is divided by that fraction:
+
+``` math
+B_{cap}^{curtail} = \min\!\left(\frac{V}{u},\;\; B_{cap}\right), \qquad u = \frac{\min\!\left(SOC_{ini} - SOC_{min},\;\; SOC_{max} - SOC_{ini}\right)}{100}
+```
+
+The $`\min`$ of the two sides of the band is the honest bound, since the
+volume must both be held from the initial content and be recoverable
+afterwards inside the same energy-neutral window. A battery pinned at
+either end of its band has no usable fraction at all ($`u \le 0`$); the
+full $`B_{cap}`$ is used there instead. If the original profile causes
+no violation, $`V = 0`$ and the battery is left idle for that window.

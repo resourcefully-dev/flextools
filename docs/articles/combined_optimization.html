@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -336,19 +336,56 @@ optimization window to keep the same initial state of charge:</li>
 <ul>
 <li>The imported and exported power must remain between 0 and the grid
 import and export capacity, tightened to the maximum physically
-achievable flow in each slot:</li>
+achievable flow in each slot. Only the non-negative part of the capacity
+can act as a box, since
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>I</mi><mi>t</mi></msub><annotation encoding="application/x-tex">I_t</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>E</mi><mi>t</mi></msub><annotation encoding="application/x-tex">E_t</annotation></semantics></math>
+are one sided while the capacity limits the <strong>net</strong>
+flow:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>c</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le I_t \le \min\!\left(IC_t,\; \max\!\left(L_t - G_t + B_c,\; 0\right)\right) \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>c</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le I_t \le \min\!\left(\max\!\left(IC_t,\; 0\right),\; \max\!\left(L_t - G_t + B_c,\; 0\right)\right) \quad t \in T
 </annotation></semantics></math></p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>d</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le E_t \le \min\!\left(EC_t,\; \max\!\left(G_t - L_t + B_d,\; 0\right)\right) \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>d</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le E_t \le \min\!\left(\max\!\left(EC_t,\; 0\right),\; \max\!\left(G_t - L_t + B_d,\; 0\right)\right) \quad t \in T
 </annotation></semantics></math></p>
 <p>These tightened bounds are what keep the QP bounded below when import
 prices are negative. As on the other QP paths, export prices are also
 clipped to
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>P</mi><msub><mi>E</mi><mi>t</mi></msub><mo>←</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>P</mi><msub><mi>E</mi><mi>t</mi></msub><mo>,</mo><mi>P</mi><msub><mi>I</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">PE_t \leftarrow \min(PE_t, PI_t)</annotation></semantics></math>,
 with a warning emitted once when clipping occurs.</p>
+<ul>
+<li>The capacity is imposed on the net flow with a penalised slack,
+exactly as in the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization">net
+power</a> and <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization">cost</a>
+articles. This is what expresses a <em>negative</em> capacity — an
+obligation to flow the other way — and what lets an unreachable capacity
+be approached instead of dropped:</li>
+</ul>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="2.0em"></mspace><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+I_t - E_t - s^I_t \;\le\; IC_t, \qquad E_t - I_t - s^E_t \;\le\; EC_t \quad t \in T
+</annotation></semantics></math></p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+</annotation></semantics></math></p>
+<p>These rows and variables are added only when a capacity can be missed
+or is negative; with no capacity limits the problem is unchanged.</p>
+<p><strong>Concentrating an unreachable capacity.</strong> As on the net
+power path, the slack is penalised linearly in the volume missed, so the
+solver is indifferent to <em>how</em> an out-of-reach capacity is missed
+and the quadratic term spreads it thinly over every affected slot. The
+solved profile is post-processed the same way: within each run of
+violating slots the same energy is redistributed chronologically, so the
+capacity is met exactly for as many slots as the energy covers instead
+of being missed marginally everywhere. See <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization">Concentrating
+the miss</a> for why this preserves feasibility and when it declines to
+act. Only the battery setpoint is returned, so
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>I</mi><mi>t</mi></msub><annotation encoding="application/x-tex">I_t</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>E</mi><mi>t</mi></msub><annotation encoding="application/x-tex">E_t</annotation></semantics></math>
+need no repair of their own.</p>
 <p><strong>Unsupported parameters.</strong> For
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>&lt;</mo><mi>w</mi><mo>&lt;</mo><mn>1</mn></mrow><annotation encoding="application/x-tex">0 \lt w \lt 1</annotation></semantics></math>
 the battery is modelled as <strong>lossless and without degradation

@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -446,11 +446,46 @@ I_t - E_t = C_t - D_t + L_t - G_t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
 <li>The imported and exported power must remain between 0 and the grid
-import and export capacity:</li>
+import and export capacity.
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>
+limit the <strong>net</strong> flow while
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>I</mi><mi>t</mi></msub><annotation encoding="application/x-tex">I_t</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>E</mi><mi>t</mi></msub><annotation encoding="application/x-tex">E_t</annotation></semantics></math>
+are one sided, so only the non-negative part of the capacity can act as
+a box:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le I_t \le IC_t \quad 0 \le E_t \le EC_t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le I_t \le \max\!\left(IC_t,\; 0\right) \quad 0 \le E_t \le \max\!\left(EC_t,\; 0\right) \quad t \in T
 </annotation></semantics></math></p>
+<ul>
+<li>The capacity itself is imposed on the net flow, with the same
+penalised slack as in the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization">net
+power article</a>. This is what expresses a <em>negative</em> capacity —
+an obligation to flow the other way,
+e.g. <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>=</mo><mi>−</mi><mn>100</mn></mrow><annotation encoding="application/x-tex">IC_t = -100</annotation></semantics></math>
+requiring at least 100 kW of export — which a one-sided box cannot
+represent:</li>
+</ul>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="2.0em"></mspace><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+I_t - E_t - s^I_t \;\le\; IC_t, \qquad E_t - I_t - s^E_t \;\le\; EC_t \quad t \in T
+</annotation></semantics></math></p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+</annotation></semantics></math></p>
+<p>These rows and variables are added only when a capacity can be missed
+or is negative. With no capacity limits the problem is exactly the one
+described above.</p>
+<p>Unlike the quadratic paths, this objective needs no post-processing
+to concentrate an unreachable capacity: being an LP (or MILP), its
+optimum sits on a vertex of the feasible region, so the miss already
+comes out concentrated on as few slots as the battery’s energy allows
+rather than spread thinly across the window. The redistribution
+described in the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization">net
+power article</a> is therefore not applied here.</p>
 <div class="section level3">
 <h3 id="solver-paths">Solver paths<a class="anchor" aria-label="anchor" href="#solver-paths"></a>
 </h3>

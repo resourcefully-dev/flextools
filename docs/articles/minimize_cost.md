@@ -254,11 +254,42 @@ I_t - E_t = C_t - D_t + L_t - G_t \quad t \in T
 ```
 
 - The imported and exported power must remain between 0 and the grid
-  import and export capacity:
+  import and export capacity. $`IC_t`$ and $`EC_t`$ limit the **net**
+  flow while $`I_t`$ and $`E_t`$ are one sided, so only the non-negative
+  part of the capacity can act as a box:
 
 ``` math
-0 \le I_t \le IC_t \quad 0 \le E_t \le EC_t \quad t \in T
+0 \le I_t \le \max\!\left(IC_t,\; 0\right) \quad 0 \le E_t \le \max\!\left(EC_t,\; 0\right) \quad t \in T
 ```
+
+- The capacity itself is imposed on the net flow, with the same
+  penalised slack as in the [net power
+  article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization).
+  This is what expresses a *negative* capacity — an obligation to flow
+  the other way, e.g. $`IC_t = -100`$ requiring at least 100 kW of
+  export — which a one-sided box cannot represent:
+
+``` math
+I_t - E_t - s^I_t \;\le\; IC_t, \qquad E_t - I_t - s^E_t \;\le\; EC_t \quad t \in T
+```
+
+``` math
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+```
+
+These rows and variables are added only when a capacity can be missed or
+is negative. With no capacity limits the problem is exactly the one
+described above.
+
+Unlike the quadratic paths, this objective needs no post-processing to
+concentrate an unreachable capacity: being an LP (or MILP), its optimum
+sits on a vertex of the feasible region, so the miss already comes out
+concentrated on as few slots as the battery’s energy allows rather than
+spread thinly across the window. The redistribution described in the
+[net power
+article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization)
+is therefore not applied here.
 
 ### Solver paths
 

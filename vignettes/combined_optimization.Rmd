@@ -146,6 +146,8 @@ $$
 
   These rows and variables are added only when a capacity can be missed or is negative; with no capacity limits the problem is unchanged.
 
+**Concentrating an unreachable capacity.** As on the net power path, the slack is penalised linearly in the volume missed, so the solver is indifferent to *how* an out-of-reach capacity is missed and the quadratic term spreads it thinly over every affected slot. The solved profile is post-processed the same way: within each run of violating slots the same energy is redistributed chronologically, so the capacity is met exactly for as many slots as the energy covers instead of being missed marginally everywhere. See [Concentrating the miss](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization) for why this preserves feasibility and when it declines to act. Only the battery setpoint is returned, so $I_t$ and $E_t$ need no repair of their own.
+
 **Unsupported parameters.** For $0 \lt w \lt 1$ the battery is modelled as **lossless and without degradation cost**: the `charge_eff`, `discharge_eff` and `cycle_cost` parameters of `add_battery_optimization()` are ignored, consistently with the net power objective. Note that this creates a discontinuity at the endpoints, since `opt_objective = 0` is routed to the cost formulation, which *does* apply all three. If round-trip efficiencies or a cycle cost are essential for your use case, use `opt_objective = "cost"`.
 
 **Infeasible windows.** There is no fallback for this objective: if OSQP does not converge, the battery is disabled for that window (a zero profile is returned) and a warning is emitted.

@@ -44,10 +44,36 @@ add_battery_optimization(
 
   - `price_exported`: energy export price (required for cost/combined)
 
+  `import_capacity` and `export_capacity` constrain the **net** grid
+  flow. A negative value is therefore an obligation to flow the other
+  way: `import_capacity = -100` requires at least 100 kW of export in
+  that slot, as a congestion contract might. Such an obligation outranks
+  `opt_objective` — the battery meets the capacity first and optimises
+  second.
+
+  A capacity the battery cannot physically reach is *approached*, not
+  dropped: the battery operates at its limit and a warning is emitted
+  once. The result is still guaranteed never to be worse than the
+  profile without a battery, and slots that can meet their capacity
+  remain strictly capped. The unavoidable miss is *concentrated*: the
+  capacity is met exactly for as many slots as the battery's energy
+  covers, rather than spread thinly so that every slot ends marginally
+  over. Both leave the same volume unserved, but only the former reduces
+  the number of slots in violation (see
+  [`get_energy_kpis()`](https://resourcefully-dev.github.io/flextools/reference/get_energy_kpis.md)'s
+  `congestion_time`).
+
 - opt_objective:
 
   character or numeric. `"grid"` (default), `"capacity"`, `"cost"`, or a
   numeric weight `w` where `w=1` is pure grid and `w=0` is pure cost.
+
+  `"capacity"` reserves only the part of the battery needed to clear the
+  capacity overshoot, so a small overshoot does not cycle a large
+  battery. The reserve is sized against the SOC band, not just the
+  overshoot volume: the band is a percentage of the reserve, so a
+  reserve equal to the volume would leave only a fraction of it usable
+  around `SOCini`.
 
 - Bcap:
 

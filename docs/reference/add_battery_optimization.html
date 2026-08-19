@@ -9,7 +9,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -86,13 +86,31 @@ Optional columns:</p><ul><li><p><code>static</code>: static power demand (kW)</p
 <li><p><code>export_capacity</code>: max grid export (kW)</p></li>
 <li><p><code>price_imported</code>: energy import price (required for cost/combined)</p></li>
 <li><p><code>price_exported</code>: energy export price (required for cost/combined)</p></li>
-</ul></dd>
+</ul><p><code>import_capacity</code> and <code>export_capacity</code> constrain the <strong>net</strong> grid flow. A
+negative value is therefore an obligation to flow the other way:
+<code>import_capacity = -100</code> requires at least 100 kW of export in that slot, as
+a congestion contract might. Such an obligation outranks <code>opt_objective</code> —
+the battery meets the capacity first and optimises second.</p>
+<p>A capacity the battery cannot physically reach is <em>approached</em>, not dropped:
+the battery operates at its limit and a warning is emitted once. The result
+is still guaranteed never to be worse than the profile without a battery, and
+slots that can meet their capacity remain strictly capped. The unavoidable
+miss is <em>concentrated</em>: the capacity is met exactly for as many slots as the
+battery's energy covers, rather than spread thinly so that every slot ends
+marginally over. Both leave the same volume unserved, but only the former
+reduces the number of slots in violation (see <code><a href="get_energy_kpis.html">get_energy_kpis()</a></code>'s
+<code>congestion_time</code>).</p></dd>
 
 
 <dt id="arg-opt-objective">opt_objective<a class="anchor" aria-label="anchor" href="#arg-opt-objective"></a></dt>
 <dd><p>character or numeric.
 <code>"grid"</code> (default), <code>"capacity"</code>, <code>"cost"</code>, or a numeric weight <code>w</code>
-where <code>w=1</code> is pure grid and <code>w=0</code> is pure cost.</p></dd>
+where <code>w=1</code> is pure grid and <code>w=0</code> is pure cost.</p>
+<p><code>"capacity"</code> reserves only the part of the battery needed to clear the
+capacity overshoot, so a small overshoot does not cycle a large battery. The
+reserve is sized against the SOC band, not just the overshoot volume: the
+band is a percentage of the reserve, so a reserve equal to the volume would
+leave only a fraction of it usable around <code>SOCini</code>.</p></dd>
 
 
 <dt id="arg-bcap">Bcap<a class="anchor" aria-label="anchor" href="#arg-bcap"></a></dt>

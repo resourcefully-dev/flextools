@@ -202,6 +202,8 @@ $$
 
   These rows and variables are added only when a capacity can be missed or is negative. With no capacity limits the problem is exactly the one described above.
 
+Unlike the quadratic paths, this objective needs no post-processing to concentrate an unreachable capacity: being an LP (or MILP), its optimum sits on a vertex of the feasible region, so the miss already comes out concentrated on as few slots as the battery's energy allows rather than spread thinly across the window. The redistribution described in the [net power article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization) is therefore not applied here.
+
 ## Solver paths
 
 The combination of `lambda` and `cycle_cost` selects one of three formulations:

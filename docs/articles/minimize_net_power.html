@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -434,17 +434,78 @@ battery
 Round-trip losses are only embedded in the state-of-charge constraints
 of the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization">cost
 objective</a>.</p>
-<p><strong>Infeasible windows.</strong> As in the demand case, when the
-grid capacities make a window infeasible each capacity is raised only as
-far as the <em>pre-battery</em> profile already requires,
-i.e. <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(IC_t,\; L_t - G_t)</annotation></semantics></math>
-and
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(EC_t,\; G_t - L_t)</annotation></semantics></math>,
-which guarantees that
+<p><strong>Unreachable capacities.</strong> A capacity the battery
+cannot meet is <em>approached</em>, not dropped. Instead of a hard box,
+each direction carries a slack variable
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>,</mo><mspace width="0.167em"></mspace><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo>≥</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">s^I_t,\, s^E_t \ge 0</annotation></semantics></math>
+measuring by how much the slot misses its capacity:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>B</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="2.0em"></mspace><msub><mi>B</mi><mi>t</mi></msub><mo>+</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mspace width="0.278em"></mspace><mo>≥</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+B_t - s^I_t \;\le\; G_t - L_t + IC_t, \qquad B_t + s^E_t \;\ge\; G_t - L_t - EC_t \quad t \in T
+</annotation></semantics></math></p>
+<p>The slack is bounded by how far the <em>pre-battery</em> profile
+already missed the capacity,</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+</annotation></semantics></math></p>
+<p>and penalised in the objective. Three consequences follow:
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">B = 0</annotation></semantics></math>
-is a feasible point. If OSQP does not converge, a greedy forward-pass
-heuristic clipped to the feasible box is used, and as a last resort the
-battery is disabled for that window.</p>
+with the slack at its ceiling is always feasible, so a window can never
+be infeasible; the result is never worse than the profile the battery
+started from; and slots that <em>can</em> meet their capacity have a
+ceiling of zero, so they stay hard capped. Where the capacity is out of
+reach, the penalty makes the battery spend its full physical capability
+approaching it instead of reverting to plain flattening.</p>
+<p>When no slot misses its capacity — including the default of no
+capacity limits at all — every ceiling is zero, the slack variables are
+dropped, and the problem reduces exactly to the box-constrained one
+above.</p>
+<p><strong>Concentrating the miss.</strong> The penalty above is linear
+in the volume missed,
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mo>∑</mo><mi>t</mi></msub><mrow><mo stretchy="true" form="prefix">(</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>+</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">\sum_t \left(s^I_t + s^E_t\right)</annotation></semantics></math>,
+so <em>every</em> way of spending the battery’s limited energy over the
+affected slots is worth exactly the same to it, and the quadratic net
+power term breaks the tie by flattening: the miss comes out spread
+thinly, with every affected slot marginally over its capacity. That is
+the worst distribution for a capacity contract, whose cost is counted in
+slots in violation — <code>congestion_time</code> in
+<code><a href="../reference/get_energy_kpis.html">get_energy_kpis()</a></code> — and not in kWh. Spread thinly, the
+whole window stays in violation whatever the battery size, and the
+metric only moves once the battery is large enough to clear the window
+outright.</p>
+<p>The solved profile is therefore post-processed: inside each run of
+consecutive violating slots the <em>same</em> energy is redistributed
+chronologically, so the capacity is met exactly for as many slots as the
+energy covers and missed on the remainder. This is a rearrangement, not
+a re-solve — the energy per run is preserved, so every partial sum
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mo>∑</mo><mrow><mi>k</mi><mo>=</mo><mn>1</mn></mrow><mi>t</mi></msubsup><msub><mi>B</mi><mi>k</mi></msub></mrow><annotation encoding="application/x-tex">\sum_{k=1}^t B_k</annotation></semantics></math>
+outside a run is untouched, and inside a run both the flat and the
+front-loaded profile move in one direction only and end at the same
+value, leaving the extremes of the state of charge where the solver put
+them.</p>
+<p>A run is left as the solver returned it when rearranging cannot buy
+back a single slot — a run missed on <em>power</em> rather than on
+energy, where no arrangement meets the capacity and concentrating would
+only spike the profile — when its battery power does not consistently
+point the way the violation needs, or when the rearranged profile would
+come out worse than the solved one on any bound. Since a capacity that
+<em>can</em> be met carries no slack, none of this applies to the
+ordinary case: it changes only windows where a capacity is out of
+reach.</p>
+<p><strong>Forced flows.</strong> A <em>negative</em>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>
+is an obligation to export at least
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false" form="prefix">|</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="false" form="prefix">|</mo></mrow><annotation encoding="application/x-tex">|IC_t|</annotation></semantics></math>,
+and a negative
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>
+an obligation to import. The constraint
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">-EC_t \le L_t + B_t - G_t \le IC_t</annotation></semantics></math>
+covers both without special casing. Because the slack penalty dominates
+the objective, such an obligation outranks it: the battery meets the
+capacity first and flattens second.</p>
+<p>If OSQP does not converge, a greedy forward-pass heuristic clipped to
+the feasible box is used, and as a last resort the battery is disabled
+for that window.</p>
 </div>
 <div class="section level3">
 <h3 id="grid-capacity-objective-1">Grid capacity objective<a class="anchor" aria-label="anchor" href="#grid-capacity-objective-1"></a>
@@ -455,14 +516,43 @@ capacity, rather than flattening the whole net power profile. It reuses
 exactly the net power formulation above, but first <strong>curtails the
 usable battery capacity</strong> to the amount of energy that actually
 has to be displaced:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mo>=</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>1.01</mn><mo>⋅</mo><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
-B_{cap}^{curtail} = \min\!\left(1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(G_t - L_t - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(L_t - G_t - IC_t,\; 0\right)\right),\;\; B_{cap}\right)
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>V</mi><mo>=</mo><mn>1.01</mn><mo>⋅</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>−</mi><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+V = 1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(-\left(L_t - G_t\right) - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(\left(L_t - G_t\right) - IC_t,\; 0\right)\right)
 </annotation></semantics></math></p>
-<p>The two sums are the total energy exported above the export capacity
-and imported above the import capacity by the original (pre-battery)
-profile. The 1% headroom ensures the resulting problem is strictly
-feasible. If the original profile causes no violation at all,
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">B_{cap}^{curtail} = 0</annotation></semantics></math>
+<p>The two sums are the energy the original (pre-battery) profile pushes
+beyond its export and import capacity, measured on the
+<strong>net</strong> flow
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">L_t - G_t</annotation></semantics></math>
+so that a negative capacity is accounted as the overshoot it really is.
+The 1% headroom ensures the resulting problem is strictly feasible.</p>
+<p><math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>V</mi><annotation encoding="application/x-tex">V</annotation></semantics></math>
+is a volume of energy, but
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><annotation encoding="application/x-tex">B_{cap}^{curtail}</annotation></semantics></math>
+is a <em>nameplate</em> of which the state of charge band is a
+percentage: the storage band handed to the solver is
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mfrac><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>i</mi><mi>n</mi></mrow></msub><mo>−</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub></mrow><mn>100</mn></mfrac><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mi>…</mi><mfrac><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mo>−</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub></mrow><mn>100</mn></mfrac><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup></mrow><annotation encoding="application/x-tex">\frac{SOC_{min} - SOC_{ini}}{100} B_{cap}^{curtail} \dots \frac{SOC_{max} - SOC_{ini}}{100} B_{cap}^{curtail}</annotation></semantics></math>.
+Reserving exactly
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>V</mi><annotation encoding="application/x-tex">V</annotation></semantics></math>
+would therefore leave only a fraction of
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi>V</mi><annotation encoding="application/x-tex">V</annotation></semantics></math>
+usable around
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub></mrow><annotation encoding="application/x-tex">SOC_{ini}</annotation></semantics></math>,
+and the capacity would go unmet however much battery the caller has. The
+reserve is divided by that fraction:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mo>=</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mfrac><mi>V</mi><mi>u</mi></mfrac><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mi>u</mi><mo>=</mo><mfrac><mrow><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub><mo>−</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>i</mi><mi>n</mi></mrow></msub><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>m</mi><mi>a</mi><mi>x</mi></mrow></msub><mo>−</mo><mi>S</mi><mi>O</mi><msub><mi>C</mi><mrow><mi>i</mi><mi>n</mi><mi>i</mi></mrow></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><mn>100</mn></mfrac></mrow><annotation encoding="application/x-tex">
+B_{cap}^{curtail} = \min\!\left(\frac{V}{u},\;\; B_{cap}\right), \qquad u = \frac{\min\!\left(SOC_{ini} - SOC_{min},\;\; SOC_{max} - SOC_{ini}\right)}{100}
+</annotation></semantics></math></p>
+<p>The
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mi mathvariant="normal">min</mi><annotation encoding="application/x-tex">\min</annotation></semantics></math>
+of the two sides of the band is the honest bound, since the volume must
+both be held from the initial content and be recoverable afterwards
+inside the same energy-neutral window. A battery pinned at either end of
+its band has no usable fraction at all
+(<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>u</mi><mo>≤</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">u \le 0</annotation></semantics></math>);
+the full
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub><annotation encoding="application/x-tex">B_{cap}</annotation></semantics></math>
+is used there instead. If the original profile causes no violation,
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>V</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">V = 0</annotation></semantics></math>
 and the battery is left idle for that window.</p>
 </div>
 </div>

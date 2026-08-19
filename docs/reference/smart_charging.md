@@ -52,6 +52,13 @@ smart_charging(
   - `export_capacity`: maximum exported power from the grid (in kW), for
     example the contracted power with the energy company.
 
+  - `load_capacity`: maximum charging power (in kW) allowed for the
+    flexible EV demand at every time slot. By default the algorithm
+    already limits the optimized setpoint to the nominal power of the
+    connected EVs (the physical charging envelope). This variable can be
+    used to tighten that limit further (e.g. a charging point or
+    transformer power limit).
+
   - `production`: local power generation (in kW). This is used when
     `opt_objective = "grid"`.
 

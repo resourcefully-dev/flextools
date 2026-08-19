@@ -187,20 +187,56 @@ SOC_{min} \le SOC_{ini} + \frac{100}{B_{cap}} \sum_{k=1}^t B_k \, \Delta t \le S
 
 - The imported and exported power must remain between 0 and the grid
   import and export capacity, tightened to the maximum physically
-  achievable flow in each slot:
+  achievable flow in each slot. Only the non-negative part of the
+  capacity can act as a box, since $`I_t`$ and $`E_t`$ are one sided
+  while the capacity limits the **net** flow:
 
 ``` math
-0 \le I_t \le \min\!\left(IC_t,\; \max\!\left(L_t - G_t + B_c,\; 0\right)\right) \quad t \in T
+0 \le I_t \le \min\!\left(\max\!\left(IC_t,\; 0\right),\; \max\!\left(L_t - G_t + B_c,\; 0\right)\right) \quad t \in T
 ```
 
 ``` math
-0 \le E_t \le \min\!\left(EC_t,\; \max\!\left(G_t - L_t + B_d,\; 0\right)\right) \quad t \in T
+0 \le E_t \le \min\!\left(\max\!\left(EC_t,\; 0\right),\; \max\!\left(G_t - L_t + B_d,\; 0\right)\right) \quad t \in T
 ```
 
 These tightened bounds are what keep the QP bounded below when import
 prices are negative. As on the other QP paths, export prices are also
 clipped to $`PE_t \leftarrow \min(PE_t, PI_t)`$, with a warning emitted
 once when clipping occurs.
+
+- The capacity is imposed on the net flow with a penalised slack,
+  exactly as in the [net
+  power](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization)
+  and
+  [cost](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization)
+  articles. This is what expresses a *negative* capacity — an obligation
+  to flow the other way — and what lets an unreachable capacity be
+  approached instead of dropped:
+
+``` math
+I_t - E_t - s^I_t \;\le\; IC_t, \qquad E_t - I_t - s^E_t \;\le\; EC_t \quad t \in T
+```
+
+``` math
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+```
+
+These rows and variables are added only when a capacity can be missed or
+is negative; with no capacity limits the problem is unchanged.
+
+**Concentrating an unreachable capacity.** As on the net power path, the
+slack is penalised linearly in the volume missed, so the solver is
+indifferent to *how* an out-of-reach capacity is missed and the
+quadratic term spreads it thinly over every affected slot. The solved
+profile is post-processed the same way: within each run of violating
+slots the same energy is redistributed chronologically, so the capacity
+is met exactly for as many slots as the energy covers instead of being
+missed marginally everywhere. See [Concentrating the
+miss](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization)
+for why this preserves feasibility and when it declines to act. Only the
+battery setpoint is returned, so $`I_t`$ and $`E_t`$ need no repair of
+their own.
 
 **Unsupported parameters.** For $`0 \lt w \lt 1`$ the battery is
 modelled as **lossless and without degradation cost**: the `charge_eff`,

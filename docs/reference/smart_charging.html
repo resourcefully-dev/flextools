@@ -15,7 +15,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.5.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -101,6 +101,11 @@ offices, etc.</p></li>
 for example the contracted power with the energy company.</p></li>
 <li><p><code>export_capacity</code>: maximum exported power from the grid (in kW),
 for example the contracted power with the energy company.</p></li>
+<li><p><code>load_capacity</code>: maximum charging power (in kW) allowed for the flexible
+EV demand at every time slot. By default the algorithm already limits the
+optimized setpoint to the nominal power of the connected EVs (the physical
+charging envelope). This variable can be used to tighten that limit further
+(e.g. a charging point or transformer power limit).</p></li>
 <li><p><code>production</code>: local power generation (in kW).
 This is used when <code>opt_objective = "grid"</code>.</p></li>
 <li><p><code>price_imported</code>: price for imported energy (Euro/kWh).

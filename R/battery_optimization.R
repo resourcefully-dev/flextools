@@ -223,7 +223,24 @@ battery_solve_grid_window <- function(
     # than a battery setpoint. Only the soft path needs this - the fast path is
     # left untouched so it stays bit-for-bit identical to the hard-constrained
     # solver it replaces.
-    return(round(solution$profile[seq_len(time_slots)], 6))
+    profile <- round(solution$profile[seq_len(time_slots)], 6)
+
+    # The slack penalty is linear in the volume missed, so the solver is
+    # indifferent to how an unreachable capacity is missed and the quadratic
+    # term flattens it across every affected slot. Spend the same energy on
+    # meeting the capacity for as many slots as it covers instead.
+    return(
+      optimization_concentrate_slack(
+        B = profile,
+        net0 = L - G,
+        import_capacity = import_capacity,
+        export_capacity = export_capacity,
+        lb_B = lb_B_relaxed,
+        ub_B = ub_B_relaxed,
+        lb_cumsum = lb_cumsum,
+        ub_cumsum = ub_cumsum
+      )
+    )
   }
 
   # Solver crash guard. Aim the heuristic at the capacity when a capacity is
@@ -328,12 +345,34 @@ battery_capacity_window <- function(
   imported_over[!is.finite(imported_over)] <- 0
   exported_over[!is.finite(exported_over)] <- 0
 
-  Bcap_curtail <- min(
-    max(sum(exported_over), sum(imported_over)) * 1.01, # add 1% headroom to ensure feasibility
-    Bcap
-  )
+  # The volume the battery has to move to clear the window, with 1% headroom to
+  # ensure feasibility.
+  curtail_volume <- max(sum(exported_over), sum(imported_over)) * 1.01
 
-  if (Bcap_curtail == 0) {
+  # The reserve is a *nameplate*, and the SOC band is a percentage of it:
+  # `battery_solve_grid_window()` derives the storage band as
+  # (SOCmin - SOCini) / 100 * Bcap .. (SOCmax - SOCini) / 100 * Bcap. Reserving
+  # exactly the curtailment volume therefore hands the solver a battery whose
+  # *usable* energy around SOCini is only a fraction of that volume - at the
+  # common SOCini = 50 the window can pre-charge half of what it needs, and the
+  # rest has to be recharged inside the same energy-neutral window. The capacity
+  # then goes unmet no matter how much battery the caller actually has, which
+  # contradicts a capacity outranking `opt_objective`.
+  #
+  # So divide by the fraction the SOC band makes usable. `min()` of the two
+  # sides is the honest bound: the reserve must both hold the volume from its
+  # initial content (SOCini - SOCmin) and be able to take it back afterwards
+  # (SOCmax - SOCini). A battery pinned at either end of its band has no usable
+  # fraction at all; fall through to the full `Bcap` there rather than dividing
+  # by zero.
+  usable_soc <- min(SOCini - SOCmin, SOCmax - SOCini) / 100
+  Bcap_curtail <- if (usable_soc <= 0) {
+    Bcap
+  } else {
+    min(curtail_volume / usable_soc, Bcap)
+  }
+
+  if (curtail_volume == 0 || Bcap_curtail == 0) {
     return(rep(0, length(G)))
   }
 
@@ -928,7 +967,26 @@ battery_combined_window <- function(
   )
 
   if (!is.null(sol$x)) {
-    return(round(sol$x[seq_len(n)], 10))
+    profile <- round(sol$x[seq_len(n)], 10)
+    if (!soft_caps) {
+      return(profile)
+    }
+    # Same linear-slack indifference as in `battery_solve_grid_window()`: spend
+    # the energy on meeting the capacity for as many slots as it covers rather
+    # than missing it marginally everywhere. Only `B` is returned, so the I / E
+    # variables need no repair of their own.
+    return(
+      optimization_concentrate_slack(
+        B = profile,
+        net0 = L - G,
+        import_capacity = import_capacity,
+        export_capacity = export_capacity,
+        lb_B = rep(-Bd, n),
+        ub_B = rep(Bc, n),
+        lb_cumsum = lb_soc,
+        ub_cumsum = ub_soc
+      )
+    )
   }
 
   message_once(
@@ -965,11 +1023,22 @@ battery_combined_window <- function(
 #' A capacity the battery cannot physically reach is *approached*, not dropped:
 #' the battery operates at its limit and a warning is emitted once. The result
 #' is still guaranteed never to be worse than the profile without a battery, and
-#' slots that can meet their capacity remain strictly capped.
+#' slots that can meet their capacity remain strictly capped. The unavoidable
+#' miss is *concentrated*: the capacity is met exactly for as many slots as the
+#' battery's energy covers, rather than spread thinly so that every slot ends
+#' marginally over. Both leave the same volume unserved, but only the former
+#' reduces the number of slots in violation (see `get_energy_kpis()`'s
+#' `congestion_time`).
 #'
 #' @param opt_objective character or numeric.
 #' `"grid"` (default), `"capacity"`, `"cost"`, or a numeric weight `w`
 #' where `w=1` is pure grid and `w=0` is pure cost.
+#'
+#' `"capacity"` reserves only the part of the battery needed to clear the
+#' capacity overshoot, so a small overshoot does not cycle a large battery. The
+#' reserve is sized against the SOC band, not just the overshoot volume: the
+#' band is a percentage of the reserve, so a reserve equal to the volume would
+#' leave only a fraction of it usable around `SOCini`.
 #' @param Bcap numeric, battery capacity (kWh)
 #' @param Bc numeric, maximum charging power (kW)
 #' @param Bd numeric, maximum discharging power (kW)

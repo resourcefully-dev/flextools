@@ -258,6 +258,270 @@ test_that("slack ceiling is zero exactly where the capacity can be met", {
 })
 
 
+# Concentrating an unavoidable miss ----------------------------------------
+# The slack penalty is linear in the volume missed, so the solver is
+# indifferent to HOW a limited amount of energy is spread over the slots that
+# miss their capacity, and the quadratic term flattens it - leaving every slot
+# marginally over. `congestion_time` counts slots, not kWh, so that is the one
+# distribution which never improves it.
+
+congestion_scenario <- function(
+  static = 50,
+  import_capacity = -100,
+  export_capacity = 200,
+  n = 96
+) {
+  dttm <- seq(as.POSIXct("2025-01-01 00:00", tz = "UTC"), by = 900, length.out = n)
+  hour <- as.integer(format(dttm, "%H"))
+  window <- hour >= 17 & hour < 21
+  list(
+    window = window,
+    opt_data = dplyr::tibble(
+      datetime = dttm,
+      production = 0,
+      static = static,
+      price_imported = 0.20,
+      price_exported = 0.05,
+      import_capacity = ifelse(window, import_capacity, 100),
+      export_capacity = export_capacity
+    )
+  )
+}
+
+
+test_that("an energy-limited forced export is met in as many slots as it covers", {
+  scenario <- congestion_scenario()
+  window <- scenario$window
+
+  B <- suppressMessages(add_battery_optimization(
+    scenario$opt_data, opt_objective = "grid",
+    Bcap = 600, Bc = 200, Bd = 200,
+    SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+  ))
+  net <- scenario$opt_data$static - scenario$opt_data$production + B
+  capacity <- scenario$opt_data$import_capacity
+  over <- net[window] > capacity[window] + 1e-6
+
+  # The battery cannot cover the whole 4-hour obligation, so some slots must
+  # miss it - but not all of them, which is what flattening produced.
+  expect_gt(sum(over), 0)
+  expect_lt(sum(over), sum(window))
+  # The slots it does cover sit exactly on the capacity, not near it.
+  expect_equal(net[window][!over], rep(-100, sum(!over)), tolerance = 1e-3)
+  # Concentrating moves energy inside the window; it does not invent any. The
+  # tolerance is OSQP's own: its solution for this window closes the neutrality
+  # row to ~1e-5, and the redistribution is exact on top of whatever it returns.
+  expect_equal(sum(B), 0, tolerance = 1e-4)
+})
+
+
+test_that("congestion_time decreases with battery size instead of stepping", {
+  # The regression this guards: with the miss spread thinly, every one of these
+  # batteries left 100% of the window in violation, so the sizing sweep read as
+  # "no battery helps" until one covered the window outright.
+  scenario <- congestion_scenario()
+  window <- scenario$window
+
+  violated <- vapply(
+    c(200, 400, 600, 800),
+    function(Bcap) {
+      B <- suppressMessages(add_battery_optimization(
+        scenario$opt_data, opt_objective = "grid",
+        Bcap = Bcap, Bc = 200, Bd = 200,
+        SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+      ))
+      net <- scenario$opt_data$static + B
+      sum(net[window] > scenario$opt_data$import_capacity[window] + 1e-6)
+    },
+    numeric(1)
+  )
+
+  expect_true(all(diff(violated) < 0))
+})
+
+
+test_that("a forced import is concentrated the same way", {
+  # Mirror image: a negative `export_capacity` obliges the site to IMPORT, so
+  # the battery charges, and the slots it covers sit on that capacity exactly.
+  scenario <- congestion_scenario(
+    static = 0,
+    import_capacity = 200,
+    export_capacity = -100
+  )
+  window <- scenario$window
+  opt_data <- scenario$opt_data
+  opt_data$production <- 50
+  opt_data$export_capacity <- ifelse(window, -100, 200)
+
+  B <- suppressMessages(add_battery_optimization(
+    opt_data, opt_objective = "grid",
+    Bcap = 300, Bc = 200, Bd = 200,
+    SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+  ))
+  net <- opt_data$static - opt_data$production + B
+  under <- -net[window] > opt_data$export_capacity[window] + 1e-6
+
+  expect_gt(sum(under), 0)
+  expect_lt(sum(under), sum(window))
+  expect_equal(net[window][!under], rep(100, sum(!under)), tolerance = 1e-3)
+  expect_equal(sum(B), 0, tolerance = 1e-4)
+})
+
+
+test_that("concentration keeps the energy and the storage envelope", {
+  B <- c(20, 20, 20, -30, -30, -30)
+  net0 <- rep(10, 6)
+  out <- flextools:::optimization_concentrate_slack(
+    B = B,
+    net0 = net0,
+    import_capacity = c(rep(100, 3), rep(-50, 3)),
+    export_capacity = rep(200, 6),
+    lb_B = rep(-100, 6),
+    ub_B = rep(100, 6),
+    lb_cumsum = rep(-200, 6),
+    ub_cumsum = rep(200, 6)
+  )
+
+  expect_equal(sum(out), sum(B))
+  # -60 meets the -50 capacity exactly; the 90 kWh available covers 1.5 slots.
+  expect_equal(out, c(20, 20, 20, -60, -30, 0))
+  expect_equal(min(cumsum(out)), min(cumsum(B)))
+})
+
+
+test_that("concentration is skipped when it cannot buy a slot back", {
+  # Power-limited: 160 kW of discharge is needed and only 105 kW exists, so no
+  # arrangement of the energy meets the capacity anywhere. Rearranging would
+  # only spike the profile, so the flat answer stands.
+  B <- rep(-40, 4)
+  out <- flextools:::optimization_concentrate_slack(
+    B = B,
+    net0 = rep(60, 4),
+    import_capacity = rep(-100, 4),
+    export_capacity = rep(200, 4),
+    lb_B = rep(-105, 4),
+    ub_B = rep(0, 4),
+    lb_cumsum = rep(-400, 4),
+    ub_cumsum = rep(400, 4)
+  )
+
+  expect_equal(out, B)
+})
+
+
+test_that("concentration leaves a profile within its capacities untouched", {
+  B <- c(10, -10, 10, -10)
+  expect_equal(
+    flextools:::optimization_concentrate_slack(
+      B = B,
+      net0 = rep(20, 4),
+      import_capacity = rep(100, 4),
+      export_capacity = rep(100, 4),
+      lb_B = rep(-50, 4),
+      ub_B = rep(50, 4),
+      lb_cumsum = rep(-100, 4),
+      ub_cumsum = rep(100, 4)
+    ),
+    B
+  )
+})
+
+
+# The `capacity` objective's reserve ----------------------------------------
+# It reserves only the part of the battery needed to clear the overshoot. That
+# reserve is a nameplate the SOC band is a percentage of, so sizing it to the
+# overshoot volume alone leaves only a fraction of the volume usable.
+
+test_that("the capacity objective meets a reachable capacity at any SOCini", {
+  scenario <- congestion_scenario()
+  window <- scenario$window
+
+  for (soc_ini in c(20, 50, 80)) {
+    B <- suppressMessages(add_battery_optimization(
+      scenario$opt_data, opt_objective = "capacity",
+      Bcap = 4000, Bc = 200, Bd = 200,
+      SOCmin = 0, SOCmax = 100, SOCini = soc_ini, window_start_hour = 0
+    ))
+    net <- scenario$opt_data$static + B
+    expect_true(
+      all(net[window] <= -100 + 1e-3),
+      label = paste("capacity met at SOCini", soc_ini)
+    )
+  }
+})
+
+
+test_that("the capacity objective does not throw away extra battery capacity", {
+  # Regression: the reserve was the overshoot volume itself, so the usable
+  # energy around SOCini was a fraction of it and the capacity went unmet no
+  # matter how much battery the caller had - adding capacity changed nothing.
+  scenario <- congestion_scenario()
+  window <- scenario$window
+
+  for (Bcap in c(1000, 2000)) {
+    B <- suppressMessages(add_battery_optimization(
+      scenario$opt_data, opt_objective = "capacity",
+      Bcap = Bcap, Bc = 200, Bd = 200,
+      SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+    ))
+    net <- scenario$opt_data$static + B
+    expect_true(
+      all(net[window] <= -100 + 1e-3),
+      label = paste("capacity met with Bcap", Bcap)
+    )
+  }
+})
+
+
+test_that("the capacity objective still reserves only what the overshoot needs", {
+  # A 20 kW overshoot in one hour against a 2 MWh battery: the reserve, not the
+  # battery, must bound the energy cycled.
+  scenario <- congestion_scenario(import_capacity = 30)
+  window <- scenario$window
+
+  B <- suppressMessages(add_battery_optimization(
+    scenario$opt_data, opt_objective = "capacity",
+    Bcap = 2000, Bc = 500, Bd = 500,
+    SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+  ))
+  net <- scenario$opt_data$static + B
+
+  expect_true(all(net[window] <= 30 + 1e-3))
+  # Overshoot is 20 kW over 16 slots = 80 kWh. Reserving against the SOC band
+  # doubles that; anything near the 2 MWh nameplate means the reserve is gone.
+  expect_lt(sum(pmax(B, 0)) / 4, 400)
+})
+
+
+test_that("a battery pinned at one end of its SOC band still optimizes", {
+  # SOCini == SOCmin leaves no usable fraction to divide by. The reserve falls
+  # through to the full battery rather than dividing by zero and disabling it.
+  scenario <- congestion_scenario()
+  window <- scenario$window
+
+  B <- suppressMessages(add_battery_optimization(
+    scenario$opt_data, opt_objective = "capacity",
+    Bcap = 1000, Bc = 200, Bd = 200,
+    SOCmin = 0, SOCmax = 100, SOCini = 0, window_start_hour = 0
+  ))
+  net <- scenario$opt_data$static + B
+
+  expect_false(all(abs(B) < 1e-9))
+  expect_true(all(net[window] <= -100 + 1e-3))
+})
+
+
+test_that("the capacity objective does nothing when there is no overshoot", {
+  scenario <- congestion_scenario(import_capacity = 100)
+  B <- suppressMessages(add_battery_optimization(
+    scenario$opt_data, opt_objective = "capacity",
+    Bcap = 1000, Bc = 200, Bd = 200,
+    SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+  ))
+  expect_equal(B, rep(0, nrow(scenario$opt_data)))
+})
+
+
 test_that("battery optimization falls back to a heuristic profile on solver failure", {
   testthat::local_mocked_bindings(
     battery_solve_osqp = function(P, q, A, lower, upper) {

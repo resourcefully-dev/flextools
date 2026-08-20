@@ -55,11 +55,14 @@ reduces the number of slots in violation (see \code{get_energy_kpis()}'s
 \code{"grid"} (default), \code{"capacity"}, \code{"cost"}, or a numeric weight \code{w}
 where \code{w=1} is pure grid and \code{w=0} is pure cost.
 
-\code{"capacity"} reserves only the part of the battery needed to clear the
-capacity overshoot, so a small overshoot does not cycle a large battery. The
-reserve is sized against the SOC band, not just the overshoot volume: the
-band is a percentage of the reserve, so a reserve equal to the volume would
-leave only a fraction of it usable around \code{SOCini}.}
+\code{"grid"} minimises the net grid flow, so it flattens the profile with
+whatever battery it is given. \code{"capacity"} instead minimises the \emph{battery
+usage} that keeps the net flow inside \code{import_capacity} and
+\code{export_capacity}: windows within both capacities are left untouched, and in
+the windows that are not, the battery discharges onto the capacity line
+rather than below it and recharges at the lowest power the window allows.
+Use it to size the minimum battery a congestion limit needs; use \code{"grid"} to
+minimise the peak itself.}
 
 \item{Bcap}{numeric, battery capacity (kWh)}
 

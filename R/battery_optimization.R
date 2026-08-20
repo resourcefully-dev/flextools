@@ -154,12 +154,20 @@ battery_solve_grid_window <- function(
     # of abandoning it, while the ceiling keeps the guarantee that the result
     # is never worse than the pre-battery profile.
     zeroMat <- matrix(0, time_slots, time_slots)
-    penalty <- optimization_slack_penalty(
-      c(
-        pmax(import_capacity, L - G),
-        pmax(export_capacity, G - L)
-      )
-    )
+    # The penalty has to dominate the gradient of whatever objective the caller
+    # handed in: `sum(net^2)` from `battery_grid_window()`, whose gradient is
+    # bounded by the net flow, or `sum(B^2)` from `battery_usage_window()`,
+    # bounded by the battery power. The relaxed box keeps `|B| <= max(Bc, Bd)`,
+    # so `max|L - G| + max(Bc, Bd)` bounds the net flow and, being no smaller,
+    # the battery power too - one envelope covers both objectives.
+    #
+    # It is derived from the flows the solution can actually reach rather than
+    # from the capacities, which bound nothing achievable once a capacity is set
+    # loosely: a nominal 1e6 standing in for "unlimited" (rather than `Inf`,
+    # which is filtered out) produced a penalty of 2e7, and at that
+    # conditioning OSQP returned no solution at all, so the battery was
+    # disabled for the whole window.
+    penalty <- optimization_slack_penalty(max(abs(L - G)) + max(Bc, Bd))
     # Small quadratic ridge on the slack block: keeps the objective strictly
     # convex in every variable so OSQP has a unique optimum to converge to.
     ridge <- 1e-6 * penalty
@@ -264,7 +272,7 @@ battery_solve_grid_window <- function(
   if (!is.null(heuristic)) {
     message_once(paste0(
       "\u26a0\ufe0f Optimization warning: ",
-      solution$result$info$status,
+      solution$result$status_message,
       ". Using heuristic battery profile for some windows."
     ))
     return(heuristic)
@@ -275,7 +283,7 @@ battery_solve_grid_window <- function(
   # the do-nothing profile, which leaves the site untouched.
   message_once(paste0(
     "\u26a0\ufe0f Optimization warning: ",
-    solution$result$info$status,
+    solution$result$status_message,
     ". Disabling battery for some windows."
   ))
   rep(0, time_slots)
@@ -318,6 +326,62 @@ battery_grid_window <- function(
 }
 
 
+#' Minimize battery usage (just a window)
+#'
+#' The capacity is enforced by `battery_solve_grid_window()`'s constraints, so
+#' the objective is free to ask for the *least battery* that satisfies them:
+#' `min sum(B^2)`, with no linear term pulling the net flow anywhere. The
+#' quadratic penalises power, so the discharge settles exactly on the binding
+#' capacity rather than below it, and the energy neutrality it has to give back
+#' is recharged at the lowest power the window allows.
+#'
+#' This is the opposite reading of the same constraints from
+#' `battery_grid_window()`, whose `q = 2 * (L - G)` makes the objective
+#' `sum((L - G + B)^2)` and therefore flattens the whole profile.
+#'
+#' @inheritParams battery_solve_grid_window
+#' @param lambda numeric, ramping penalty weight.
+#'
+#' @return numeric vector
+#' @keywords internal
+#'
+battery_usage_window <- function(
+  G,
+  L,
+  Bcap,
+  Bc,
+  Bd,
+  SOCmin,
+  SOCmax,
+  SOCini,
+  import_capacity,
+  export_capacity,
+  lambda = 0
+) {
+  time_slots <- length(G)
+  lambdaMat <- get_lambda_matrix(time_slots)
+
+  # min sum(B^2) + lambda * sum((B_t - B_{t-1})^2)
+  P <- 2 * (diag(time_slots) + lambda * lambdaMat)
+  q <- rep(0, time_slots)
+
+  battery_solve_grid_window(
+    G,
+    L,
+    Bcap,
+    Bc,
+    Bd,
+    SOCmin,
+    SOCmax,
+    SOCini,
+    import_capacity,
+    export_capacity,
+    P,
+    q
+  )
+}
+
+
 #' @keywords internal
 battery_capacity_window <- function(
   G,
@@ -338,48 +402,39 @@ battery_capacity_window <- function(
   # against a -100 kW capacity is a 160 kW overshoot, which the one-sided
   # `imported - import_capacity` would also report as 160 while treating any
   # slot that already exports as compliant. Working from the net flow keeps the
-  # curtailment volume right in both directions.
-  net <- L - G
+  # overshoot test right in both directions.
+  #
+  # Rounded to 2 decimals to match `battery_solve_grid_window()`, which rounds
+  # its inputs before deriving the very capacities this test anticipates: an
+  # overshoot too small to survive that rounding is not one the solver would
+  # act on either.
+  net <- round(L, 2) - round(G, 2)
   imported_over <- pmax(net - import_capacity, 0)
   exported_over <- pmax(-net - export_capacity, 0)
   imported_over[!is.finite(imported_over)] <- 0
   exported_over[!is.finite(exported_over)] <- 0
 
-  # The volume the battery has to move to clear the window, with 1% headroom to
-  # ensure feasibility.
-  curtail_volume <- max(sum(exported_over), sum(imported_over)) * 1.01
-
-  # The reserve is a *nameplate*, and the SOC band is a percentage of it:
-  # `battery_solve_grid_window()` derives the storage band as
-  # (SOCmin - SOCini) / 100 * Bcap .. (SOCmax - SOCini) / 100 * Bcap. Reserving
-  # exactly the curtailment volume therefore hands the solver a battery whose
-  # *usable* energy around SOCini is only a fraction of that volume - at the
-  # common SOCini = 50 the window can pre-charge half of what it needs, and the
-  # rest has to be recharged inside the same energy-neutral window. The capacity
-  # then goes unmet no matter how much battery the caller actually has, which
-  # contradicts a capacity outranking `opt_objective`.
-  #
-  # So divide by the fraction the SOC band makes usable. `min()` of the two
-  # sides is the honest bound: the reserve must both hold the volume from its
-  # initial content (SOCini - SOCmin) and be able to take it back afterwards
-  # (SOCmax - SOCini). A battery pinned at either end of its band has no usable
-  # fraction at all; fall through to the full `Bcap` there rather than dividing
-  # by zero.
-  usable_soc <- min(SOCini - SOCmin, SOCmax - SOCini) / 100
-  Bcap_curtail <- if (usable_soc <= 0) {
-    Bcap
-  } else {
-    min(curtail_volume / usable_soc, Bcap)
-  }
-
-  if (curtail_volume == 0 || Bcap_curtail == 0) {
+  # Nothing to solve for: the window is within both capacities, so the least
+  # battery that keeps it there is no battery at all. Short-circuiting here is
+  # what keeps the battery idle outside congestion instead of cycling it for a
+  # marginal gain the objective would otherwise still find.
+  tol <- optimization_solution_tolerance()
+  if (!any(imported_over > tol) && !any(exported_over > tol)) {
     return(rep(0, length(G)))
   }
 
-  battery_grid_window(
+  # The whole battery is offered, not a reserve sized to the overshoot. Sizing
+  # a reserve was a proxy for "use as little as possible" needed only because
+  # the objective underneath was `battery_grid_window()`, which spends whatever
+  # it is given on flattening the profile. `battery_usage_window()` asks for
+  # the minimum directly, so the nameplate no longer decides how hard the
+  # battery works - the capacity does - and a large battery on a small
+  # overshoot now behaves like a small one instead of being throttled by a
+  # reserve that could also be sized too small to clear the window.
+  battery_usage_window(
     G,
     L,
-    Bcap_curtail,
+    Bcap,
     Bc,
     Bd,
     SOCmin,
@@ -1034,11 +1089,14 @@ battery_combined_window <- function(
 #' `"grid"` (default), `"capacity"`, `"cost"`, or a numeric weight `w`
 #' where `w=1` is pure grid and `w=0` is pure cost.
 #'
-#' `"capacity"` reserves only the part of the battery needed to clear the
-#' capacity overshoot, so a small overshoot does not cycle a large battery. The
-#' reserve is sized against the SOC band, not just the overshoot volume: the
-#' band is a percentage of the reserve, so a reserve equal to the volume would
-#' leave only a fraction of it usable around `SOCini`.
+#' `"grid"` minimises the net grid flow, so it flattens the profile with
+#' whatever battery it is given. `"capacity"` instead minimises the *battery
+#' usage* that keeps the net flow inside `import_capacity` and
+#' `export_capacity`: windows within both capacities are left untouched, and in
+#' the windows that are not, the battery discharges onto the capacity line
+#' rather than below it and recharges at the lowest power the window allows.
+#' Use it to size the minimum battery a congestion limit needs; use `"grid"` to
+#' minimise the peak itself.
 #' @param Bcap numeric, battery capacity (kWh)
 #' @param Bc numeric, maximum charging power (kW)
 #' @param Bd numeric, maximum discharging power (kW)

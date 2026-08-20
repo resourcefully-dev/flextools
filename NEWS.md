@@ -1,3 +1,36 @@
+# flextools 1.6.0
+
+* The battery `capacity` objective now **minimizes battery usage** subject to
+  the grid capacity, instead of minimizing the net grid flow with a
+  capacity-sized slice of the battery. It keeps every constraint of the net
+  power formulation and changes only the objective, from
+  `sum((L + B - G)^2)` to `sum(B^2)`. **This changes results** for
+  `opt_objective = "capacity"`: the battery now discharges onto the capacity
+  line rather than below it, cycles only the overshoot volume, and recharges at
+  the lowest power the window allows.
+
+  The previous formulation reserved a slice of the battery sized to the
+  overshoot and ran the net power objective on it, so the reserve was the only
+  thing holding the optimizer back from flattening. Sizing that reserve against
+  the usable SOC band in 1.5.0 - necessary, since a reserve too small could not
+  clear the window at all - roughly doubled it, and the flattening it had been
+  restraining became plainly visible: on a 4000 kW peak against a 3400 kW
+  capacity the battery pulled the profile down to 2788 kW and cycled twice the
+  energy the overshoot needed. Minimizing the battery directly removes the need
+  for a reserve, so the nameplate no longer decides how hard the battery works -
+  the capacity does, and two batteries that can both clear a window now return
+  the same profile. Use `"grid"` to minimize the peak itself.
+* Fixed: the slack penalty was derived from the grid capacities rather than from
+  the flows a solution can actually reach, so a capacity standing in for
+  "unlimited" as a large finite number (rather than `Inf`, which is filtered
+  out) produced a penalty large enough to wreck the solver's conditioning -
+  OSQP returned no solution and the battery was disabled for the whole window.
+  It is now derived from `max|L - G| + max(Bc, Bd)`, which bounds both
+  objectives' gradients and is tighter than the capacities in the common case.
+* Fixed: a battery window that fell back to the heuristic or to a disabled
+  battery reported an empty solver status, because the message read
+  `result$info$status` where `solve_osqp()` stores `result$status_message`.
+
 # flextools 1.5.0
 
 * A grid capacity the battery cannot fully meet is now **concentrated** rather

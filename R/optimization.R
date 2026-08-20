@@ -190,19 +190,24 @@ optimization_slack_ceiling <- function(capacity, flow) {
 
 #' Linear penalty weight for grid-capacity slack
 #'
-#' The weight must strictly dominate the marginal gain of a quadratic
-#' net-power objective, otherwise the optimizer prefers a flatter profile over
-#' respecting the grid capacity. Since `|d/dB sum(net^2)| = 2*|net|` and the
-#' achievable net flow is bounded by the relaxed envelope, `2 * max(envelope)`
-#' is a tight and valid bound.
+#' The weight must strictly dominate the marginal gain of the quadratic
+#' objective it is added to, otherwise the optimizer prefers a better objective
+#' value over respecting the grid capacity. The caller therefore passes an
+#' envelope bounding whatever that objective differentiates to: the achievable
+#' net flow for `sum(net^2)`, where `|d/dB sum(net^2)| = 2*|net|`, or the
+#' battery power rating for `sum(B^2)`. `2 * max(envelope)` is then a tight and
+#' valid bound.
 #'
-#' Deriving the weight from the envelope rather than from the battery power
-#' rating matters for performance, not just tidiness: an oversized weight
-#' leaves the optimum untouched but multiplies the ADMM iteration count. On a
-#' one-year benchmark the power-derived weight needed 8600 iterations against
-#' 2625 for the envelope-derived one, for an identical solution.
+#' Keeping the envelope no larger than the objective needs matters for
+#' performance, not just tidiness: an oversized weight leaves the optimum
+#' untouched but multiplies the ADMM iteration count. On a one-year benchmark a
+#' weight derived from a battery power rating far above the site's own flows
+#' needed 8600 iterations against 2625 for the flow-derived one, for an
+#' identical solution.
 #'
-#' @param envelope numeric vector, per-slot bound on the absolute net flow (kW)
+#' @param envelope numeric, one or more bounds on the absolute value of the
+#'   quantity the objective is quadratic in (kW). Only the largest is used, so
+#'   callers may pass either a per-slot vector or a single global bound.
 #'
 #' @return numeric scalar
 #' @keywords internal

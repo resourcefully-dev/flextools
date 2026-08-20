@@ -289,6 +289,38 @@ congestion_scenario <- function(
 }
 
 
+# A flat baseline well inside the capacity with one short peak that overshoots
+# it. `congestion_scenario()` cannot tell the two objectives apart: its load is
+# flat, so the profile that respects the capacity is also the flattest one and
+# `grid` and `capacity` return the same answer. Here they disagree - `grid`
+# keeps pulling the peak down past the capacity, `capacity` stops on it.
+peak_scenario <- function(
+  base = 2000,
+  peak = 4000,
+  import_capacity = 3400,
+  n = 96
+) {
+  dttm <- seq(as.POSIXct("2025-11-01 00:00", tz = "UTC"), by = 900, length.out = n)
+  hour <- as.integer(format(dttm, "%H"))
+  window <- hour >= 7 & hour < 9
+  list(
+    window = window,
+    capacity = import_capacity,
+    # 600 kW over two hours = 1200 kWh to move.
+    overshoot_kwh = (peak - import_capacity) * sum(window) / 4,
+    opt_data = dplyr::tibble(
+      datetime = dttm,
+      production = 0,
+      static = ifelse(window, peak, base),
+      price_imported = 0.20,
+      price_exported = 0.05,
+      import_capacity = import_capacity,
+      export_capacity = 3000
+    )
+  )
+}
+
+
 test_that("an energy-limited forced export is met in as many slots as it covers", {
   scenario <- congestion_scenario()
   window <- scenario$window
@@ -427,10 +459,10 @@ test_that("concentration leaves a profile within its capacities untouched", {
 })
 
 
-# The `capacity` objective's reserve ----------------------------------------
-# It reserves only the part of the battery needed to clear the overshoot. That
-# reserve is a nameplate the SOC band is a percentage of, so sizing it to the
-# overshoot volume alone leaves only a fraction of the volume usable.
+# The `capacity` objective ---------------------------------------------------
+# It minimizes battery usage subject to the capacity, rather than minimizing
+# the net grid flow the way `grid` does. So it discharges onto the capacity
+# line and no further, and the nameplate does not decide how hard it works.
 
 test_that("the capacity objective meets a reachable capacity at any SOCini", {
   scenario <- congestion_scenario()
@@ -473,9 +505,9 @@ test_that("the capacity objective does not throw away extra battery capacity", {
 })
 
 
-test_that("the capacity objective still reserves only what the overshoot needs", {
-  # A 20 kW overshoot in one hour against a 2 MWh battery: the reserve, not the
-  # battery, must bound the energy cycled.
+test_that("the capacity objective cycles only the overshoot volume", {
+  # A 20 kW overshoot over four hours against a 2 MWh battery: the overshoot,
+  # not the nameplate, must bound the energy cycled.
   scenario <- congestion_scenario(import_capacity = 30)
   window <- scenario$window
 
@@ -487,15 +519,112 @@ test_that("the capacity objective still reserves only what the overshoot needs",
   net <- scenario$opt_data$static + B
 
   expect_true(all(net[window] <= 30 + 1e-3))
-  # Overshoot is 20 kW over 16 slots = 80 kWh. Reserving against the SOC band
-  # doubles that; anything near the 2 MWh nameplate means the reserve is gone.
-  expect_lt(sum(pmax(B, 0)) / 4, 400)
+  # 50 kW against a 30 kW capacity for 16 slots is 20 kW * 4 h = 80 kWh, and
+  # every kWh discharged has to be recharged inside the same window.
+  expect_equal(-sum(B[B < 0]) / 4, 80, tolerance = 1e-3)
+  expect_equal(sum(pmax(B, 0)) / 4, 80, tolerance = 1e-3)
+})
+
+
+test_that("the capacity objective discharges onto the capacity, not below it", {
+  # Regression (#71): the objective was `sum(net^2)` on a battery whose
+  # nameplate had been shrunk to the overshoot, so it minimized the peak
+  # instead of the battery and pulled the profile well under the capacity -
+  # visibly so once the reserve was sized against the SOC band and doubled. On
+  # this scenario it reached 2788 kW against a 3400 kW capacity and cycled
+  # twice the overshoot volume to do it.
+  scenario <- peak_scenario()
+  window <- scenario$window
+
+  B <- suppressMessages(add_battery_optimization(
+    scenario$opt_data, opt_objective = "capacity",
+    Bcap = 4000, Bc = 2000, Bd = 2000,
+    SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+  ))
+  net <- scenario$opt_data$static + B
+
+  # The peak sits exactly on the capacity, not under it: going under spends
+  # battery for nothing.
+  expect_equal(net[window], rep(scenario$capacity, sum(window)), tolerance = 1e-3)
+  expect_equal(max(net), scenario$capacity, tolerance = 1e-3)
+  # Exactly the overshoot volume is discharged, and recharged flat afterwards.
+  expect_equal(-sum(B[B < 0]) / 4, scenario$overshoot_kwh, tolerance = 1e-3)
+  # 1200 kWh spread over the 22 remaining hours is ~55 kW, far below the
+  # 2000 kW the battery could have used.
+  expect_lt(max(B), 100)
+})
+
+
+test_that("the capacity objective ignores battery it does not need", {
+  # The counterpart of "does not throw away extra capacity": once the battery
+  # is big enough to clear the window, a bigger one must change nothing. This
+  # is what makes the objective usable for sizing - it answers "how little
+  # battery does this limit need" rather than "how flat can this battery get".
+  scenario <- congestion_scenario(import_capacity = 30)
+
+  solutions <- lapply(c(500, 1000, 2000), function(Bcap) {
+    suppressMessages(add_battery_optimization(
+      scenario$opt_data, opt_objective = "capacity",
+      Bcap = Bcap, Bc = 500, Bd = 500,
+      SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+    ))
+  })
+
+  expect_equal(solutions[[2]], solutions[[1]], tolerance = 1e-3)
+  expect_equal(solutions[[3]], solutions[[1]], tolerance = 1e-3)
+})
+
+
+test_that("the grid objective still minimizes the net flow, not the battery", {
+  # The two objectives must stay distinguishable: `grid` is expected to spend
+  # the whole battery flattening the profile, which is why it is the wrong tool
+  # for a capacity limit and the right one for a peak.
+  scenario <- peak_scenario()
+
+  args <- list(
+    scenario$opt_data, Bcap = 4000, Bc = 2000, Bd = 2000,
+    SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+  )
+  B_capacity <- suppressMessages(
+    do.call(add_battery_optimization, c(args, opt_objective = "capacity"))
+  )
+  B_grid <- suppressMessages(
+    do.call(add_battery_optimization, c(args, opt_objective = "grid"))
+  )
+
+  # Both respect the capacity; only `grid` goes on to flatten below it, and it
+  # spends materially more battery doing so.
+  expect_lte(max(scenario$opt_data$static + B_capacity), scenario$capacity + 1e-3)
+  expect_lt(max(scenario$opt_data$static + B_grid), scenario$capacity - 100)
+  expect_gt(sum(abs(B_grid)), 1.5 * sum(abs(B_capacity)))
+})
+
+
+test_that("a loose finite capacity does not disable the battery", {
+  # Regression: the slack penalty was derived from the capacities rather than
+  # from the flows a solution can reach, so a capacity standing in for
+  # "unlimited" as a large finite number (rather than `Inf`, which is filtered
+  # out) produced a penalty of ~2e7. OSQP returned no solution at that
+  # conditioning and the window fell through to a disabled battery.
+  scenario <- congestion_scenario(import_capacity = 30, export_capacity = 1e6)
+  window <- scenario$window
+
+  B <- suppressMessages(add_battery_optimization(
+    scenario$opt_data, opt_objective = "capacity",
+    Bcap = 2000, Bc = 500, Bd = 500,
+    SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0
+  ))
+  net <- scenario$opt_data$static + B
+
+  expect_false(all(abs(B) < 1e-9))
+  expect_equal(net[window], rep(30, sum(window)), tolerance = 1e-3)
 })
 
 
 test_that("a battery pinned at one end of its SOC band still optimizes", {
-  # SOCini == SOCmin leaves no usable fraction to divide by. The reserve falls
-  # through to the full battery rather than dividing by zero and disabling it.
+  # SOCini == SOCmin gives a one-sided storage band: the battery can only
+  # charge first and discharge afterwards. The congestion window is late enough
+  # in the window for that to be possible, so the capacity is still met.
   scenario <- congestion_scenario()
   window <- scenario$window
 

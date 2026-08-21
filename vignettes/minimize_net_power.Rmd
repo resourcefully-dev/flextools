@@ -128,7 +128,13 @@ If the optimal slice is zero (the original profile already respects the grid lim
 
 **Stage 2 — reshape only that slice (QP, OSQP).** The untouched part $LF_t - M_t$ is added to the static load, and the net power formulation of the previous section is applied to the slice $M_t$ alone, with its maximum power reduced accordingly. The final result is the sum of the fixed part and the optimized slice.
 
-If Stage 1 is infeasible under the true capacities, the same minimal relaxation described above is applied and the plain net power formulation is used on the full flexible load.
+**Infeasible windows.** When no shift of the flexible load can keep a window inside its capacities, Stage 1 is infeasible — and the answer is still the *least* shift, not the flattest profile. Each slot is instead allowed to miss its bound by at most what the original, unshifted profile already misses it by, which is the same slack ceiling the battery uses:
+
+$$
+\overline{s}^{+}_t = \max\left(LF_t - \overline{LF}_t,\; 0\right), \qquad \overline{s}^{-}_t = \max\left(\underline{O}_t - LF_t,\; 0\right) \quad t \in T
+$$
+
+$M = O^M = 0$ sits at those ceilings, so the relaxed LP is feasible by construction, a slot that *can* meet its capacity stays hard capped, and the result can never be worse than the profile it started from. Two passes then settle it in the order the capacity demands: first $\min \sum_t \left(s^{+}_t + s^{-}_t\right)$, how close to the capacity the window can get, and then $\min \sum_t M_t$ subject to that miss, the least shift that still gets that close. Leaving the shift to the second pass matters, because the miss is a *volume* and its objective is therefore indifferent to *which* slots carry it; choosing among the equally-close solutions by the shift keeps the miss where it already was. Stage 2 runs as usual, with each capacity raised to the flow the reach needs, so it can spend the slice on smoothing but not on a slot the reach left inside its capacity. If the solver still fails, the minimal relaxation described above is applied and the plain net power formulation is used on the full flexible load.
 
 
 # Battery optimization

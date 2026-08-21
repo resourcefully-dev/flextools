@@ -294,6 +294,24 @@ demand_select_window_solver <- function(solver_data) {
 
 # Capacity objective helpers ------------------------------------------------------
 
+# The LP behind the `capacity` objective, in two modes.
+#
+# Variables are X = [s, f]: `s_t` is the flexible energy removed from slot `t`
+# and `f_t` the energy added to it, so the resulting load is `LF - s + f`.
+#
+# Hard mode (the default) caps the resulting load at the grid capacities and
+# minimises `sum(s)`: the least flexible demand that has to move for the window
+# to respect them.
+#
+# Soft mode (`slack_up_max` / `slack_dn_max` given) lets each slot miss those
+# caps by at most the given amount, for windows the caps cannot be met in at
+# all. It minimises the *miss*, unless a `violation_budget` caps the total miss
+# as well, in which case it is back to minimising the shift. The two are
+# solved one after the other rather than weighted into one objective: the
+# capacity outranks the shift, and with the caps soft the least shift that
+# satisfies the constraints is no shift at all, so a single objective would
+# either hand back the untouched profile or need a penalty tuned against the
+# smallest miss worth chasing. See `select_capacity_reach_slice()`.
 capacity_slice_problem <- function(
   G,
   LF,
@@ -302,7 +320,10 @@ capacity_slice_problem <- function(
   time_horizon,
   LFmax,
   import_capacity,
-  export_capacity
+  export_capacity,
+  slack_up_max = NULL,
+  slack_dn_max = NULL,
+  violation_budget = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -356,28 +377,85 @@ capacity_slice_problem <- function(
   final_lb <- round(pmax(G - LS - export_capacity, 0), 2)
   final_ub <- round(pmin(pmax(G - LS + import_capacity, 0), LFmax), 2)
 
-  A_slice_bounds <- cbind(identityMat, zeroMat)
-  A_final_bounds <- cbind(-identityMat, identityMat)
-  A_shift_identity <- cbind(-horizonMat_identity, identityMat)
+  # Soft mode appends the slack block [s_up, s_dn] to every constraint. Only
+  # the resulting-load rows touch it, so the rest is padded with zeros.
+  soft <- !is.null(slack_up_max)
+  pad <- function(block) {
+    if (!soft) {
+      return(block)
+    }
+    cbind(block, matrix(0, nrow = nrow(block), ncol = 2 * time_slots))
+  }
+
+  A_slice_bounds <- pad(cbind(identityMat, zeroMat))
+  A_shift_identity <- pad(cbind(-horizonMat_identity, identityMat))
   A_energy <- matrix(0, nrow = 1, ncol = 2 * time_slots)
   A_energy[1, seq_len(time_slots)] <- -1
   A_energy[1, time_slots + seq_len(time_slots)] <- 1
+  A_energy <- pad(A_energy)
+
+  if (soft) {
+    # One row per direction, so a slot missing `final_ub` and a slot missing
+    # `final_lb` never share a slack column (they would cancel in a two-sided
+    # row, and both ceilings can be positive at once when `LFmax` pushes
+    # `final_ub` below `final_lb`):
+    #   (f - s) - s_up <= final_ub - LF
+    #   (f - s) + s_dn >= final_lb - LF
+    A_final_bounds <- rbind(
+      cbind(-identityMat, identityMat, -identityMat, zeroMat),
+      cbind(-identityMat, identityMat, zeroMat, identityMat)
+    )
+    lhs_final_bounds <- c(rep(-Inf, time_slots), final_lb - LF)
+    rhs_final_bounds <- c(final_ub - LF, rep(Inf, time_slots))
+
+    lower <- rep(0, 4 * time_slots)
+    upper <- c(LF, rep(Inf, time_slots), slack_up_max, slack_dn_max)
+
+    if (is.null(violation_budget)) {
+      # min sum(s_up) + sum(s_dn): how far the window still misses its bounds.
+      L <- c(rep(0, 2 * time_slots), rep(1, 2 * time_slots))
+    } else {
+      # min sum(s), with the total miss held at the budget the pass above
+      # proved unavoidable. Sorting out the shift here and not there matters:
+      # the miss objective is a volume, so it is indifferent to *which* slots
+      # carry an unavoidable miss and picks a redistribution as readily as it
+      # leaves the profile alone. Choosing among those by the shift keeps the
+      # miss where it already was.
+      L <- c(rep(1, time_slots), rep(0, 3 * time_slots))
+      A_budget <- matrix(
+        c(rep(0, 2 * time_slots), rep(1, 2 * time_slots)),
+        nrow = 1
+      )
+      A_final_bounds <- rbind(A_final_bounds, A_budget)
+      lhs_final_bounds <- c(lhs_final_bounds, -Inf)
+      rhs_final_bounds <- c(rhs_final_bounds, violation_budget)
+    }
+  } else {
+    A_final_bounds <- cbind(-identityMat, identityMat)
+    lhs_final_bounds <- final_lb - LF
+    rhs_final_bounds <- final_ub - LF
+
+    # min sum(s): the least flexible demand that has to move.
+    L <- c(rep(1, time_slots), rep(0, time_slots))
+    lower <- rep(0, 2 * time_slots)
+    upper <- c(LF, rep(Inf, time_slots))
+  }
 
   list(
-    L = c(rep(1, time_slots), rep(0, time_slots)),
-    lower = c(rep(0, time_slots), rep(0, time_slots)),
-    upper = c(LF, rep(Inf, time_slots)),
+    L = L,
+    lower = lower,
+    upper = upper,
     A = rbind(
       A_slice_bounds,
       A_final_bounds,
-      A_cumsum_lb,
-      A_cumsum_ub,
+      pad(A_cumsum_lb),
+      pad(A_cumsum_ub),
       A_shift_identity,
       A_energy
     ),
     lhs = c(
       rep(0, time_slots),
-      final_lb - LF,
+      lhs_final_bounds,
       lhs_cumsum_lb,
       lhs_cumsum_ub,
       rep(-Inf, time_slots),
@@ -385,13 +463,34 @@ capacity_slice_problem <- function(
     ),
     rhs = c(
       LF,
-      final_ub - LF,
+      rhs_final_bounds,
       rhs_cumsum_lb,
       rhs_cumsum_ub,
       rep(0, time_slots),
       0
     )
   )
+}
+
+
+capacity_slice_solve <- function(problem) {
+  result <- highs::highs_solve(
+    Q = NULL,
+    L = problem$L,
+    lower = problem$lower,
+    upper = problem$upper,
+    A = problem$A,
+    lhs = problem$lhs,
+    rhs = problem$rhs,
+    types = rep(1L, ncol(problem$A)),
+    control = optimization_highs_options(include_mip_gap = FALSE)
+  )
+
+  if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
+    return(NULL)
+  }
+
+  result
 }
 
 
@@ -425,19 +524,8 @@ select_capacity_slice <- function(
     export_capacity = export_capacity
   )
 
-  result <- highs::highs_solve(
-    Q = NULL,
-    L = problem$L,
-    lower = problem$lower,
-    upper = problem$upper,
-    A = problem$A,
-    lhs = problem$lhs,
-    rhs = problem$rhs,
-    types = rep(1L, ncol(problem$A)),
-    control = optimization_highs_options(include_mip_gap = FALSE)
-  )
-
-  if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
+  result <- capacity_slice_solve(problem)
+  if (is.null(result)) {
     return(NULL)
   }
 
@@ -447,6 +535,106 @@ select_capacity_slice <- function(
 
   list(
     slice = round(slice, 2),
+    result = result
+  )
+}
+
+
+# The least shift that gets a window as close to a grid capacity as the
+# flexible demand allows, for the windows where the capacity cannot be met at
+# all and `select_capacity_slice()` is therefore infeasible.
+#
+# The counterpart of `battery_solve_grid_window()`'s soft path: each slot may
+# miss its bound by at most what the original, unshifted profile already misses
+# it by - `optimization_slack_ceiling()`'s rule - so a slot that can meet its
+# capacity stays hard capped and the result can never be worse than the profile
+# it started from. `s = f = 0` sits at those ceilings, so the LP is feasible by
+# construction and needs no relaxation retry.
+#
+# Two passes, in that order, because the capacity outranks the shift: how close
+# the window can get, then the least shift that still gets that close.
+#
+# Returns the slice to move and the resulting load profile it was measured
+# against, or `NULL` if the solver gave up.
+select_capacity_reach_slice <- function(
+  G,
+  LF,
+  LS,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity
+) {
+  G <- round(as.numeric(G), 2)
+  LF <- round(as.numeric(LF), 2)
+  LS <- round(as.numeric(LS), 2)
+
+  time_slots <- length(LF)
+  LFmax <- as.numeric(rep_len(LFmax, time_slots))
+  import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
+  export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+
+  # The same bounds `capacity_slice_problem()` derives, and by how much the
+  # untouched profile already misses them.
+  final_lb <- round(pmax(G - LS - export_capacity, 0), 2)
+  final_ub <- round(pmin(pmax(G - LS + import_capacity, 0), LFmax), 2)
+  slack_up_max <- pmax(LF - final_ub, 0)
+  slack_dn_max <- pmax(final_lb - LF, 0)
+  # An infinite capacity leaves an infinite bound behind; guard it (and the
+  # Inf - Inf = NaN corner) back to "no relaxation allowed", as
+  # `optimization_slack_ceiling()` does.
+  slack_up_max[!is.finite(slack_up_max)] <- 0
+  slack_dn_max[!is.finite(slack_dn_max)] <- 0
+
+  soft_problem <- function(violation_budget = NULL) {
+    capacity_slice_problem(
+      G = G,
+      LF = LF,
+      LS = LS,
+      direction = direction,
+      time_horizon = time_horizon,
+      LFmax = LFmax,
+      import_capacity = import_capacity,
+      export_capacity = export_capacity,
+      slack_up_max = slack_up_max,
+      slack_dn_max = slack_dn_max,
+      violation_budget = violation_budget
+    )
+  }
+
+  # Pass 1: how far the window still misses its bounds once the flexible
+  # demand has been spent on them. Read off the slack variables rather than the
+  # reported objective value so the budget below is in the same units as the
+  # row that will hold it.
+  tolerance <- optimization_solution_tolerance()
+  reach <- capacity_slice_solve(soft_problem())
+  if (is.null(reach)) {
+    return(NULL)
+  }
+  missed <- sum(reach$primal_solution[2 * time_slots + seq_len(2 * time_slots)])
+
+  # Pass 2: the least shift that still misses no more than that. This is also
+  # what decides *which* slots carry the miss, since pass 1 is indifferent to
+  # that: the least shift is the one that leaves it closest to where it already
+  # was. It is not the explicit concentration the battery does in
+  # `optimization_concentrate_slack()`, but it does not spread the miss either.
+  # The tolerance absorbs the solver's own, so the budget row cannot turn pass
+  # 1's optimum into an infeasible point.
+  result <- capacity_slice_solve(
+    soft_problem(violation_budget = max(missed, 0) + tolerance)
+  )
+  if (is.null(result)) {
+    return(NULL)
+  }
+
+  moved <- pmax(result$primal_solution[seq_len(time_slots)], 0)
+  moved[moved < tolerance] <- 0
+  added <- pmax(result$primal_solution[time_slots + seq_len(time_slots)], 0)
+
+  list(
+    slice = round(moved, 2),
+    reach = round(pmax(LF - moved + added, 0), 2),
     result = result
   )
 }
@@ -487,13 +675,62 @@ demand_capacity_window <- function(
   )
 
   if (is.null(slice_solution)) {
-    # The capacity slice LP is infeasible under the true caps. Rather than
-    # dropping the grid constraints entirely, relax each cap only as far as the
-    # original, unshifted profile already needs (import LS + LF - G, export
-    # G - LS - LF). Slots within their caps keep the true capacity, so the
-    # result can never be worse than the input profile. demand_grid_window()
-    # (via demand_solve_window) is feasible by construction with these caps
-    # because O = LF is a feasible point.
+    # The slice LP is infeasible under the true caps: no shift of the flexible
+    # demand can keep the whole window inside them. The answer is still the
+    # *least* shift, exactly as `battery_usage_window()` is for the battery -
+    # get as close to the capacity as the flexibility allows, and shift only as
+    # much as getting there needs. Handing the window to `demand_grid_window()`
+    # instead - the objective that minimises the net flow - spends all the
+    # flexible demand it is given on flattening the profile, including the
+    # slots that were already well inside their caps.
+    slice_solution <- select_capacity_reach_slice(
+      G = G,
+      LF = LF,
+      LS = LS,
+      direction = direction,
+      time_horizon = time_horizon,
+      LFmax = LFmax,
+      import_capacity = import_capacity,
+      export_capacity = export_capacity
+    )
+
+    if (!is.null(slice_solution)) {
+      message_once(
+        "\u26a0\ufe0f Optimization warning: grid capacity not reachable in some windows. The flexible demand is shifted as little as the capacity allows, so the capacity is approached but not met."
+      )
+      # Hand the slice on under caps relaxed to the profile that reach needs,
+      # and never past what the original, unshifted profile already needed. The
+      # slack ceilings already guarantee the second bound; taking the `pmin()`
+      # anyway keeps it true whatever the 2-decimal rounding does, so no slot
+      # can end up worse than it was and slots that can meet their capacity
+      # keep it. The relaxation is per slot, so the placement below can spend
+      # the slice on smoothing but cannot spend it on a slot the reach left
+      # inside its capacity.
+      reach <- slice_solution$reach
+      tol <- optimization_solution_tolerance()
+      import_reach <- pmax(import_capacity, reach + LS - G)
+      import_input <- pmax(import_capacity, LF + LS - G)
+      export_reach <- pmax(export_capacity, G - LS - reach)
+      export_input <- pmax(export_capacity, G - LS - LF)
+      import_capacity <- pmin(import_reach, import_input) + tol
+      export_capacity <- pmin(export_reach, export_input) + tol
+      # `LFmax` bounds the same resulting load the reach was measured against,
+      # so it has to admit the reach too - the counterpart of
+      # `demand_solve_window()`'s `clamp_to_lf`. Without this the placement
+      # below could be infeasible whenever `LFmax`, not the grid, is what the
+      # window cannot meet.
+      LFmax <- pmin(pmax(LFmax, reach), pmax(LFmax, LF))
+    }
+  }
+
+  if (is.null(slice_solution)) {
+    # Unreachable for well-formed inputs: the reach LP is feasible by
+    # construction and its own solution is a feasible point of the re-solve
+    # above, so getting here means the solver gave up. Fall back to the
+    # minimal relaxation `demand_solve_window()` uses - each cap raised only as
+    # far as the original, unshifted profile already needs, which keeps the
+    # never-worse-than-input guarantee - and let the grid objective place the
+    # load.
     tol <- optimization_solution_tolerance()
     import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
     export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
@@ -587,8 +824,12 @@ demand_capacity_window <- function(
 #' The `"capacity"` objective minimizes the amount of flexible demand that
 #' needs to be moved to respect `import_capacity` and `export_capacity`,
 #' then applies the grid-minimizing formulation only to that moved slice.
-#' If that constrained problem is infeasible, grid limits are removed for the
-#' affected optimization window.
+#' When no shift can respect them, it keeps minimizing the shift instead of
+#' falling back on `"grid"`: the window gets as close to the capacity as the
+#' flexible demand allows, and each capacity is then relaxed only to the flow
+#' that reach needs - never past what the original, unshifted profile already
+#' needed, so no slot ends up worse than it was. Use `"grid"` to minimize the
+#' net power itself.
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of time slots to shift energy from.
 #'  If `NULL`, the `time_horizon` will be the total optimization window length.

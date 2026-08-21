@@ -247,6 +247,73 @@ test_that("capacity objective relaxes minimally when a window is infeasible", {
   expect_false(isTRUE(all.equal(as.numeric(O), LF)))
 })
 
+# A capacity no shift can meet is still answered with the *least* shift, not
+# with the flattest profile: the window gets as close to the capacity as the
+# flexible demand allows, and the slots that were already inside their caps are
+# left where they are. Mirrors `battery_usage_window()` for the battery.
+test_that("capacity objective shifts as little as the capacity allows when a window is infeasible", {
+  n <- 12
+  G <- rep(0, n)
+  LS <- rep(0, n)
+  # A 10 kW spike against a 3 kW cap, with time_horizon = 1 so the spike can
+  # only push into the next slot: the capacity cannot be met. The rest of the
+  # window sits well inside the cap and has no reason to move.
+  LF <- c(10, 0.5, 1, 0.5, 2, 0.5, 1, 0.5, 2, 0.5, 1, 0.5)
+  LFmax <- rep(10, n)
+  import_capacity <- rep(3, n)
+  export_capacity <- rep(0, n)
+
+  O <- suppressMessages(demand_capacity_window(
+    G = G, LF = LF, LS = LS, direction = "forward",
+    time_horizon = 1L, LFmax = LFmax,
+    import_capacity = import_capacity, export_capacity = export_capacity
+  ))
+  O_grid <- suppressMessages(demand_grid_window(
+    G = G, LF = LF, LS = LS, direction = "forward",
+    time_horizon = 1L, LFmax = LFmax,
+    import_capacity = import_capacity, export_capacity = export_capacity
+  ))
+
+  overshoot <- function(profile) {
+    sum(pmax(profile + LS - G - import_capacity, 0))
+  }
+
+  # The capacity outranks the shift: getting no closer to it than the objective
+  # that flattens the whole window would is not a saving.
+  expect_lte(overshoot(O), overshoot(O_grid) + relax_tol)
+  # But it is reached without touching the slots that were already compliant.
+  expect_equal(as.numeric(O)[4:n], LF[4:n], tolerance = 1e-6)
+  expect_lt(sum(abs(as.numeric(O) - LF)), sum(abs(as.numeric(O_grid) - LF)))
+  expect_equal(sum(O), sum(LF), tolerance = 1e-6)
+})
+
+test_that("capacity objective keeps its invariants when LFmax is what a window cannot meet", {
+  n <- 6
+  G <- rep(0, n)
+  LS <- rep(0, n)
+  LF <- c(8, 0, 0, 8, 0, 0)
+  import_capacity <- rep(3, n)
+  export_capacity <- rep(0, n)
+
+  # `LFmax` below the LF peak: no profile can respect it, so the reach is
+  # bounded by `LFmax` and not by the grid capacity.
+  O <- suppressMessages(demand_capacity_window(
+    G = G, LF = LF, LS = LS, direction = "forward",
+    time_horizon = 2L, LFmax = rep(4, n),
+    import_capacity = import_capacity, export_capacity = export_capacity
+  ))
+
+  net_import <- pmax(O + LS - G, 0)
+  orig_import <- pmax(LF + LS - G, 0)
+
+  expect_true(all(net_import <= pmax(import_capacity, orig_import) + relax_tol))
+  within <- orig_import <= import_capacity
+  expect_true(all(net_import[within] <= import_capacity[within] + relax_tol))
+  expect_equal(sum(O), sum(LF), tolerance = 1e-6)
+  # The spikes are brought down as far as the horizon allows.
+  expect_lt(max(net_import), max(orig_import))
+})
+
 test_that("grid objective relaxes minimally and clamps ub_O when LFmax < LF", {
   n <- 6
   G <- rep(0, n)

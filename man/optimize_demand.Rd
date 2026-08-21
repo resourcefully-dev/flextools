@@ -52,8 +52,12 @@ where \code{0 == "cost"} and \code{1 == "grid"}.
 The \code{"capacity"} objective minimizes the amount of flexible demand that
 needs to be moved to respect \code{import_capacity} and \code{export_capacity},
 then applies the grid-minimizing formulation only to that moved slice.
-If that constrained problem is infeasible, grid limits are removed for the
-affected optimization window.}
+When no shift can respect them, it keeps minimizing the shift instead of
+falling back on \code{"grid"}: the window gets as close to the capacity as the
+flexible demand allows, and each capacity is then relaxed only to the flow
+that reach needs - never past what the original, unshifted profile already
+needed, so no slot ends up worse than it was. Use \code{"grid"} to minimize the
+net power itself.}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 

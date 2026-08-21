@@ -149,7 +149,7 @@ Additionally, this optimization problem also counts with the following parameter
 - $SOC_{ini}$ : State of charge at the beginning/end of the optimization window (%)
 - $\eta_c$ : Battery charging efficiency (`charge_eff`)
 - $\eta_d$ : Battery discharging efficiency (`discharge_eff`)
-- $c_{cyc}$ : Cycle degradation cost per kWh cycled (`cycle_cost`)
+- $c_{cyc}$ : Degradation cost of one full cycle, i.e. per $B_{cap}$ kWh discharged (`cycle_cost`)
 
 Unlike the [net power objective](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization), the cost objective uses **separate charging and discharging variables** $C_t$ and $D_t$, which is what allows the charging and discharging efficiencies to be applied correctly in the state-of-charge constraints.
 
@@ -225,7 +225,7 @@ $$
 
 This is the most accurate but also the most expensive path, since a branch-and-bound problem is solved for every optimization window.
 
-**LP path (`cycle_cost > 0`).** A positive cycle cost adds the linear term $\frac{c_{cyc}}{B_{cap}} D_t$ to the objective, which converts the per-kWh degradation cost into a penalty on discharged power, so the optimizer trades energy cost savings against battery wear. This penalty alone makes simultaneous charging and discharging uneconomical, so the binary grid mode is dropped and the problem becomes a pure LP — substantially faster than the MILP. On this path the import and export bounds are tightened to their physically achievable values, which is what keeps the LP bounded when import prices are negative:
+**LP path (`cycle_cost > 0`).** A positive cycle cost adds the linear term $\frac{c_{cyc}}{B_{cap}} D_t$ to the objective, which converts the per-cycle degradation cost into a per-kWh penalty on discharged power, so the optimizer trades energy cost savings against battery wear. This penalty alone makes simultaneous charging and discharging uneconomical, so the binary grid mode is dropped and the problem becomes a pure LP — substantially faster than the MILP. On this path the import and export bounds are tightened to their physically achievable values, which is what keeps the LP bounded when import prices are negative:
 
 $$
 0 \le I_t \le \min\!\left(IC_t,\; \max\!\left(L_t - G_t + B_c,\; 0\right)\right), \qquad

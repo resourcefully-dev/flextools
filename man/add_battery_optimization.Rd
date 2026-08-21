@@ -91,9 +91,12 @@ Embeds round-trip losses in the SOC constraints for accurate energy accounting.}
 \item{discharge_eff}{numeric, discharging efficiency in (0, 1]. Default 1 (lossless).
 See \code{charge_eff}.}
 
-\item{cycle_cost}{numeric, degradation cost per kWh cycled (Euro/kWh). Default 0.
-Adds a linear penalty on battery discharge so the optimizer trades off energy
-cost savings against battery wear. When positive, the problem is solved as a
+\item{cycle_cost}{numeric, degradation cost of one full cycle, in Euro per
+\code{Bcap} kWh discharged (NOT Euro/kWh). Default 0. Divided by \code{Bcap}
+internally to obtain the per-kWh penalty, so a battery costing \code{p} Euro/kWh
+and rated for \code{n} cycles has \code{cycle_cost = p * Bcap / n}. Adds a linear
+penalty on battery discharge so the optimizer trades off energy cost
+savings against battery wear. When positive, the problem is solved as a
 pure LP (no binary variables) which is substantially faster than the default MILP.}
 }
 \value{

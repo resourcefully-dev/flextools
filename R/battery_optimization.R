@@ -1112,9 +1112,12 @@ battery_combined_window <- function(
 #'   Embeds round-trip losses in the SOC constraints for accurate energy accounting.
 #' @param discharge_eff numeric, discharging efficiency in (0, 1]. Default 1 (lossless).
 #'   See `charge_eff`.
-#' @param cycle_cost numeric, degradation cost per kWh cycled (Euro/kWh). Default 0.
-#'   Adds a linear penalty on battery discharge so the optimizer trades off energy
-#'   cost savings against battery wear. When positive, the problem is solved as a
+#' @param cycle_cost numeric, degradation cost of one full cycle, in Euro per
+#'   `Bcap` kWh discharged (NOT Euro/kWh). Default 0. Divided by `Bcap`
+#'   internally to obtain the per-kWh penalty, so a battery costing `p` Euro/kWh
+#'   and rated for `n` cycles has `cycle_cost = p * Bcap / n`. Adds a linear
+#'   penalty on battery discharge so the optimizer trades off energy cost
+#'   savings against battery wear. When positive, the problem is solved as a
 #'   pure LP (no binary variables) which is substantially faster than the default MILP.
 #'
 #' @return numeric vector

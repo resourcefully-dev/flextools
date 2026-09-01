@@ -432,3 +432,58 @@ test_that("view_smart_charging_logs errors when there are no log messages", {
     "no log messages"
   )
 })
+
+
+# Sessions no window can schedule -----------------------------------------
+
+test_that("a session whose charging outlasts its window is reported, not silently dropped", {
+  # `set_responsive()` needs a session's charging to end inside the
+  # optimization window. This one starts charging 45 min before the window ends
+  # and needs 1.5 h, so its own window cannot take it on - and the next window
+  # claims sessions by `ChargingStartDateTime`, which is back in this one. It is
+  # therefore scheduled by nobody: it charges at nominal power, `Responsive`
+  # stays `NA`, and it can exceed the grid capacity on its own.
+  crossing_session <- tibble(
+    Session = "X1",
+    Timecycle = "Wednesday",
+    Profile = "Home",
+    ConnectionStartDateTime = as.POSIXct("2025-03-05 05:15:00", tz = "UTC"),
+    ConnectionEndDateTime = as.POSIXct("2025-03-05 14:30:00", tz = "UTC"),
+    ChargingStartDateTime = as.POSIXct("2025-03-05 05:15:00", tz = "UTC"),
+    ChargingEndDateTime = as.POSIXct("2025-03-05 06:45:00", tz = "UTC"),
+    Power = 11,
+    Energy = 16.5,
+    ConnectionHours = 9.25,
+    ChargingHours = 1.5
+  )
+  opt_data_crossing <- tibble(
+    datetime = seq(
+      as.POSIXct("2025-03-04 06:00:00", tz = "UTC"),
+      as.POSIXct("2025-03-06 05:45:00", tz = "UTC"),
+      by = "15 min"
+    ),
+    production = 0,
+    static = 0,
+    import_capacity = 3,
+    export_capacity = 3
+  )
+
+  expect_message(
+    sc_results <- suppressWarnings(smart_charging(
+      crossing_session,
+      opt_data_crossing,
+      opt_objective = "capacity",
+      method = "curtail",
+      window_days = 1,
+      window_start_hour = 6,
+      energy_min = 0,
+      show_progress = FALSE
+    )),
+    "not eligible for smart charging"
+  )
+
+  expect_true(all(is.na(sc_results$sessions$Responsive)))
+  # Unscheduled means unmanaged: the full energy, at nominal power, over the cap.
+  expect_equal(sum(sc_results$sessions$Energy), 16.5, tolerance = 0.05)
+  expect_gt(max(rowSums(as.data.frame(sc_results$demand)[, -1, drop = FALSE])), 3)
+})

@@ -91,6 +91,16 @@
 #' optimal setpoints (tibble), sessions schedule (tibble) and log messages
 #' (list of character vectors, one per window). The date-time values in the log
 #' list are in the time zone of the `opt_data`.
+#'
+#' The `Responsive` column of the sessions schedule has **three** states, not
+#' two. `TRUE` and `FALSE` are the sessions that could take part in smart
+#' charging, split according to `responsive`. `NA` marks a session that was not
+#' eligible for smart charging in its optimization window at all, because its
+#' charging does not end inside the window, or because its connection times fall
+#' outside the 95% band of its user profile in that window. A session with
+#' `Responsive = NA` is not scheduled: it charges at nominal power and can
+#' therefore exceed `import_capacity`. `smart_charging()` reports how many there
+#' are.
 #' @export
 #'
 #' @details
@@ -324,6 +334,39 @@ smart_charging <- function(
       )
     }
   )
+
+  # Sessions no window could take on. `set_responsive()` leaves `Responsive`
+  # as `NA` for them, they are scheduled by nobody, and they charge at nominal
+  # power - so they can exceed `import_capacity` on their own. That was silent
+  # until now, and indistinguishable from a session that `responsive` simply
+  # did not select.
+  n_not_eligible <- 0L
+  kwh_not_eligible <- 0
+  for (window_data in windows_data) {
+    sessions_window <- window_data$sessions_window
+    if (
+      is.data.frame(sessions_window) &&
+        nrow(sessions_window) > 0 &&
+        "Responsive" %in% colnames(sessions_window)
+    ) {
+      not_eligible <- is.na(sessions_window$Responsive)
+      n_not_eligible <- n_not_eligible + sum(not_eligible)
+      kwh_not_eligible <- kwh_not_eligible +
+        sum(sessions_window$Energy[not_eligible])
+    }
+  }
+  if (n_not_eligible > 0) {
+    message(paste0(
+      "\u2139 ",
+      n_not_eligible,
+      " session(s) (",
+      round(kwh_not_eligible, 1),
+      " kWh) are not eligible for smart charging in their optimization",
+      " window, because their charging does not end inside it or their",
+      " connection times are outliers. They charge at nominal power and are",
+      " returned with `Responsive = NA`."
+    ))
+  }
 
   # Get setpoints -----------------------------------------------------------
   if (show_progress) {

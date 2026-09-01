@@ -1,3 +1,31 @@
+# flextools 1.7.0
+
+* `smart_charging()` now **holds the grid import capacity**: a setpoint returned
+  by `get_setpoints()` is capped at the power the connection can still pass for
+  that user profile. **This changes results** whenever the capacity was
+  previously exceeded. Every objective conserves the flexible energy, so a
+  window whose energy does not fit under `import_capacity` was answered by
+  approaching the capacity rather than meeting it - and an infeasible LP relaxed
+  it outright. `schedule_sessions()` follows the setpoint faithfully, so that
+  relaxation reached the result as a breach of a contracted limit: on a
+  residential fleet of 11 kW chargers against a 3 kW capacity, the setpoint
+  peaked at 20.35 kW and 424 of 3168 time slots came back over the capacity.
+
+  Capping the setpoint makes the capacity the binding constraint and leaves the
+  energy to `energy_min`, at scheduling time. With `energy_min = 0` the same
+  fleet holds 3.00 kW and delivers 74% of the energy asked for; with
+  `energy_min = 1` the curtail floor still overrides the setpoint to deliver all
+  of it, so an unreachable capacity is met by exceeding it - set `energy_min`
+  below 1 for the capacity to win. A *reachable* capacity now costs no energy at
+  either setting. A message says when the cap binds.
+
+  Profiles whose setpoint the caller pins through an `opt_data` column are not
+  capped: that is an instruction, not an optimization result.
+* The `opt_objective = "none"` setpoint is built from the same helper
+  (`setpoint_capacity_available()`), which also fixes it for `opt_data` without a
+  `static` or `production` column - it read those columns directly and failed
+  when they were absent.
+
 # flextools 1.6.0
 
 * The battery `capacity` objective now **minimizes battery usage** subject to

@@ -432,3 +432,53 @@ test_that("view_smart_charging_logs errors when there are no log messages", {
     "no log messages"
   )
 })
+
+
+# Flexibility requirement tolerance --------------------------------------
+
+test_that("a setpoint that is already met exploits no flexibility", {
+  # The flexibility requirement is computed with exact arithmetic and compared
+  # against a tolerance, rather than rounded to 2 decimals to decide whether it
+  # is worth acting on. Rounding used to be that guard, so a setpoint sitting
+  # exactly on the demand must still leave every session alone: floating-point
+  # noise is not flexibility.
+  tolerance_sessions <- local({
+    connection_start <- as.POSIXct("2025-02-05 09:00:00", tz = "UTC")
+    tibble(
+      Session = paste0("T", 1:3),
+      Timecycle = "Wednesday",
+      Profile = "Home",
+      ConnectionStartDateTime = rep(connection_start, 3),
+      ConnectionEndDateTime = rep(connection_start + 8 * 3600, 3),
+      ChargingStartDateTime = rep(connection_start, 3),
+      ChargingEndDateTime = rep(connection_start + 7 / 3 * 3600, 3),
+      Power = 3,
+      Energy = 7,
+      ConnectionHours = 8,
+      ChargingHours = 7 / 3
+    )
+  })
+
+  unmanaged <- evsim::get_demand(tolerance_sessions, resolution = 15)
+  setpoint <- tibble(
+    datetime = unmanaged$datetime,
+    setpoint = rowSums(as.data.frame(unmanaged)[, -1, drop = FALSE])
+  )
+
+  scheduled <- schedule_sessions(
+    tolerance_sessions,
+    setpoint,
+    method = "curtail",
+    power_th = 0,
+    charging_power_min = 0,
+    energy_min = 0,
+    show_progress = FALSE
+  )
+
+  expect_false(any(scheduled$sessions$Exploited, na.rm = TRUE))
+  expect_equal(
+    sum(scheduled$sessions$Energy),
+    sum(tolerance_sessions$Energy),
+    tolerance = 0.01
+  )
+})

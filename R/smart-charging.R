@@ -1052,6 +1052,17 @@ smart_charging_window_parallel <- function(
 }
 
 
+# `schedule_sessions()` decision tolerances. These were literals spread
+# through the timeslot loop, with `round(x, 2)` standing in for the smallest of
+# them: rounding the flexibility requirement to 2 decimals is what decided
+# whether a requirement was worth acting on. Rounding is a poor guard - it also
+# quantises the power the loop then commits to - so the decisions are made with
+# exact arithmetic against these, and rounding is left to the caller.
+POWER_TOLERANCE <- 1e-6 # kW, below this a power difference is noise
+ENERGY_TO_CHARGE_MIN <- 0.025 # kWh, energy left worth acting on
+POWER_REDUCTION_MIN <- 0.1 # kW, curtailment worth exploiting a session for
+
+
 #' Schedule sessions according to optimal setpoint
 #'
 #' @param sessions tibble, sessions data set containing the following variables:
@@ -1259,8 +1270,7 @@ schedule_sessions <- function(
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           Flexible = ifelse(
-            # Added error tolerance
-            (.data$EnergyToCharge > 0.025) &
+            (.data$EnergyToCharge > ENERGY_TO_CHARGE_MIN) &
               (.data$MinEnergyToCharge <= .data$PossibleEnergyRest),
             TRUE,
             FALSE
@@ -1300,9 +1310,10 @@ schedule_sessions <- function(
             )
           ),
           Flexible = ifelse(
-            # Added error tolerance
-            (.data$EnergyToCharge > 0.025) &
-              (.data$PowerTimeslot - .data$MinPowerTimeslot > 0.1),
+            (.data$EnergyToCharge > ENERGY_TO_CHARGE_MIN) &
+              (.data$PowerTimeslot -
+                .data$MinPowerTimeslot >
+                POWER_REDUCTION_MIN),
             TRUE,
             FALSE
           )
@@ -1343,16 +1354,18 @@ schedule_sessions <- function(
     }
 
     # Flexibility requirement
-    flex_req <- round(
-      sessions_timeslot_power - setpoint_power_timeslot * (1 + power_th),
-      2
-    )
+    flex_req <- sessions_timeslot_power -
+      setpoint_power_timeslot * (1 + power_th)
 
     # If demand should be reduced
-    if (flex_req > 0) {
+    if (flex_req > POWER_TOLERANCE) {
       if (include_log) {
         log_message <- c(
-          paste("\u2139 Flexibility requirement of", flex_req, "kW"),
+          paste(
+            "\u2139 Flexibility requirement of",
+            round(flex_req, 2),
+            "kW"
+          ),
           paste(
             "\u2139",
             nrow(sessions_timeslot),
@@ -1378,7 +1391,7 @@ schedule_sessions <- function(
         # If the available flexibility is higher than the flexibility request,
         # then allow the sessions with less flexibility to charge.
         # Else, shift all sessions.
-        if (shift_flex_available >= flex_req) {
+        if (shift_flex_available >= flex_req - POWER_TOLERANCE) {
           sessions_timeslot_shiftable <- sessions_timeslot %>%
             filter(.data$Flexible)
 
@@ -1407,7 +1420,7 @@ schedule_sessions <- function(
               flex_req - sessions_timeslot_shiftable$PowerTimeslot[s],
               0
             )
-            if (flex_req == 0) break
+            if (flex_req <= POWER_TOLERANCE) break
           }
           if ((s + 1) <= length(allowed_to_charge_idx)) {
             allowed_to_charge_idx[seq(
@@ -1427,7 +1440,7 @@ schedule_sessions <- function(
           sessions_timeslot$Exploited[sessions_timeslot$Flexible] <- TRUE
 
           # Update flexibility requirement with power from all shiftable sessions
-          flex_req <- round(flex_req - shift_flex_available, 2)
+          flex_req <- flex_req - shift_flex_available
 
           if (include_log) {
             log_message <- paste0(
@@ -1479,8 +1492,8 @@ schedule_sessions <- function(
               reduction_factor
 
           # Update flexibility requirement
-          flex_provided <- round(max_power_reduction * reduction_factor, 2)
-          flex_req <- round(flex_req - flex_provided, 2)
+          flex_provided <- max_power_reduction * reduction_factor
+          flex_req <- flex_req - flex_provided
         } else {
           flex_provided <- 0
         }
@@ -1490,10 +1503,10 @@ schedule_sessions <- function(
           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
         if (include_log) {
-          if (flex_req > 0) {
+          if (flex_req > POWER_TOLERANCE) {
             log_message <- paste0(
               "\u2716 Not enough flexibility available (",
-              flex_provided,
+              round(flex_provided, 2),
               " kW)"
             )
             # message(log_message)

@@ -432,3 +432,112 @@ test_that("view_smart_charging_logs errors when there are no log messages", {
     "no log messages"
   )
 })
+
+
+# Holding the grid capacity ----------------------------------------------
+
+# Four identical sessions, all connected inside one optimization window, so
+# every session is scheduled and nothing is carried in from a neighbouring
+# window. 80 kWh asked for over a 10 h connection.
+capacity_sessions <- local({
+  connection_start <- as.POSIXct("2025-01-15 08:00:00", tz = "UTC")
+  tibble(
+    Session = paste0("S", 1:4),
+    Timecycle = "Wednesday",
+    Profile = rep(c("Home", "Work"), each = 2),
+    ConnectionStartDateTime = rep(connection_start, 4),
+    ConnectionEndDateTime = rep(connection_start + 10 * 3600, 4),
+    ChargingStartDateTime = rep(connection_start, 4),
+    ChargingEndDateTime = rep(connection_start + 20 / 11 * 3600, 4),
+    Power = 11,
+    Energy = 20,
+    ConnectionHours = 10,
+    ChargingHours = 20 / 11
+  )
+})
+
+capacity_opt_data <- function(import_capacity) {
+  tibble(
+    datetime = seq(
+      as.POSIXct("2025-01-15 00:00:00", tz = "UTC"),
+      as.POSIXct("2025-01-16 23:45:00", tz = "UTC"),
+      by = "15 min"
+    ),
+    production = 0,
+    static = 0,
+    import_capacity = import_capacity,
+    export_capacity = import_capacity
+  )
+}
+
+capacity_smart_charging <- function(import_capacity, energy_min) {
+  suppressWarnings(smart_charging(
+    capacity_sessions,
+    capacity_opt_data(import_capacity),
+    opt_objective = "capacity",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 6,
+    energy_min = energy_min,
+    show_progress = FALSE
+  ))
+}
+
+total_by_slot <- function(df) rowSums(as.data.frame(df)[, -1, drop = FALSE])
+
+test_that("an unreachable grid capacity is held, and costs energy", {
+  # 3 kW over the 10 h connection carries 30 of the 80 kWh asked for, so no
+  # shift of the demand can meet this capacity.
+  sc_results <- capacity_smart_charging(import_capacity = 3, energy_min = 0)
+
+  expect_true(all(total_by_slot(sc_results$setpoints) <= 3 + 1e-6))
+  expect_true(all(total_by_slot(sc_results$demand) <= 3 + 1e-6))
+  # The capacity, not the energy requirement, decides what is delivered.
+  expect_equal(sum(sc_results$sessions$Energy), 30, tolerance = 0.05)
+})
+
+test_that("a reachable grid capacity is held without dropping energy", {
+  # 10 kW over 10 h carries 100 kWh, so all 80 kWh fit under the capacity.
+  for (energy_min in c(0, 1)) {
+    sc_results <- capacity_smart_charging(
+      import_capacity = 10,
+      energy_min = energy_min
+    )
+    expect_true(all(total_by_slot(sc_results$setpoints) <= 10 + 1e-6))
+    expect_true(all(total_by_slot(sc_results$demand) <= 10 + 1e-6))
+    expect_equal(sum(sc_results$sessions$Energy), 80, tolerance = 0.15)
+  }
+})
+
+test_that("energy_min = 1 keeps the setpoint capped but lets sessions exceed it", {
+  # Documented interaction: the setpoint holds the capacity, but the curtail
+  # floor derived from `energy_min` overrides it to deliver all the energy, so
+  # an unreachable capacity is met by exceeding it rather than by charging
+  # less. Set `energy_min` below 1 to let the capacity win.
+  sc_results <- capacity_smart_charging(import_capacity = 3, energy_min = 1)
+
+  expect_true(all(total_by_slot(sc_results$setpoints) <= 3 + 1e-6))
+  expect_gt(max(total_by_slot(sc_results$demand)), 3)
+  expect_equal(sum(sc_results$sessions$Energy), 80, tolerance = 0.15)
+})
+
+test_that("a user profile setpoint given in `opt_data` is not capped", {
+  # The caller pinned this profile's setpoint, so it is an instruction, not an
+  # optimization result to be bounded.
+  opt_data_pinned <- capacity_opt_data(import_capacity = 3) %>%
+    mutate(Home = 8)
+  sc_results <- suppressWarnings(smart_charging(
+    capacity_sessions,
+    opt_data_pinned,
+    opt_objective = "capacity",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 6,
+    energy_min = 0,
+    show_progress = FALSE
+  ))
+
+  # 8 kW inside the optimization window, and no setpoint at all outside it.
+  expect_equal(max(sc_results$setpoints$Home), 8)
+  expect_true(all(sc_results$setpoints$Home %in% c(0, 8)))
+})

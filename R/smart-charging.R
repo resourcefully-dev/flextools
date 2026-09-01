@@ -598,6 +598,32 @@ arrange_by_flex_potential <- function(sessions, descendent = TRUE) {
 }
 
 
+#' Grid capacity still available to one user profile
+#'
+#' The power the connection can still pass for a user profile, once the fixed
+#' demand and the capacity already claimed by other profiles have taken their
+#' share. Floored at zero: a connection that is already full offers nothing,
+#' it does not offer negative power.
+#'
+#' @param import_capacity numeric vector, grid import capacity
+#' @param production numeric vector, local production
+#' @param L_static numeric vector, fixed (non-flexible) demand
+#' @param L_claimed numeric vector, capacity already claimed by other profiles
+#'
+#' @return numeric vector, never negative
+#'
+#' @keywords internal
+#'
+setpoint_capacity_available <- function(
+  import_capacity,
+  production,
+  L_static,
+  L_claimed
+) {
+  pmax(import_capacity + production - (L_static + L_claimed), 0)
+}
+
+
 #' Set setpoints for smart charging
 #'
 #' @param sessions_window tibble, sessions corresponding to a single windows
@@ -636,8 +662,27 @@ get_setpoints <- function(
     L_fixed <- rep(0, nrow(opt_data))
   }
 
+  if ("production" %in% colnames(opt_data)) {
+    G_fixed <- opt_data$production
+  } else {
+    G_fixed <- rep(0, nrow(opt_data))
+  }
+
   opt_profiles <- get_opt_profiles(sessions_window)
   setpoints <- profiles_demand
+
+  # Grid capacity already committed at each time slot: the demand of the
+  # profiles this window does not optimize - their sessions belong to another
+  # window, or they have no session here - plus the setpoints of the profiles
+  # already optimized by the loop below. Every profile is held at the capacity
+  # still free once that claim is served, so the optimized setpoints cannot sum
+  # past the connection limit however many profiles share the window.
+  L_claimed <- setpoints %>%
+    select(-any_of(c("datetime", opt_profiles))) %>%
+    rowSums()
+  if (length(L_claimed) == 0) {
+    L_claimed <- rep(0, length(dttm_seq))
+  }
 
   for (profile in opt_profiles) {
     # If `opt_data` contains user profile's name,
@@ -777,13 +822,40 @@ get_setpoints <- function(
         }
 
         setpoints[[profile]][opt_idxs] <- O + L_fixed_prof[opt_idxs]
+
+        # Hold the grid capacity. Every objective conserves the flexible
+        # energy, so a window whose energy does not fit under
+        # `import_capacity` is answered by approaching the capacity rather
+        # than meeting it, and an infeasible LP may relax it outright.
+        # `schedule_sessions()` then follows the setpoint faithfully, so a
+        # setpoint above the connection limit lands in the result as a
+        # breach of a contracted limit. Cap it at what the connection can
+        # still pass: whether the sessions consequently charge less energy is
+        # `energy_min`'s decision, taken at scheduling time.
+        if ("import_capacity" %in% colnames(opt_data)) {
+          capacity_available <- setpoint_capacity_available(
+            opt_data$import_capacity,
+            G_fixed,
+            L_fixed,
+            L_claimed
+          )
+          if (any(setpoints[[profile]] > capacity_available + 1e-6)) {
+            message_once(paste(
+              "\u26a0\ufe0f Smart charging warning: the optimized setpoint",
+              "exceeded the grid import capacity and has been held at it. The",
+              "sessions will charge less energy than they ask for, unless",
+              "`energy_min` forces them past the setpoint."
+            ))
+          }
+          setpoints[[profile]] <- pmin(setpoints[[profile]], capacity_available)
+        }
       } else if ("import_capacity" %in% colnames(opt_data)) {
         # Calculate available capacity for this profile
-        capacity_available <- pmax(
-          opt_data$import_capacity +
-            opt_data$production -
-            (opt_data$static + L_others),
-          0 # Not negative power
+        capacity_available <- setpoint_capacity_available(
+          opt_data$import_capacity,
+          G_fixed,
+          L_fixed,
+          L_others
         )
 
         # Capacity available should allow the same energy than LF to
@@ -804,6 +876,9 @@ get_setpoints <- function(
         ))
       }
     }
+
+    # This profile now holds part of the connection.
+    L_claimed <- L_claimed + setpoints[[profile]]
   }
 
   return(setpoints)

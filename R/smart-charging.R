@@ -858,16 +858,15 @@ get_setpoints <- function(
           L_others
         )
 
-        # Capacity available should allow the same energy than LF to
-        # avoid pushing the demand to the end of the window.
-        # In case of capacity limitation, we increase the
-        # capacity available by a factor
-        inc_capacity_factor <- max(
-          sum(profiles_demand[[profile]]) / sum(capacity_available),
-          1
-        )
-        setpoints[[profile]] <- capacity_available *
-          inc_capacity_factor
+        # The setpoint is that capacity, and nothing above it. It used to be
+        # scaled up by `sum(profiles_demand) / sum(capacity_available)` whenever
+        # the profile asked for more energy than the capacity could carry, so
+        # that all of the energy would fit - which made the one objective that
+        # exists to follow the grid capacity exceed it by design, by an amount
+        # set by how much energy the profile happened to want. How much energy
+        # is delivered under the capacity is `energy_min`'s decision, taken at
+        # scheduling time.
+        setpoints[[profile]] <- capacity_available
       } else {
         stop(paste(
           "Error: `opt_objective` is 'none' but no setpoint or grid capacity

@@ -541,3 +541,26 @@ test_that("a user profile setpoint given in `opt_data` is not capped", {
   expect_equal(max(sc_results$setpoints$Home), 8)
   expect_true(all(sc_results$setpoints$Home %in% c(0, 8)))
 })
+
+
+test_that("the `none` objective follows the grid capacity instead of inflating it", {
+  # 80 kWh asked for and 30 kWh the capacity can carry. The setpoint used to be
+  # the available capacity scaled up by `sum(demand) / sum(capacity)` so that
+  # all the energy fit, which put the one objective that exists to follow the
+  # grid capacity above it - and made the overshoot a function of how much
+  # energy the fleet happened to want.
+  sc_results <- suppressWarnings(smart_charging(
+    capacity_sessions,
+    capacity_opt_data(import_capacity = 3),
+    opt_objective = "none",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 6,
+    energy_min = 0,
+    show_progress = FALSE
+  ))
+
+  expect_true(all(total_by_slot(sc_results$setpoints) <= 3 + 1e-6))
+  expect_true(all(total_by_slot(sc_results$demand) <= 3 + 1e-6))
+  expect_false(any(is.na(total_by_slot(sc_results$setpoints))))
+})

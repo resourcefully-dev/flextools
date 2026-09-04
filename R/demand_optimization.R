@@ -631,8 +631,15 @@ demand_capacity_window <- function(
     LF_ref <- LF
     fallback_ratio <- c(1, 1)
     if (energy_ratio[1] < 1 && sum(LF) > 0) {
-      LF_ref <- round(LF * energy_ratio[1], 2)
-      fallback_ratio <- rep(min(sum(LF_ref) / sum(LF), 1), 2)
+      LF_min <- round(LF * energy_ratio[1], 2)
+      # A minimum of 0 leaves no profile to relax towards, and a slice LP that
+      # is infeasible even when every unit of energy may be dropped is not
+      # infeasible because of energy (export side, load capacity). Both fall
+      # through to the original-profile relaxation below, as 1.6.0 did.
+      if (sum(LF_min) > 0) {
+        LF_ref <- LF_min
+        fallback_ratio <- rep(min(sum(LF_min) / sum(LF), 1), 2)
+      }
     }
     import_cap_relaxed <- pmax(import_capacity, LS + LF_ref - G) + tol
     export_cap_relaxed <- pmax(export_capacity, G - LS - LF_ref) + tol
@@ -672,13 +679,18 @@ demand_capacity_window <- function(
   # sides round to the same 2-decimal figure.
   moved_energy <- sum(moved_slice)
   added_energy <- sum(slice_solution$added)
+  fixed_load <- round(LF_target - moved_slice, 2)
+  if (added_energy <= tol) {
+    # The caps left no room for any of the removed energy: with a minimum
+    # below 100% the LP dropped all of it, and there is nothing left to place.
+    return(fixed_load)
+  }
   slice_ratio <- if (added_energy < moved_energy - tol) {
     rep(added_energy / moved_energy, 2)
   } else {
     c(1, 1)
   }
 
-  fixed_load <- round(LF_target - moved_slice, 2)
   optimized_slice <- demand_grid_window(
     G = G,
     LF = moved_slice,
@@ -1225,60 +1237,68 @@ demand_solve_window <- function(
     return(demand_extract_solution(O$x, solver_data))
   }
 
-  # Fallback solve: the original grid limits make the problem infeasible.
+  # Fallback solves: the original grid limits make the problem infeasible.
   # Instead of removing the grid constraints entirely (an unconstrained solve
   # that could shift energy into new, worse violations), raise the per-slot
   # caps only as far as a reference profile already needs. Slots that were
   # within their caps keep the true capacity, so the optimizer can never
   # create a violation worse than that profile had.
   #
-  # The reference is the ORIGINAL, unshifted profile O = LF - unless the energy
-  # range admits less: then it is LF scaled down to the minimum energy, since
-  # the minimum is all that has to be forced through the capacity.
-  #
-  # This retry is feasible BY CONSTRUCTION: the reference point O = LF_ref
-  # (with the induced grid flows I = pmax(LS + LF_ref - G, 0),
-  # E = pmax(G - LS - LF_ref, 0)) satisfies every constraint:
-  #   * energy: pinned to sum(LF_ref) — when the minimum is all that fits the
-  #     capacity is exceeded by exactly what the minimum needs, no more;
+  # The retry with the original profile O = LF is feasible BY CONSTRUCTION:
+  # with the induced grid flows I = pmax(LS + LF - G, 0), E = pmax(G - LS -
+  # LF, 0) it satisfies every constraint:
+  #   * energy: pinned to sum(LF);
   #   * cumsum bounds: they are derived from LF itself, so cumsum(LF) lies
-  #     inside [lb_cumsum, ub_cumsum] (one side is exactly cumsum(LF)), and a
-  #     scaled LF_ref stays inside because a range below 1 is only admitted
-  #     for forward shifting over the whole window (lb_cumsum = 0);
+  #     inside [lb_cumsum, ub_cumsum] (one side is exactly cumsum(LF));
   #   * grid balance: O - I + E = G - LS by definition;
   #   * capacity: the relaxed caps equal at least the reference net flows, so
   #     I <= import_cap_relaxed and E <= export_cap_relaxed;
-  #   * optimized-load box: lb_O <= LF_ref is always true, and clamp_to_lf
-  #     lifts ub_O up to LF (>= LF_ref) when LFmax would otherwise pull it
-  #     below.
+  #   * optimized-load box: lb_O <= LF is always true, and clamp_to_lf lifts
+  #     ub_O up to LF when LFmax would otherwise pull it below.
+  # The minimum-energy retry tried first is the same construction on the scaled
+  # profile (a range below 1 is only admitted for forward shifting over the
+  # whole window, where lb_cumsum = 0), except that the export-side lower bound
+  # lb_O can exceed a scaled profile — which is why it may fail and is followed
+  # by the original-profile retry rather than replacing it.
   # A small tolerance absorbs the 2-decimal rounding of the bounds.
   tol <- optimization_solution_tolerance()
-  LF_ref <- LF
-  energy_floor <- energy_lb
-  energy_ceiling <- energy_ub
-  if (energy_lb < round(LF_energy, 2) && LF_energy > 0) {
-    LF_ref <- round(LF * energy_lb / LF_energy, 2)
-    energy_floor <- sum(LF_ref)
-    energy_ceiling <- sum(LF_ref)
-  }
-  import_cap_relaxed <- pmax(import_capacity, LS + LF_ref - G) + tol
-  export_cap_relaxed <- pmax(export_capacity, G - LS - LF_ref) + tol
-  if (identical(LF_ref, LF)) {
-    message_once(
-      "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
+  relax_to <- function(LF_ref, energy) {
+    solve_with_capacities(
+      pmax(import_capacity, LS + LF_ref - G) + tol,
+      pmax(export_capacity, G - LS - LF_ref) + tol,
+      clamp_to_lf = TRUE,
+      energy_floor = energy,
+      energy_ceiling = energy
     )
+  }
+
+  # Energy first: when the range admits less than the full profile, relax the
+  # caps only as far as the minimum-energy profile needs and deliver exactly
+  # that minimum. A minimum of 0 is skipped \u2014 a zero profile has no headroom to
+  # relax towards, and an infeasibility that survives dropping every unit of
+  # energy is not about energy (export side, load capacity).
+  LF_min <- if (energy_lb < round(LF_energy, 2) && LF_energy > 0) {
+    round(LF * energy_lb / LF_energy, 2)
   } else {
+    LF
+  }
+  if (!identical(LF_min, LF) && sum(LF_min) > 0) {
     message_once(
       "\u26A0\uFE0F Optimization warning: even the minimum energy does not fit under the grid capacity in some windows. Relaxing grid capacity to the minimum-energy profile in the affected windows."
     )
+    O <- relax_to(LF_min, sum(LF_min))
+    if (demand_highs_is_optimal(O$result)) {
+      return(demand_extract_solution(O$x, solver_data))
+    }
   }
-  O <- solve_with_capacities(
-    import_cap_relaxed,
-    export_cap_relaxed,
-    clamp_to_lf = TRUE,
-    energy_floor = energy_floor,
-    energy_ceiling = energy_ceiling
+
+  # Capacity second: the original, unshifted profile, feasible by construction
+  # (the 1.6.0 behaviour). The energy is pinned to the profile's own for the
+  # same reason: it is the one point known to satisfy every other constraint.
+  message_once(
+    "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
   )
+  O <- relax_to(LF, round(LF_energy, 2))
   if (demand_highs_is_optimal(O$result)) {
     return(demand_extract_solution(O$x, solver_data))
   }

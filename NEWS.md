@@ -1,3 +1,16 @@
+# flextools 1.7.1
+
+* Fixed: with `energy_min = 0`, two fallback paths of the 1.7.0 energy range
+  built a `c(0, 0)` ratio for a follow-up LP, which then stopped with "the
+  maximum energy ratio must be higher than 0" — once when the capacity slice
+  LP removed EV energy and could re-add none of it (the caps were already full
+  of static load), and once when a window was infeasible for a reason energy
+  cannot fix (production above the export capacity, load capacity). The first
+  now returns the profile with the energy simply dropped; the second falls back
+  to the original-profile capacity relaxation, as 1.6.0 did, after the
+  minimum-energy relaxation has been tried where it exists. `smart_charging()`
+  with `energy_min = 0` no longer errors on such windows.
+
 # flextools 1.7.0
 
 * New `energy_max` argument in `smart_charging()`, `smart_charging_window()`

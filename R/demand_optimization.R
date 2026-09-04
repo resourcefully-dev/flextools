@@ -89,6 +89,91 @@ demand_highs_is_optimal <- function(result) {
 }
 
 
+#' Validate the energy range of a demand window
+#'
+#' The optimized load carries, by default, exactly the energy of the flexible
+#' profile it starts from. `energy_ratio = c(min, max)` widens that to a range
+#' `[min, max] * sum(LF)`. A range below 1 only makes sense when energy may be
+#' left undelivered, which the cumulative-shift constraints admit only for
+#' forward shifting over the whole window: any finite horizon, and the
+#' backward direction, pin `cumsum(O)` from below to the original profile.
+#'
+#' @param energy_ratio numeric vector `c(min, max)`, or `NULL` for `c(1, 1)`.
+#' @param direction character, `forward` or `backward`.
+#' @param time_horizon integer or `NULL` (whole window).
+#' @param time_slots integer, number of slots in the window.
+#'
+#' @return the validated `c(min, max)`
+#' @keywords internal
+#'
+demand_check_energy_ratio <- function(
+  energy_ratio,
+  direction,
+  time_horizon,
+  time_slots
+) {
+  if (is.null(energy_ratio)) {
+    return(c(1, 1))
+  }
+  if (
+    !is.numeric(energy_ratio) ||
+      length(energy_ratio) != 2 ||
+      any(!is.finite(energy_ratio))
+  ) {
+    stop("Error: `energy_ratio` must be two finite numbers, `c(min, max)`")
+  }
+  if (
+    energy_ratio[1] < 0 ||
+      energy_ratio[2] > 1 ||
+      energy_ratio[1] > energy_ratio[2]
+  ) {
+    stop("Error: `energy_ratio` must satisfy `0 <= min <= max <= 1`")
+  }
+  if (energy_ratio[2] <= 0) {
+    stop("Error: the maximum energy ratio must be higher than 0")
+  }
+  if (energy_ratio[1] < 1) {
+    if (is.null(time_horizon)) {
+      time_horizon <- time_slots
+    }
+    if (direction != "forward" || time_horizon != time_slots) {
+      stop(
+        "Error: an energy ratio below 1 requires `direction = \"forward\"` over the whole window (`time_horizon = NULL`)"
+      )
+    }
+  }
+  energy_ratio
+}
+
+
+#' Reward per unit of optimized load kept
+#'
+#' When the energy row is a range, the optimizer must be told to keep energy
+#' rather than drop it: every objective in this file improves when load is
+#' removed (less net flow, less cost). A uniform linear reward on `O` that
+#' strictly dominates the objective's marginal gain from removing one unit —
+#' `|d/dO| <= max row sum of |P| * max |X| + max |q|` anywhere in the feasible
+#' box — makes the solver keep as much energy as the constraints admit and
+#' shape it afterwards. Being the same in every slot it does not bias where the
+#' energy goes, only how much of it stays.
+#'
+#' @param P numeric matrix or `NULL`, normalised quadratic term.
+#' @param q numeric vector, linear term.
+#' @param envelope numeric, bound on the absolute value of any decision
+#'   variable in the feasible box (kW).
+#'
+#' @return numeric scalar
+#' @keywords internal
+#'
+demand_energy_reward <- function(P, q, envelope) {
+  envelope <- abs(envelope[is.finite(envelope)])
+  envelope <- if (length(envelope)) max(envelope) else 0
+  gradient_quadratic <- if (is.null(P)) 0 else max(rowSums(abs(P))) * envelope
+  gradient_linear <- max(abs(q[is.finite(q)]), 0)
+  10 * (gradient_quadratic + gradient_linear + 1)
+}
+
+
 demand_attach_profile <- function(
   optimized_load,
   imported = NULL,
@@ -302,7 +387,8 @@ capacity_slice_problem <- function(
   time_horizon,
   LFmax,
   import_capacity,
-  export_capacity
+  export_capacity,
+  energy_lb = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -359,12 +445,29 @@ capacity_slice_problem <- function(
   A_slice_bounds <- cbind(identityMat, zeroMat)
   A_final_bounds <- cbind(-identityMat, identityMat)
   A_shift_identity <- cbind(-horizonMat_identity, identityMat)
+  # Energy row: -sum(slice) + sum(added) = sum(final) - sum(LF). By default an
+  # equality, so the slice is re-added in full. When `energy_lb` admits less
+  # energy the row becomes a range and the objective charges 2 per unit
+  # removed and refunds 1 per unit re-added: a shifted unit still costs 1
+  # (as before), a dropped unit costs 2 and doing nothing costs 0 — so the LP
+  # shifts before it drops, and drops only what the caps leave no room for.
   A_energy <- matrix(0, nrow = 1, ncol = 2 * time_slots)
   A_energy[1, seq_len(time_slots)] <- -1
   A_energy[1, time_slots + seq_len(time_slots)] <- 1
+  LF_energy <- sum(LF)
+  if (
+    is.null(energy_lb) ||
+      energy_lb >= LF_energy - optimization_solution_tolerance()
+  ) {
+    L <- c(rep(1, time_slots), rep(0, time_slots))
+    lhs_energy <- 0
+  } else {
+    L <- c(rep(2, time_slots), rep(-1, time_slots))
+    lhs_energy <- round(energy_lb - LF_energy, 2)
+  }
 
   list(
-    L = c(rep(1, time_slots), rep(0, time_slots)),
+    L = L,
     lower = c(rep(0, time_slots), rep(0, time_slots)),
     upper = c(LF, rep(Inf, time_slots)),
     A = rbind(
@@ -381,7 +484,7 @@ capacity_slice_problem <- function(
       lhs_cumsum_lb,
       lhs_cumsum_ub,
       rep(-Inf, time_slots),
-      0
+      lhs_energy
     ),
     rhs = c(
       LF,
@@ -403,7 +506,8 @@ select_capacity_slice <- function(
   time_horizon,
   LFmax,
   import_capacity,
-  export_capacity
+  export_capacity,
+  energy_lb = NULL
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -422,7 +526,8 @@ select_capacity_slice <- function(
     time_horizon = time_horizon,
     LFmax = LFmax,
     import_capacity = import_capacity,
-    export_capacity = export_capacity
+    export_capacity = export_capacity,
+    energy_lb = energy_lb
   )
 
   result <- highs::highs_solve(
@@ -444,9 +549,12 @@ select_capacity_slice <- function(
   tolerance <- optimization_solution_tolerance()
   slice <- pmax(result$primal_solution[seq_len(time_slots)], 0)
   slice[slice < tolerance] <- 0
+  added <- pmax(result$primal_solution[time_slots + seq_len(time_slots)], 0)
+  added[added < tolerance] <- 0
 
   list(
     slice = round(slice, 2),
+    added = round(added, 2),
     result = result
   )
 }
@@ -461,7 +569,8 @@ demand_capacity_window <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -474,32 +583,68 @@ demand_capacity_window <- function(
   LFmax <- as.numeric(rep_len(LFmax, time_slots))
   import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
   export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+  energy_ratio <- demand_check_energy_ratio(
+    energy_ratio,
+    direction,
+    time_horizon,
+    time_slots
+  )
+  tol <- optimization_solution_tolerance()
+
+  # The capacity objective leaves the profile alone wherever the caps hold, so
+  # an energy target below the requirement is applied as a uniform scaling of
+  # the whole profile before the slice is chosen: same shape, less energy. The
+  # floor stays relative to the ORIGINAL profile, since that is what the caller
+  # promised to deliver at least.
+  LF_target <- if (energy_ratio[2] < 1) round(LF * energy_ratio[2], 2) else LF
+  energy_lb <- if (energy_ratio[1] < 1) {
+    round(energy_ratio[1] * sum(LF), 2)
+  } else {
+    NULL
+  }
 
   slice_solution <- select_capacity_slice(
     G = G,
-    LF = LF,
+    LF = LF_target,
     LS = LS,
     direction = direction,
     time_horizon = time_horizon,
     LFmax = LFmax,
     import_capacity = import_capacity,
-    export_capacity = export_capacity
+    export_capacity = export_capacity,
+    energy_lb = energy_lb
   )
 
   if (is.null(slice_solution)) {
-    # The capacity slice LP is infeasible under the true caps. Rather than
-    # dropping the grid constraints entirely, relax each cap only as far as the
-    # original, unshifted profile already needs (import LS + LF - G, export
-    # G - LS - LF). Slots within their caps keep the true capacity, so the
-    # result can never be worse than the input profile. demand_grid_window()
-    # (via demand_solve_window) is feasible by construction with these caps
-    # because O = LF is a feasible point.
-    tol <- optimization_solution_tolerance()
-    import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
-    export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
-    message_once(
-      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
-    )
+    # The capacity slice LP is infeasible under the true caps, even after
+    # dropping energy down to the floor. Rather than dropping the grid
+    # constraints entirely, relax each cap only as far as a reference profile
+    # already needs (import LS + LF_ref - G, export G - LS - LF_ref). Slots
+    # within their caps keep the true capacity, so the result can never be
+    # worse than that profile. The reference is the original, unshifted
+    # profile - or, when the energy range admits less, the original profile
+    # scaled down to the minimum energy, since the minimum is all that has to
+    # be forced through the capacity. demand_grid_window() (via
+    # demand_solve_window) is feasible by construction with these caps because
+    # O = LF_ref is a feasible point; its energy row is pinned to sum(LF_ref)
+    # through a ratio of the rounded reference, so the two agree exactly.
+    LF_ref <- LF
+    fallback_ratio <- c(1, 1)
+    if (energy_ratio[1] < 1 && sum(LF) > 0) {
+      LF_ref <- round(LF * energy_ratio[1], 2)
+      fallback_ratio <- rep(min(sum(LF_ref) / sum(LF), 1), 2)
+    }
+    import_cap_relaxed <- pmax(import_capacity, LS + LF_ref - G) + tol
+    export_cap_relaxed <- pmax(export_capacity, G - LS - LF_ref) + tol
+    if (identical(LF_ref, LF)) {
+      message_once(
+        "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
+      )
+    } else {
+      message_once(
+        "\u26a0\ufe0f Optimization warning: even the minimum energy does not fit under the grid capacity in some windows. Relaxing grid capacity to the minimum-energy profile in the affected windows."
+      )
+    }
     return(
       demand_grid_window(
         G = G,
@@ -510,17 +655,30 @@ demand_capacity_window <- function(
         LFmax = LFmax,
         import_capacity = import_cap_relaxed,
         export_capacity = export_cap_relaxed,
-        lambda = lambda
+        lambda = lambda,
+        energy_ratio = fallback_ratio
       )
     )
   }
 
   moved_slice <- slice_solution$slice
   if (all(moved_slice == 0)) {
-    return(LF)
+    return(LF_target)
   }
 
-  fixed_load <- round(LF - moved_slice, 2)
+  # The slice LP decided how much of the removed energy is re-added (all of it
+  # unless the caps left no room). The grid LP that places it must carry
+  # exactly that energy, expressed as a ratio of the rounded slice so both
+  # sides round to the same 2-decimal figure.
+  moved_energy <- sum(moved_slice)
+  added_energy <- sum(slice_solution$added)
+  slice_ratio <- if (added_energy < moved_energy - tol) {
+    rep(added_energy / moved_energy, 2)
+  } else {
+    c(1, 1)
+  }
+
+  fixed_load <- round(LF_target - moved_slice, 2)
   optimized_slice <- demand_grid_window(
     G = G,
     LF = moved_slice,
@@ -530,7 +688,8 @@ demand_capacity_window <- function(
     LFmax = round(pmax(LFmax - fixed_load, 0), 2),
     import_capacity = import_capacity,
     export_capacity = export_capacity,
-    lambda = lambda
+    lambda = lambda,
+    energy_ratio = slice_ratio
   )
 
   round(fixed_load + as.numeric(optimized_slice), 2)
@@ -764,6 +923,10 @@ optimize_demand <- function(
 #' @param export_capacity numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand
 #' @param P numeric matrix, optimization objective parameter
 #' @param q numeric vector, optimization objective parameter
+#' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
+#'   load's energy the optimized load must carry. `c(1, 1)` (default) preserves
+#'   the energy exactly; a range lets the optimizer drop energy — down to `min`
+#'   — when the grid capacity cannot fit `max`.
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -778,7 +941,8 @@ demand_solve_window <- function(
   import_capacity,
   export_capacity,
   P,
-  q
+  q,
+  energy_ratio = c(1, 1)
 ) {
   # The original implementation rounded the inputs to avoid tiny numerical
   # inconsistencies between bounds. That behavior is kept unchanged.
@@ -811,6 +975,32 @@ demand_solve_window <- function(
     import_capacity,
     export_capacity
   )
+
+  # Energy the optimized load must carry: by default exactly the profile's own
+  # (`energy_ratio = c(1, 1)`), otherwise the range `[min, max] * sum(LF)`.
+  energy_ratio <- demand_check_energy_ratio(
+    energy_ratio,
+    direction,
+    time_horizon,
+    time_slots
+  )
+  LF_energy <- sum(LF)
+  energy_lb <- round(energy_ratio[1] * LF_energy, 2)
+  energy_ub <- round(energy_ratio[2] * LF_energy, 2)
+  if (energy_lb < energy_ub) {
+    # Every objective here improves when load is removed, so a range would be
+    # read as "deliver the minimum". Reward each unit of optimized load kept by
+    # more than the objective can gain from dropping it: the solver then keeps
+    # as much energy as the caps admit and shapes it afterwards. The reward is
+    # the same in every slot, so it decides how much energy stays, not where.
+    reward <- demand_energy_reward(
+      P_normalized,
+      q,
+      envelope = max(base_bounds$ub_O[is.finite(base_bounds$ub_O)], 0) +
+        max(abs(LS - G))
+    )
+    q[seq_len(time_slots)] <- q[seq_len(time_slots)] - reward
+  }
 
   if (has_grid_flows) {
     # Unknown variable: X = [O, I, E]
@@ -849,14 +1039,14 @@ demand_solve_window <- function(
     lb_cumsum <- base_bounds$lb_cumsum
     ub_cumsum <- base_bounds$ub_cumsum
 
-    # Total flexible energy must be preserved.
+    # Total flexible energy: preserved by default, a range otherwise.
     Amat_energy <- cbind(
       matrix(1, ncol = time_slots),
       matrix(0, ncol = time_slots),
       matrix(0, ncol = time_slots)
     )
-    lb_energy <- sum(LF)
-    ub_energy <- sum(LF)
+    lb_energy <- energy_lb
+    ub_energy <- energy_ub
 
     Amat <- rbind(
       Amat_O,
@@ -870,7 +1060,9 @@ demand_solve_window <- function(
     bounds_with_capacities <- function(
       import_cap,
       export_cap,
-      clamp_to_lf = FALSE
+      clamp_to_lf = FALSE,
+      energy_floor = lb_energy,
+      energy_ceiling = ub_energy
     ) {
       import_cap <- as.numeric(rep_len(import_cap, time_slots))
       export_cap <- as.numeric(rep_len(export_cap, time_slots))
@@ -916,7 +1108,7 @@ demand_solve_window <- function(
             rep(0, time_slots),
             lb_balance,
             lb_cumsum,
-            lb_energy
+            energy_floor
           ),
           2
         ),
@@ -927,7 +1119,7 @@ demand_solve_window <- function(
             export_cap,
             ub_balance,
             ub_cumsum,
-            ub_energy
+            energy_ceiling
           ),
           2
         ),
@@ -959,15 +1151,17 @@ demand_solve_window <- function(
     ub_cumsum <- base_bounds$ub_cumsum
 
     Amat_energy <- matrix(1, ncol = time_slots)
-    lb_energy <- sum(LF)
-    ub_energy <- sum(LF)
+    lb_energy <- energy_lb
+    ub_energy <- energy_ub
 
     Amat <- rbind(Amat_O, Amat_cumsum, Amat_energy)
 
     bounds_with_capacities <- function(
       import_cap,
       export_cap,
-      clamp_to_lf = FALSE
+      clamp_to_lf = FALSE,
+      energy_floor = lb_energy,
+      energy_ceiling = ub_energy
     ) {
       L_bounds <- get_bounds(
         time_slots,
@@ -989,8 +1183,8 @@ demand_solve_window <- function(
       }
 
       list(
-        lb = round(c(L_bounds$lb_O, lb_cumsum, lb_energy), 2),
-        ub = round(c(L_bounds$ub_O, ub_cumsum, ub_energy), 2)
+        lb = round(c(L_bounds$lb_O, lb_cumsum, energy_floor), 2),
+        ub = round(c(L_bounds$ub_O, ub_cumsum, energy_ceiling), 2)
       )
     }
 
@@ -1011,12 +1205,16 @@ demand_solve_window <- function(
   solve_with_capacities <- function(
     import_cap,
     export_cap,
-    clamp_to_lf = FALSE
+    clamp_to_lf = FALSE,
+    energy_floor = energy_lb,
+    energy_ceiling = energy_ub
   ) {
     bounds <- solver_data$bounds_with_capacities(
       import_cap,
       export_cap,
-      clamp_to_lf
+      clamp_to_lf,
+      energy_floor,
+      energy_ceiling
     )
     solve_window_problem(solver_data, bounds)
   }
@@ -1030,32 +1228,56 @@ demand_solve_window <- function(
   # Fallback solve: the original grid limits make the problem infeasible.
   # Instead of removing the grid constraints entirely (an unconstrained solve
   # that could shift energy into new, worse violations), raise the per-slot
-  # caps only as far as the ORIGINAL, unshifted profile already needs. Slots
-  # that were within their caps keep the true capacity, so the optimizer can
-  # never create a violation worse than the input profile had.
+  # caps only as far as a reference profile already needs. Slots that were
+  # within their caps keep the true capacity, so the optimizer can never
+  # create a violation worse than that profile had.
   #
-  # This retry is feasible BY CONSTRUCTION: the do-nothing point O = LF (with
-  # the induced grid flows I = pmax(LS + LF - G, 0), E = pmax(G - LS - LF, 0))
-  # satisfies every constraint:
-  #   * energy equality: sum(O) = sum(LF) trivially;
+  # The reference is the ORIGINAL, unshifted profile O = LF - unless the energy
+  # range admits less: then it is LF scaled down to the minimum energy, since
+  # the minimum is all that has to be forced through the capacity.
+  #
+  # This retry is feasible BY CONSTRUCTION: the reference point O = LF_ref
+  # (with the induced grid flows I = pmax(LS + LF_ref - G, 0),
+  # E = pmax(G - LS - LF_ref, 0)) satisfies every constraint:
+  #   * energy: pinned to sum(LF_ref) — when the minimum is all that fits the
+  #     capacity is exceeded by exactly what the minimum needs, no more;
   #   * cumsum bounds: they are derived from LF itself, so cumsum(LF) lies
-  #     inside [lb_cumsum, ub_cumsum] (one side is exactly cumsum(LF));
-  #   * grid balance: O - I + E = LF - (LS + LF - G) = G - LS by definition;
-  #   * capacity: the relaxed caps equal at least the original net flows, so
+  #     inside [lb_cumsum, ub_cumsum] (one side is exactly cumsum(LF)), and a
+  #     scaled LF_ref stays inside because a range below 1 is only admitted
+  #     for forward shifting over the whole window (lb_cumsum = 0);
+  #   * grid balance: O - I + E = G - LS by definition;
+  #   * capacity: the relaxed caps equal at least the reference net flows, so
   #     I <= import_cap_relaxed and E <= export_cap_relaxed;
-  #   * optimized-load box: lb_O <= LF is always true, and clamp_to_lf lifts
-  #     ub_O up to LF when LFmax would otherwise pull it below.
+  #   * optimized-load box: lb_O <= LF_ref is always true, and clamp_to_lf
+  #     lifts ub_O up to LF (>= LF_ref) when LFmax would otherwise pull it
+  #     below.
   # A small tolerance absorbs the 2-decimal rounding of the bounds.
   tol <- optimization_solution_tolerance()
-  import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
-  export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
-  message_once(
-    "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
-  )
+  LF_ref <- LF
+  energy_floor <- energy_lb
+  energy_ceiling <- energy_ub
+  if (energy_lb < round(LF_energy, 2) && LF_energy > 0) {
+    LF_ref <- round(LF * energy_lb / LF_energy, 2)
+    energy_floor <- sum(LF_ref)
+    energy_ceiling <- sum(LF_ref)
+  }
+  import_cap_relaxed <- pmax(import_capacity, LS + LF_ref - G) + tol
+  export_cap_relaxed <- pmax(export_capacity, G - LS - LF_ref) + tol
+  if (identical(LF_ref, LF)) {
+    message_once(
+      "\u26A0\uFE0F Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
+    )
+  } else {
+    message_once(
+      "\u26A0\uFE0F Optimization warning: even the minimum energy does not fit under the grid capacity in some windows. Relaxing grid capacity to the minimum-energy profile in the affected windows."
+    )
+  }
   O <- solve_with_capacities(
     import_cap_relaxed,
     export_cap_relaxed,
-    clamp_to_lf = TRUE
+    clamp_to_lf = TRUE,
+    energy_floor = energy_floor,
+    energy_ceiling = energy_ceiling
   )
   if (demand_highs_is_optimal(O$result)) {
     return(demand_extract_solution(O$x, solver_data))
@@ -1084,6 +1306,7 @@ demand_solve_window <- function(
 #' @param import_capacity numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand
 #' @param export_capacity numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand
 #' @param lambda numeric, penalty on change for the flexible load.
+#' @inheritParams demand_solve_window
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1097,7 +1320,8 @@ demand_grid_window <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -1117,7 +1341,8 @@ demand_grid_window <- function(
     import_capacity,
     export_capacity,
     P,
-    q
+    q,
+    energy_ratio
   )
 }
 
@@ -1137,6 +1362,7 @@ demand_grid_window <- function(
 #' @param import_capacity numeric or numeric vector, grid maximum import capacity that will limit the maximum optimized demand
 #' @param export_capacity numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand
 #' @param lambda numeric, penalty on change for the flexible load.
+#' @inheritParams demand_solve_window
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1154,7 +1380,8 @@ demand_cost_window <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -1197,7 +1424,8 @@ demand_cost_window <- function(
     import_capacity,
     export_capacity,
     P,
-    q
+    q,
+    energy_ratio
   )
 }
 
@@ -1218,6 +1446,7 @@ demand_cost_window <- function(
 #' @param export_capacity numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand
 #' @param w numeric, optimization objective weight (`w=1` minimizes net power while `w=0` minimizes cost).
 #' @param lambda numeric, penalty on change for the flexible load.
+#' @inheritParams demand_solve_window
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -1236,7 +1465,8 @@ demand_combined_window <- function(
   import_capacity,
   export_capacity,
   w,
-  lambda
+  lambda,
+  energy_ratio = c(1, 1)
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -1278,6 +1508,7 @@ demand_combined_window <- function(
     import_capacity,
     export_capacity,
     P,
-    q
+    q,
+    energy_ratio
   )
 }

@@ -14,7 +14,8 @@ demand_solve_window(
   import_capacity,
   export_capacity,
   P,
-  q
+  q,
+  energy_ratio = c(1, 1)
 )
 }
 \arguments{
@@ -37,6 +38,11 @@ demand_solve_window(
 \item{P}{numeric matrix, optimization objective parameter}
 
 \item{q}{numeric vector, optimization objective parameter}
+
+\item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
+load's energy the optimized load must carry. \code{c(1, 1)} (default) preserves
+the energy exactly; a range lets the optimizer drop energy — down to \code{min}
+— when the grid capacity cannot fit \code{max}.}
 }
 \value{
 numeric vector

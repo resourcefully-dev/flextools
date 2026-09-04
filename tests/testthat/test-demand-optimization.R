@@ -273,6 +273,178 @@ test_that("grid objective relaxes minimally and clamps ub_O when LFmax < LF", {
 })
 
 
+# Energy range ------------------------------------------------------------
+
+test_that("optimize_demand results are unchanged at the default energy ratio", {
+  # Baseline captured on 1.6.0 (commit 77312479) with exactly these calls.
+  golden <- readRDS(test_path("golden-energy-range-defaults.rds"))
+
+  O_grid <- suppressMessages(suppressWarnings(optimize_demand(
+    opt_data |> mutate(flexible = building),
+    opt_objective = "grid", direction = "forward",
+    flex_window_hours = 6, time_horizon = 12
+  )))
+  expect_equal(O_grid, golden[["optimize_demand_grid"]])
+
+  O_cost <- suppressMessages(suppressWarnings(optimize_demand(
+    opt_data |> mutate(flexible = building),
+    opt_objective = "cost", direction = "forward",
+    flex_window_hours = 6, time_horizon = 12
+  )))
+  expect_equal(O_cost, golden[["optimize_demand_cost"]])
+
+  O_capacity <- suppressMessages(suppressWarnings(optimize_demand(
+    opt_data |> mutate(flexible = building, import_capacity = 1.5),
+    opt_objective = "capacity", direction = "forward", window_days = 1
+  )))
+  expect_equal(O_capacity, golden[["optimize_demand_capacity"]])
+})
+
+# Two 10 kW slots followed by two empty ones, against a 4 kW import capacity:
+# 20 units of energy where only 16 fit. Energy conservation makes this window
+# infeasible; an energy range lets the optimizer keep the 16 that fit.
+range_case <- list(
+  G = rep(0, 4),
+  LF = c(10, 10, 0, 0),
+  LS = rep(0, 4),
+  LFmax = rep(10, 4),
+  import_capacity = rep(4, 4),
+  export_capacity = rep(0, 4)
+)
+
+test_that("grid window drops only the energy the capacity leaves no room for", {
+  expect_no_message(
+    O <- demand_grid_window(
+      G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+      direction = "forward", time_horizon = NULL, LFmax = range_case$LFmax,
+      import_capacity = range_case$import_capacity,
+      export_capacity = range_case$export_capacity,
+      energy_ratio = c(0.5, 1)
+    )
+  )
+  expect_equal(sum(O), 16, tolerance = 1e-6)
+  expect_true(all(O <= 4 + relax_tol))
+
+  # A ceiling below what fits is met exactly.
+  O_low <- suppressMessages(demand_grid_window(
+    G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+    direction = "forward", time_horizon = NULL, LFmax = range_case$LFmax,
+    import_capacity = range_case$import_capacity,
+    export_capacity = range_case$export_capacity,
+    energy_ratio = c(0, 0.6)
+  ))
+  expect_equal(sum(O_low), 12, tolerance = 1e-6)
+  expect_true(all(O_low <= 4 + relax_tol))
+})
+
+test_that("cost window keeps as much energy as the capacity admits", {
+  O <- suppressMessages(demand_cost_window(
+    G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+    PI = rep(0.2, 4), PE = rep(0, 4), PTD = rep(0, 4), PTU = rep(0, 4),
+    direction = "forward", time_horizon = NULL, LFmax = range_case$LFmax,
+    import_capacity = range_case$import_capacity,
+    export_capacity = range_case$export_capacity,
+    energy_ratio = c(0, 1)
+  ))
+  # Dropping energy is cheaper, but the reward for keeping it dominates.
+  expect_equal(sum(O), 16, tolerance = 1e-6)
+  expect_true(all(O <= 4 + relax_tol))
+})
+
+test_that("capacity window shifts before it drops, and scales to the ceiling", {
+  solve <- function(energy_ratio) {
+    demand_capacity_window(
+      G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+      direction = "forward", time_horizon = NULL, LFmax = range_case$LFmax,
+      import_capacity = range_case$import_capacity,
+      export_capacity = range_case$export_capacity,
+      energy_ratio = energy_ratio
+    )
+  }
+
+  expect_no_message(O_half <- solve(c(0.5, 1)))
+  expect_equal(sum(O_half), 16, tolerance = 1e-6)
+  expect_true(all(O_half <= 4 + relax_tol))
+
+  # 80% of 20 is exactly what fits: nothing has to be dropped.
+  expect_no_message(O_80 <- solve(c(0, 0.8)))
+  expect_equal(sum(O_80), 16, tolerance = 1e-6)
+  expect_true(all(O_80 <= 4 + relax_tol))
+
+  # A ceiling below what fits is met exactly, with the same shape scaled down
+  # wherever the capacity holds.
+  expect_no_message(O_50 <- solve(c(0, 0.5)))
+  expect_equal(sum(O_50), 10, tolerance = 1e-6)
+  expect_true(all(O_50 <= 4 + relax_tol))
+})
+
+test_that("a minimum above what fits relaxes the capacity to the minimum-energy profile only", {
+  expect_message(
+    O <- demand_grid_window(
+      G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+      direction = "forward", time_horizon = NULL, LFmax = range_case$LFmax,
+      import_capacity = range_case$import_capacity,
+      export_capacity = range_case$export_capacity,
+      energy_ratio = c(0.9, 1)
+    ),
+    "minimum energy does not fit"
+  )
+  # Exactly the minimum is delivered: the capacity is exceeded by what the
+  # minimum needs and no more.
+  expect_equal(sum(O), 18, tolerance = 1e-6)
+  # The relaxed cap is what the 90% profile (9, 9, 0, 0) draws; slots that
+  # were within their cap stay hard-capped.
+  expect_true(all(O <= pmax(range_case$import_capacity, 0.9 * range_case$LF) + relax_tol))
+
+  # Same order of relaxation in the capacity objective. The warning is emitted
+  # once per smart_charging() call, so clear the cache the previous call filled.
+  flextools:::reset_message_once()
+  expect_message(
+    O_cap <- demand_capacity_window(
+      G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+      direction = "forward", time_horizon = NULL, LFmax = range_case$LFmax,
+      import_capacity = range_case$import_capacity,
+      export_capacity = range_case$export_capacity,
+      energy_ratio = c(0.9, 1)
+    ),
+    "minimum energy does not fit"
+  )
+  expect_equal(sum(O_cap), 18, tolerance = 1e-6)
+  expect_true(all(O_cap <= pmax(range_case$import_capacity, 0.9 * range_case$LF) + relax_tol))
+})
+
+test_that("an energy range is rejected where energy cannot be dropped", {
+  expect_error(
+    demand_grid_window(
+      G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+      direction = "backward", time_horizon = NULL, LFmax = range_case$LFmax,
+      import_capacity = range_case$import_capacity,
+      export_capacity = range_case$export_capacity,
+      energy_ratio = c(0.5, 1)
+    ),
+    "forward"
+  )
+  expect_error(
+    demand_grid_window(
+      G = range_case$G, LF = range_case$LF, LS = range_case$LS,
+      direction = "forward", time_horizon = 1L, LFmax = range_case$LFmax,
+      import_capacity = range_case$import_capacity,
+      export_capacity = range_case$export_capacity,
+      energy_ratio = c(0.5, 1)
+    ),
+    "whole window"
+  )
+  expect_error(
+    flextools:::demand_check_energy_ratio(c(0.8, 0.5), "forward", NULL, 4),
+    "min <= max"
+  )
+  expect_error(
+    flextools:::demand_check_energy_ratio(c(0, 0), "forward", NULL, 4),
+    "higher than 0"
+  )
+})
+
+
 # Time benchmarking for demand optimization ----------------------
 test_demand_year <- function(opt_objective) {
   message(sprintf(

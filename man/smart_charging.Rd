@@ -15,6 +15,7 @@ smart_charging(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0
@@ -86,7 +87,18 @@ For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, s
 be curtailed until the 50\% of the nominal charging power.
 And if \code{charging_power_min = 2}, sessions' charging power can be curtailed until 2 kW.}
 
-\item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.}
+\item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
+Every session charges at least this share of the energy it requires. The
+scheduler never curtails, postpones or interrupts a session below it, and the
+setpoint optimization may drop energy down to it — and no further — when the
+grid capacity cannot fit \code{energy_max}. When even this minimum does not fit,
+the grid capacity is relaxed only as far as the minimum-energy profile needs,
+so the minimum is delivered at the expense of the capacity.}
+
+\item{energy_max}{numeric, maximum allowed ratio (between 0 and 1) of required energy.
+Every session charges at most this share of the energy it requires, and the
+setpoint optimization targets exactly this share for the responsive sessions.
+Lower it to save energy or cost. Must be higher than 0 and at least \code{energy_min}.}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 

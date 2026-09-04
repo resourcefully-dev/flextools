@@ -75,6 +75,16 @@
 #' And if `charging_power_min = 2`, sessions' charging power can be curtailed until 2 kW.
 #'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
+#' Every session charges at least this share of the energy it requires. The
+#' scheduler never curtails, postpones or interrupts a session below it, and the
+#' setpoint optimization may drop energy down to it — and no further — when the
+#' grid capacity cannot fit `energy_max`. When even this minimum does not fit,
+#' the grid capacity is relaxed only as far as the minimum-energy profile needs,
+#' so the minimum is delivered at the expense of the capacity.
+#' @param energy_max numeric, maximum allowed ratio (between 0 and 1) of required energy.
+#' Every session charges at most this share of the energy it requires, and the
+#' setpoint optimization targets exactly this share for the responsive sessions.
+#' Lower it to save energy or cost. Must be higher than 0 and at least `energy_min`.
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
 #' @param lambda numeric, penalty on change for the flexible load.
@@ -178,6 +188,7 @@ smart_charging <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0
@@ -237,6 +248,8 @@ smart_charging <- function(
       )
     }
   }
+
+  check_energy_ratios(energy_min, energy_max)
 
   if (is.null(responsive)) {
     responsive <- map(
@@ -333,7 +346,9 @@ smart_charging <- function(
   setpoints_lst <- get_setpoints_parallel(
     windows_data,
     opt_objective,
-    lambda
+    lambda,
+    energy_min,
+    energy_max
   )
 
   # Scheduling --------------------------------------------------------------
@@ -350,6 +365,7 @@ smart_charging <- function(
       power_th,
       charging_power_min,
       energy_min,
+      energy_max,
       include_log
     )
   }
@@ -433,6 +449,34 @@ smart_charging <- function(
   class(results) <- "SmartCharging"
 
   return(results)
+}
+
+
+#' Validate the pair of energy ratios
+#'
+#' Shared by [smart_charging()] and [schedule_sessions()]. Both ratios are
+#' shares of each session's energy requirement: `energy_min` is what must be
+#' delivered even at the expense of the grid capacity, `energy_max` is what may
+#' be delivered at most.
+#'
+#' @param energy_min numeric, between 0 and 1.
+#' @param energy_max numeric, higher than 0 and at most 1; at least `energy_min`.
+#'
+#' @return `TRUE`, invisibly. Stops with a clear message otherwise.
+#' @keywords internal
+#'
+check_energy_ratios <- function(energy_min, energy_max) {
+  is_ratio <- function(x) is.numeric(x) && length(x) == 1 && is.finite(x)
+  if (!is_ratio(energy_min) || energy_min < 0 || energy_min > 1) {
+    stop("Error: `energy_min` must be a single number between 0 and 1")
+  }
+  if (!is_ratio(energy_max) || energy_max <= 0 || energy_max > 1) {
+    stop("Error: `energy_max` must be a single number higher than 0 and at most 1")
+  }
+  if (energy_min > energy_max) {
+    stop("Error: `energy_min` cannot be higher than `energy_max`")
+  }
+  invisible(TRUE)
 }
 
 #' Set `Responsive` column in `sessions`
@@ -605,6 +649,9 @@ arrange_by_flex_potential <- function(sessions, descendent = TRUE) {
 #' @param profiles_demand tibble, user profiles power demand
 #' @param opt_objective character, optimization objective
 #' @param lambda numeric, penalty on change for the flexible load.
+#' @param energy_min,energy_max numeric, minimum and maximum share (between 0
+#'   and 1) of each profile's energy the setpoint must carry. See
+#'   [smart_charging()].
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
 #' @importFrom lubridate hour minute date
@@ -621,8 +668,13 @@ get_setpoints <- function(
   opt_data,
   profiles_demand,
   opt_objective,
-  lambda
+  lambda,
+  energy_min = 1,
+  energy_max = 1
 ) {
+  # Both ratios are shares of the responsive sessions' own demand `LF`; the
+  # non-responsive demand `L_fixed_prof` is added back untouched below.
+  energy_ratio <- c(energy_min, energy_max)
   if (nrow(sessions_window) == 0) {
     return(profiles_demand)
   }
@@ -725,7 +777,8 @@ get_setpoints <- function(
             LFmax = LFmax_prof[opt_idxs],
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else if (opt_objective == "cost") {
           O <- demand_cost_window(
@@ -741,7 +794,8 @@ get_setpoints <- function(
             LFmax = LFmax_prof[opt_idxs],
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else if (opt_objective == "capacity") {
           O <- demand_capacity_window(
@@ -753,7 +807,8 @@ get_setpoints <- function(
             LFmax = LFmax_prof[opt_idxs],
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else if (is.numeric(opt_objective)) {
           O <- demand_combined_window(
@@ -770,7 +825,8 @@ get_setpoints <- function(
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             w = opt_objective,
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -786,12 +842,16 @@ get_setpoints <- function(
           0 # Not negative power
         )
 
-        # Capacity available should allow the same energy than LF to
-        # avoid pushing the demand to the end of the window.
-        # In case of capacity limitation, we increase the
-        # capacity available by a factor
+        # Capacity available should allow the energy that MUST be charged (the
+        # `energy_min` share of the profile's demand) to avoid pushing the
+        # demand to the end of the window. In case of capacity limitation, we
+        # increase the capacity available by a factor — only as far as that
+        # minimum requires. The scheduler stops every session at its
+        # `energy_max` target, so this setpoint is a ceiling, not a target.
         inc_capacity_factor <- max(
-          sum(profiles_demand[[profile]]) / sum(capacity_available),
+          energy_min *
+            sum(profiles_demand[[profile]]) /
+            sum(capacity_available),
           1
         )
         setpoints[[profile]] <- capacity_available *
@@ -810,7 +870,13 @@ get_setpoints <- function(
 }
 
 
-get_setpoints_parallel <- function(windows_data, opt_objective, lambda) {
+get_setpoints_parallel <- function(
+  windows_data,
+  opt_objective,
+  lambda,
+  energy_min = 1,
+  energy_max = 1
+) {
   reset_message_once()
 
   if (
@@ -825,7 +891,9 @@ get_setpoints_parallel <- function(windows_data, opt_objective, lambda) {
           profiles_demand = x$profiles_demand,
           opt_data = x$opt_data,
           opt_objective = opt_objective,
-          lambda = lambda
+          lambda = lambda,
+          energy_min = energy_min,
+          energy_max = energy_max
         )
       }
     )
@@ -839,12 +907,16 @@ get_setpoints_parallel <- function(windows_data, opt_objective, lambda) {
             profiles_demand = x$profiles_demand,
             opt_data = x$opt_data,
             opt_objective = opt_objective,
-            lambda = lambda
+            lambda = lambda,
+            energy_min = energy_min,
+            energy_max = energy_max
           )
         },
         get_setpoints = get_setpoints,
         opt_objective = opt_objective,
-        lambda = lambda
+        lambda = lambda,
+        energy_min = energy_min,
+        energy_max = energy_max
       )
     )
   }
@@ -872,6 +944,7 @@ get_setpoints_parallel <- function(windows_data, opt_objective, lambda) {
 #' And if `charging_power_min = 2`, sessions' charging power can be curtailed until 2 kW.
 #'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
+#' @param energy_max numeric, maximum allowed ratio (between 0 and 1) of required energy.
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
@@ -891,6 +964,7 @@ smart_charging_window <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE
 ) {
   if (nrow(setpoints) == 0) {
@@ -954,6 +1028,7 @@ smart_charging_window <- function(
       power_th = power_th,
       charging_power_min = charging_power_min,
       energy_min = energy_min,
+      energy_max = energy_max,
       include_log = include_log,
       show_progress = FALSE
     )
@@ -1000,6 +1075,7 @@ smart_charging_window_parallel <- function(
   power_th,
   charging_power_min,
   energy_min,
+  energy_max,
   include_log
 ) {
   if (
@@ -1018,6 +1094,7 @@ smart_charging_window_parallel <- function(
           power_th = power_th,
           charging_power_min = charging_power_min,
           energy_min = energy_min,
+          energy_max = energy_max,
           include_log = include_log
         )
       }
@@ -1036,6 +1113,7 @@ smart_charging_window_parallel <- function(
             power_th = power_th,
             charging_power_min = charging_power_min,
             energy_min = energy_min,
+            energy_max = energy_max,
             include_log = include_log
           )
         },
@@ -1044,6 +1122,7 @@ smart_charging_window_parallel <- function(
         power_th = power_th,
         charging_power_min = charging_power_min,
         energy_min = energy_min,
+        energy_max = energy_max,
         include_log = include_log
       )
     )
@@ -1068,6 +1147,11 @@ smart_charging_window_parallel <- function(
 #' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
 #' be curtailed until the 50% of the nominal charging power (i.e. `Power` variable in `sessions` tibble).
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
+#' A session is never curtailed, postponed or interrupted below this share of
+#' the energy it requires, whatever the setpoint says.
+#' @param energy_max numeric, maximum allowed ratio (between 0 and 1) of required energy.
+#' Every session stops charging once it has received this share of the energy
+#' it requires. Must be higher than 0 and at least `energy_min`.
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
 #'
@@ -1087,6 +1171,7 @@ schedule_sessions <- function(
   power_th = 0,
   charging_power_min = 0.5,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE,
   show_progress = TRUE
 ) {
@@ -1126,6 +1211,7 @@ schedule_sessions <- function(
   if (!(method %in% c("postpone", "interrupt", "curtail"))) {
     stop("Error: `method` not valid (see Arguments description)")
   }
+  check_energy_ratios(energy_min, energy_max)
 
   resolution <- get_time_resolution(setpoint$datetime, units = "mins")
   dttm_tz <- tz(setpoint$datetime)
@@ -1134,9 +1220,17 @@ schedule_sessions <- function(
     cli::cli_progress_step("Preparing sessions data set")
   }
 
+  # `energy_max` caps every session at a share of the energy it asked for. The
+  # scaled `Energy` is the target the scheduler charges towards, so the charging
+  # hours, the flexibility hours and `EnergyRequired` (set by
+  # `expand_sessions()` from `Energy`) all follow from this one place.
+  # `energy_min` keeps meaning "share of the ORIGINAL requirement", hence the
+  # floor below is expressed relative to the target.
+  energy_min_target <- energy_min / energy_max
   sessions_sch <- sessions %>%
     filter(.data$ConnectionStartDateTime %in% setpoint$datetime) %>%
     mutate(
+      Energy = .data$Energy * energy_max,
       ChargingHours = .data$Energy / .data$Power
     )
 
@@ -1233,7 +1327,7 @@ schedule_sessions <- function(
         ),
         EnergyCharged = .data$EnergyRequired - .data$EnergyToCharge,
         MinEnergyToCharge = pmax(
-          .data$EnergyRequired * energy_min - .data$EnergyCharged,
+          .data$EnergyRequired * energy_min_target - .data$EnergyCharged,
           0
         ),
         PossibleEnergyRest = .data$PowerNominal *

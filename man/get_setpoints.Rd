@@ -9,7 +9,9 @@ get_setpoints(
   opt_data,
   profiles_demand,
   opt_objective,
-  lambda
+  lambda,
+  energy_min = 1,
+  energy_max = 1
 )
 }
 \arguments{
@@ -22,6 +24,10 @@ get_setpoints(
 \item{opt_objective}{character, optimization objective}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
+
+\item{energy_min, energy_max}{numeric, minimum and maximum share (between 0
+and 1) of each profile's energy the setpoint must carry. See
+\code{\link[=smart_charging]{smart_charging()}}.}
 }
 \description{
 Set setpoints for smart charging

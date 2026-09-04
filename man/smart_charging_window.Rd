@@ -12,6 +12,7 @@ smart_charging_window(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE
 )
 }
@@ -39,6 +40,8 @@ be curtailed until the 50\% of the nominal charging power.
 And if \code{charging_power_min = 2}, sessions' charging power can be curtailed until 2 kW.}
 
 \item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.}
+
+\item{energy_max}{numeric, maximum allowed ratio (between 0 and 1) of required energy.}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 }

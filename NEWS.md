@@ -20,7 +20,8 @@
   the energy is still delivered in full but a linear objective with a flat
   price (the `cost` objective is a tie among many equal-cost profiles) may land
   on a different profile than before. At the defaults (`energy_min = 1`,
-  `energy_max = 1`) results are unchanged.
+  `energy_max = 1`) the setpoints are identical to 1.6.0 and the scheduled
+  demand is unchanged up to the scheduler's own 2-decimal rounding.
 * The infeasible-window fallback follows the same order: energy first,
   capacity second. When even `energy_min * sum(LF)` does not fit, the grid
   capacity is relaxed only as far as the *minimum-energy* profile needs

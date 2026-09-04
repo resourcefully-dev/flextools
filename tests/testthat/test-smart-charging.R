@@ -441,8 +441,39 @@ test_that("results at the default energy ratios are unchanged by the energy rang
   # before `energy_min` entered the setpoint LP and `energy_max` existed. Every
   # scenario runs at the default ratios (or, for `grid_curtail_min0`, with a
   # range that a strictly convex objective without a binding capacity must
-  # ignore), so the range machinery must leave them byte-identical.
+  # ignore), so the range machinery must leave the setpoints byte-identical.
+  #
+  # The scheduler is compared with a tolerance: it rounds to 2 decimals at
+  # several points and a rounding tie flips on floating-point dust, so the same
+  # setpoints can schedule 0.01-0.02 kW differently between environments (seen
+  # under covr instrumentation, with identical setpoints). That noise predates
+  # this change and is not what this test guards.
   golden <- readRDS(test_path("golden-energy-range-defaults.rds"))
+  scheduler_tol <- 0.05
+
+  expect_same_run <- function(actual, expected, key) {
+    expect_equal(actual$setpoints, expected$setpoints, label = paste(key, "setpoints"))
+
+    demand_diff <- max(abs(
+      as.matrix(actual$demand[-1]) - as.matrix(expected$demand[-1])
+    ), na.rm = TRUE)
+    expect_lte(demand_diff, scheduler_tol, label = paste(key, "demand"))
+
+    energy_per_session <- function(sessions) {
+      sessions %>%
+        group_by(Session) %>%
+        summarise(Energy = sum(Energy), .groups = "drop") %>%
+        arrange(Session)
+    }
+    actual_energy <- energy_per_session(actual$sessions)
+    expected_energy <- energy_per_session(expected$sessions)
+    expect_equal(actual_energy$Session, expected_energy$Session, label = paste(key, "sessions"))
+    expect_lte(
+      max(abs(actual_energy$Energy - expected_energy$Energy)),
+      scheduler_tol,
+      label = paste(key, "energy per session")
+    )
+  }
 
   golden_opt_data <- tibble(
     datetime = sessions_demand$datetime,
@@ -510,7 +541,7 @@ test_that("results at the default energy ratios are unchanged by the energy rang
   )
 
   for (key in names(cases)) {
-    expect_equal(do.call(run, cases[[key]]), golden[[key]], label = key)
+    expect_same_run(do.call(run, cases[[key]]), golden[[key]], key)
   }
 })
 

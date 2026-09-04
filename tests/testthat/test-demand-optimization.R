@@ -413,6 +413,56 @@ test_that("a minimum above what fits relaxes the capacity to the minimum-energy 
   expect_true(all(O_cap <= pmax(range_case$import_capacity, 0.9 * range_case$LF) + relax_tol))
 })
 
+test_that("a minimum of 0 never hands a zero ratio to a follow-up LP", {
+  # Static load already fills the 4 kW import capacity in every slot, so the
+  # capacity slice LP removes all the EV energy and can re-add none of it.
+  # 1.7.0 turned the empty re-add into a c(0, 0) ratio for the follow-up grid
+  # LP, which rejected it ("the maximum energy ratio must be higher than 0").
+  O <- suppressMessages(demand_capacity_window(
+    G = range_case$G, LF = range_case$LF, LS = rep(20, 4),
+    direction = "forward", time_horizon = NULL, LFmax = range_case$LFmax,
+    import_capacity = range_case$import_capacity,
+    export_capacity = range_case$export_capacity,
+    energy_ratio = c(0, 1)
+  ))
+  expect_equal(as.numeric(O), rep(0, 4))
+
+  # Infeasible for a reason energy cannot fix: production above the export
+  # capacity forces load the fleet cannot physically draw. The minimum-energy
+  # profile is empty at 0%, so the capacity objective falls back to the
+  # original profile as 1.6.0 did — with the original-profile warning, and no
+  # error.
+  export_case <- list(
+    G = c(30, 30, 0, 0), LF = range_case$LF, LS = range_case$LS,
+    LFmax = range_case$LFmax, import_capacity = range_case$import_capacity,
+    export_capacity = rep(5, 4)
+  )
+  flextools:::reset_message_once()
+  expect_message(
+    O_cap <- demand_capacity_window(
+      G = export_case$G, LF = export_case$LF, LS = export_case$LS,
+      direction = "forward", time_horizon = NULL, LFmax = export_case$LFmax,
+      import_capacity = export_case$import_capacity,
+      export_capacity = export_case$export_capacity,
+      energy_ratio = c(0, 1)
+    ),
+    "original profile"
+  )
+  expect_equal(sum(O_cap), sum(export_case$LF), tolerance = 1e-6)
+
+  # The grid objective clips the export-side floor at the load capacity, so the
+  # same window is feasible for it: the reward keeps the full profile, no
+  # relaxation, no error.
+  O_grid <- suppressMessages(demand_grid_window(
+    G = export_case$G, LF = export_case$LF, LS = export_case$LS,
+    direction = "forward", time_horizon = NULL, LFmax = export_case$LFmax,
+    import_capacity = export_case$import_capacity,
+    export_capacity = export_case$export_capacity,
+    energy_ratio = c(0, 1)
+  ))
+  expect_equal(sum(O_grid), sum(export_case$LF), tolerance = 1e-6)
+})
+
 test_that("an energy range is rejected where energy cannot be dropped", {
   expect_error(
     demand_grid_window(

@@ -13,7 +13,8 @@ demand_grid_window(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 )
 }
 \arguments{
@@ -34,6 +35,11 @@ demand_grid_window(
 \item{export_capacity}{numeric or numeric vector, grid maximum export capacity that will limit the maximum optimized demand}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
+
+\item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
+load's energy the optimized load must carry. \code{c(1, 1)} (default) preserves
+the energy exactly; a range lets the optimizer drop energy — down to \code{min}
+— when the grid capacity cannot fit \code{max}.}
 }
 \value{
 numeric vector

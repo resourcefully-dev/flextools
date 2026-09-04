@@ -1,3 +1,39 @@
+# flextools 1.7.0
+
+* New `energy_max` argument in `smart_charging()`, `smart_charging_window()`
+  and `schedule_sessions()`: the maximum share (between 0 and 1) of the energy
+  each session requires that may be charged. Every session stops at
+  `energy_max * Energy`, and the setpoint optimization targets exactly that
+  share for the responsive sessions, so the setpoint and the scheduled demand
+  agree — also with `method = "none"`, where the setpoint is the result. Default
+  `1`. Must be at least `energy_min`.
+* `energy_min` now also bounds the **setpoint optimization**, not only the
+  scheduler. The energy-conservation row of every demand LP (`grid`, `cost`,
+  `capacity`, combined) becomes a range `[energy_min, energy_max] * sum(LF)`
+  with a uniform reward on the optimized load that dominates the objective's
+  marginal gain from dropping energy, so the optimizer keeps as much energy as
+  the grid capacity admits and drops the least that restores feasibility — never
+  below `energy_min`. **This changes results for callers passing
+  `energy_min < 1`**: against a capacity the fleet cannot fit under, the
+  setpoint now holds the capacity and sheds energy, where before it conserved
+  the energy and relaxed the capacity; and where the capacity does not bind,
+  the energy is still delivered in full but a linear objective with a flat
+  price (the `cost` objective is a tie among many equal-cost profiles) may land
+  on a different profile than before. At the defaults (`energy_min = 1`,
+  `energy_max = 1`) the setpoints are identical to 1.6.0 and the scheduled
+  demand is unchanged up to the scheduler's own 2-decimal rounding.
+* The infeasible-window fallback follows the same order: energy first,
+  capacity second. When even `energy_min * sum(LF)` does not fit, the grid
+  capacity is relaxed only as far as the *minimum-energy* profile needs
+  (previously: as far as the full original profile needs), with its own
+  warning message. The `opt_objective = "none"` branch of `get_setpoints()`
+  likewise inflates the available capacity only as far as `energy_min`
+  requires (previously: always enough for 100% of the energy).
+* `smart_charging()` and `schedule_sessions()` now validate the ratios and stop
+  on `energy_min > energy_max`, `energy_max = 0` or values outside `[0, 1]`.
+* Not touched: `smart_v2g()` keeps its own setpoint path and has no
+  `energy_max`; V2G is still under development.
+
 # flextools 1.6.0
 
 * The battery `capacity` objective now **minimizes battery usage** subject to

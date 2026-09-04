@@ -82,7 +82,9 @@ For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, s
 be curtailed until the 50\% of the nominal charging power.
 And if \code{charging_power_min = 2}, sessions' charging power can be curtailed until 2 kW.}
 
-\item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.}
+\item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
+In V2G this is a scheduling-stage guard only; the V2G setpoint path has no
+energy range and no \code{energy_max} yet.}
 
 \item{discharge_eff}{numeric, discharge efficiency (0, 1], applied to energy
 losses when discharging. For example, 0.9 means that for every 1 kWh

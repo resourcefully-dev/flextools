@@ -18,7 +18,8 @@ demand_combined_window(
   import_capacity,
   export_capacity,
   w,
-  lambda
+  lambda,
+  energy_ratio = c(1, 1)
 )
 }
 \arguments{
@@ -49,6 +50,11 @@ demand_combined_window(
 \item{w}{numeric, optimization objective weight (\code{w=1} minimizes net power while \code{w=0} minimizes cost).}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
+
+\item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
+load's energy the optimized load must carry. \code{c(1, 1)} (default) preserves
+the energy exactly; a range lets the optimizer drop energy — down to \code{min}
+— when the grid capacity cannot fit \code{max}.}
 }
 \value{
 numeric vector

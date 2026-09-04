@@ -9,6 +9,9 @@
 #' untouched.
 #'
 #' @inheritParams smart_charging
+#' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
+#' In V2G this is a scheduling-stage guard only; the V2G setpoint path has no
+#' energy range and no `energy_max` yet.
 #' @param discharge_eff numeric, discharge efficiency (0, 1], applied to energy
 #'   losses when discharging. For example, 0.9 means that for every 1 kWh
 #'   discharged, 1/0.9 kWh must be recharged.

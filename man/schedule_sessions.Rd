@@ -11,6 +11,7 @@ schedule_sessions(
   power_th = 0,
   charging_power_min = 0.5,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE,
   show_progress = TRUE
 )
@@ -34,7 +35,13 @@ then sessions' demand can reach a value of \code{110} without needing to schedul
 For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
 be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} variable in \code{sessions} tibble).}
 
-\item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.}
+\item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
+A session is never curtailed, postponed or interrupted below this share of
+the energy it requires, whatever the setpoint says.}
+
+\item{energy_max}{numeric, maximum allowed ratio (between 0 and 1) of required energy.
+Every session stops charging once it has received this share of the energy
+it requires. Must be higher than 0 and at least \code{energy_min}.}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 

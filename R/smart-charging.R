@@ -77,7 +77,7 @@
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' Every session charges at least this share of the energy it requires. The
 #' scheduler never curtails, postpones or interrupts a session below it, and the
-#' setpoint optimization may drop energy down to it — and no further — when the
+#' setpoint optimization may drop energy down to it - and no further - when the
 #' grid capacity cannot fit `energy_max`. When even this minimum does not fit,
 #' the grid capacity is relaxed only as far as the minimum-energy profile needs,
 #' so the minimum is delivered at the expense of the capacity.
@@ -101,6 +101,12 @@
 #' optimal setpoints (tibble), sessions schedule (tibble) and log messages
 #' (list of character vectors, one per window). The date-time values in the log
 #' list are in the time zone of the `opt_data`.
+#'
+#' A session whose connection crosses an optimization window boundary is split
+#' into one part per window before scheduling (energy shared by connection
+#' time), so the sessions schedule carries a `Part` column and such a session
+#' returns several rows per part; its delivered energy is the sum of its rows'
+#' `Energy` grouped by `Session`.
 #' @export
 #'
 #' @details
@@ -300,6 +306,21 @@ smart_charging <- function(
     window_start_hour
   )
 
+  # A session whose connection crosses a window boundary is split into one
+  # part per window (see `split_sessions_at_windows()`), so every part is
+  # scheduled in the window it is connected in. Before this, such a session
+  # belonged to the window it started in, was never marked responsive there
+  # (its charging ended past the window) and charged unmanaged at full power.
+  window_boundaries <- c(
+    dttm_seq[flex_windows_idx$start],
+    dttm_seq[max(flex_windows_idx$end)] + lubridate::minutes(time_resolution)
+  )
+  sessions <- split_sessions_at_windows(
+    sessions,
+    window_boundaries,
+    time_resolution
+  )
+
   # Get user profiles demand
   if (show_progress) {
     cli::cli_progress_step("Calculating EV demand")
@@ -327,7 +348,6 @@ smart_charging <- function(
         set_responsive(
           dttm_seq[flex_idx],
           responsive,
-          opt_objective,
           time_resolution
         )
       list(
@@ -394,8 +414,10 @@ smart_charging <- function(
       list_rbind()
 
     if (nrow(sessions_considered) > 0) {
+      # Key on (Session, Part): a split session's parts live in different
+      # windows, and one part being scheduled says nothing about the others.
       sessions_not_considered <- sessions[
-        !(sessions$Session %in% sessions_considered$Session),
+        !(session_part_key(sessions) %in% session_part_key(sessions_considered)),
       ]
     } else {
       sessions_not_considered <- sessions %>%
@@ -411,7 +433,7 @@ smart_charging <- function(
       sessions_considered
     ) %>%
       select(any_of(names(sessions)), everything()) %>% # Set order of columns
-      mutate(Session = factor(.data$Session, levels = sessions$Session)) %>% # Convert `Session` to factor to be sorted
+      mutate(Session = factor(.data$Session, levels = unique(sessions$Session))) %>% # Convert `Session` to factor to be sorted
       arrange(
         .data$Session,
         .data$ConnectionStartDateTime,
@@ -431,6 +453,16 @@ smart_charging <- function(
     opt_dttm_idx <- demand_opt$datetime %in% demand$datetime
     demand_opt[opt_dttm_idx, names(demand)] <- demand
     # demand_opt[is.na(demand_opt)] <- 0 # ReplaceNA
+    # Round once, here, and to the same four decimals as the session rows. Not
+    # to two: the demand is one column per profile and callers sum the
+    # columns, so three profiles each rounded up by half a cent read as a cap
+    # met at 3.00 kW being exceeded at 3.01.
+    demand_cols <- names(demand_opt) != "datetime"
+    demand_opt[demand_cols] <- lapply(
+      demand_opt[demand_cols],
+      round,
+      SCHEDULE_OUTPUT_DIGITS
+    )
 
     log_lst <- map(
       scheduling_lst,
@@ -449,6 +481,116 @@ smart_charging <- function(
   class(results) <- "SmartCharging"
 
   return(results)
+}
+
+
+#' Split sessions at the optimization window boundaries
+#'
+#' A session whose connection crosses a window boundary is cut into one part
+#' per window: each part keeps the session's `Session` id, `Power`, `Profile`
+#' and `Timecycle`, gets the real connection interval of its window, a `Part`
+#' number, and a share of the energy proportional to its connection time.
+#' Sessions that cross no boundary are returned unchanged with `Part = 1`.
+#'
+#' The share is by connection time, not by what nominal charging would deliver
+#' first: a car that arrives 45 minutes before a boundary and stays nine hours
+#' would otherwise carry most of its energy into those 45 minutes, where no
+#' capacity could hold it and the `energy_min` floor would force it through.
+#' Proportional puts the energy where the flexibility is. The parts sum to the
+#' session's energy up to the 2-decimal rounding of each part.
+#'
+#' A part that could not fill one time slot at nominal power (energy below
+#' `Power * time_resolution / 60`) is folded into its longest neighbouring
+#' part instead of being emitted: [evsim::get_demand()] renders sub-slot
+#' charging as a whole slot at nominal power, so such a part would enter the
+#' optimizer as several times its real energy. Folding keeps the energy and
+#' drops the sliver of connection time, which is what the scheduler could do
+#' with it anyway. A session that arrives shortly before a boundary and stays
+#' long therefore moves whole into the next window. The charging features of
+#' every part are recomputed with [evsim::adapt_charging_features()].
+#'
+#' @param sessions tibble, sessions as returned by
+#'   [evsim::adapt_charging_features()]
+#' @param boundaries POSIXct vector, window start instants (and the end of the
+#'   last window); only boundaries strictly inside a connection split it
+#' @param time_resolution numeric, minutes
+#'
+#' @return the sessions tibble with a `Part` column, possibly more rows
+#' @keywords internal
+#'
+split_sessions_at_windows <- function(sessions, boundaries, time_resolution) {
+  if (!("Part" %in% names(sessions))) {
+    sessions$Part <- 1L
+  }
+  if (nrow(sessions) == 0 || length(boundaries) == 0) {
+    return(sessions)
+  }
+  boundaries <- sort(unique(boundaries))
+
+  inner_boundaries <- lapply(seq_len(nrow(sessions)), function(i) {
+    boundaries[
+      boundaries > sessions$ConnectionStartDateTime[i] &
+        boundaries < sessions$ConnectionEndDateTime[i]
+    ]
+  })
+  crosses <- lengths(inner_boundaries) > 0
+  if (!any(crosses)) {
+    return(sessions)
+  }
+
+  one_slot_hours <- time_resolution / 60
+
+  split_one <- function(session, cuts) {
+    cuts <- c(session$ConnectionStartDateTime, cuts, session$ConnectionEndDateTime)
+    starts <- cuts[-length(cuts)]
+    ends <- cuts[-1]
+    hours <- as.numeric(ends - starts, units = "hours")
+    energy <- session$Energy * hours / sum(hours)
+
+    # Fold every part that cannot fill one slot at nominal power into its
+    # longest neighbour: the neighbour keeps its own interval and gains the
+    # energy, the sliver's connection time is dropped.
+    one_slot_energy <- session$Power * one_slot_hours
+    repeat {
+      tiny <- which(energy < one_slot_energy)
+      if (length(tiny) == 0 || length(hours) == 1) {
+        break
+      }
+      i <- tiny[1]
+      neighbours <- c(i - 1, i + 1)
+      neighbours <- neighbours[neighbours >= 1 & neighbours <= length(hours)]
+      into <- neighbours[which.max(hours[neighbours])]
+      energy[into] <- energy[into] + energy[i]
+      starts <- starts[-i]
+      ends <- ends[-i]
+      hours <- hours[-i]
+      energy <- energy[-i]
+    }
+
+    parts <- session[rep(1, length(hours)), ]
+    parts$ConnectionStartDateTime <- starts
+    parts$ConnectionEndDateTime <- ends
+    parts$ConnectionHours <- round(hours, 2)
+    parts$Energy <- round(energy, 2)
+    parts$Part <- seq_along(hours)
+    parts[parts$Energy > 0, ]
+  }
+
+  split_parts <- purrr::map2(
+    split(sessions[crosses, ], seq_len(sum(crosses))),
+    inner_boundaries[crosses],
+    split_one
+  ) %>%
+    list_rbind() %>%
+    adapt_charging_features(time_resolution = time_resolution)
+
+  bind_rows(sessions[!crosses, ], split_parts) %>%
+    arrange(.data$ConnectionStartDateTime, .data$Session, .data$Part)
+}
+
+
+session_part_key <- function(sessions) {
+  paste(sessions$Session, sessions$Part, sep = "")
 }
 
 
@@ -484,14 +626,11 @@ check_energy_ratios <- function(energy_min, energy_max) {
 #' @param sessions_window tibble, sessions corresponding to a single windows
 #' @param dttm_seq datetime vector
 #' @param responsive named list with responsive ratios
-#' @param opt_objective character, optimization objective being `"none"`,
-#'  `"grid"`, `"cost"` or a value between 0 (cost) and 1 (grid).
 #' @param time_resolution numeric, time resolution in minutes
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
 #' @importFrom lubridate hour minute date minutes
 #' @importFrom rlang .data
-#' @importFrom stats sd
 #' @importFrom purrr set_names
 #' @importFrom evsim get_demand adapt_charging_features
 #'
@@ -501,112 +640,86 @@ set_responsive <- function(
   sessions_window,
   dttm_seq,
   responsive,
-  opt_objective,
   time_resolution
 ) {
   if (nrow(sessions_window) == 0) {
     return(tibble())
   }
 
-  # Window's features
-  # Find most common time-cycle in this window
-  window_timecycle <- names(sort(
-    table(sessions_window$Timecycle),
-    decreasing = TRUE
-  ))[1]
-  # Responsiveness of the user profiles in this time-cycle
-  # If the time cycle is not configured in `responsive` then skip smart charging
-  if (!(window_timecycle %in% names(responsive))) {
-    return(tibble())
-  }
-  window_responsive <- responsive[[window_timecycle]]
+  # The window ends one resolution after its last slot.
+  end_dttm <- dttm_seq[length(dttm_seq)]
+  max_end_connection_dttm <- end_dttm + minutes(time_resolution)
 
-  if (length(window_responsive) == 0) {
-    return(tibble())
-  }
-
-  # Profiles subjected to optimization:
-  #   1. appearing in the sessions set for this optimization window
-  #   2. responsive values higher than 0
-  opt_profiles <- names(window_responsive)[
-    (names(window_responsive) %in% unique(sessions_window$Profile)) &
-      (names(window_responsive) %in%
-        names(window_responsive)[as.numeric(window_responsive) > 0])
-  ]
-
-  if (length(opt_profiles) == 0) {
-    return(tibble())
-  }
+  # Responsiveness is looked up per (time cycle, profile) of each session, not
+  # by the window's dominant time cycle: a Friday session whose connection
+  # carries over into Saturday's window keeps Friday's responsiveness. A pair
+  # that `responsive` does not configure, or configures at 0, is not
+  # considered (it stays out of the returned set, as before).
+  groups <- sessions_window %>%
+    distinct(.data$Timecycle, .data$Profile)
 
   sessions_considered <- tibble()
 
-  # For each optimization profile
-  for (profile in opt_profiles) {
-    # Filter only sessions of this Profile
-    sessions_window_prof <- sessions_window %>%
-      filter(.data$Profile == profile)
-
-    if (nrow(sessions_window_prof) == 0) {
-      return(tibble())
+  for (g in seq_len(nrow(groups))) {
+    time_cycle <- groups$Timecycle[g]
+    profile <- groups$Profile[g]
+    ratio <- responsive[[time_cycle]][[profile]]
+    if (is.null(ratio) || !is.numeric(ratio) || length(ratio) != 1 || ratio <= 0) {
+      next
     }
+
+    sessions_group <- sessions_window %>%
+      filter(.data$Timecycle == time_cycle, .data$Profile == profile)
 
     # RESPONSIVENESS
-    sessions_window_prof$Responsive <- NA
+    sessions_group$Responsive <- NA
 
-    # Potentially responsive sessions are defined according to the following conditions:
-    #   1. Charging end time inside the optimization window
-    end_dttm <- dttm_seq[length(dttm_seq)]
-    end_charge_window <- sessions_window_prof$ChargingEndDateTime <= end_dttm
-
-    #   2. Connection times inside the 95% percentile using the rule mean+-2*sd (95.45%)
-    #       This is done only if optimization is used to find a setpoint
-    if (opt_objective != "none") {
-      not_outliers <- get_window_not_outliers(
-        sessions_window_prof,
-        pct = 95,
-        time_resolution
-      )
-    } else {
-      not_outliers <- TRUE
-    }
-
-    # Sessions that are "potentially responsive":
-    potentially_responsive_idx <- which(end_charge_window & not_outliers)
-    # potentially_responsive_idx <- which(end_charge_window)
-
-    # From the potentially responsive sessions, randomly
-    # select the configured number of `responsive` sessions:
-    n_responsive <- round(
-      length(potentially_responsive_idx) * window_responsive[[profile]]
+    # Potentially responsive: the charging ends inside the window. A session
+    # whose charging ends exactly on the next boundary is inside. Since
+    # `split_sessions_at_windows()` no connection crosses a boundary, so this
+    # only excludes sessions that outlast the whole sequence.
+    #
+    # That is the only condition. Up to 1.7.x a second one excluded sessions
+    # whose connection times fell outside the profile's 95% band in the window
+    # (mean +- 2 sd), to stop one late arrival from stretching the setpoint
+    # span and smearing the profile's energy into slots where only that car was
+    # plugged in. The setpoint LP now bounds every slot by the nominal power of
+    # the sessions actually connected (`LFmax`), which removes that failure
+    # mode at the source; what the band still did was leave the excluded
+    # sessions charging unmanaged at full power, and understate the responsive
+    # share the caller asked for.
+    potentially_responsive_idx <- which(
+      sessions_group$ChargingEndDateTime <= max_end_connection_dttm
     )
-    set.seed(1234)
-    responsive_idx <- sample(potentially_responsive_idx, n_responsive)
-    non_responsive_idx <- potentially_responsive_idx[
-      !(potentially_responsive_idx %in% responsive_idx)
-    ]
-    sessions_window_prof$Responsive[responsive_idx] <- TRUE
-    sessions_window_prof$Responsive[non_responsive_idx] <- FALSE
 
-    # For the `Responsive` sessions,
-    # limit the `ConnectionEndDateTime` to window's end
-    max_end_connection_dttm <- end_dttm + minutes(time_resolution)
-    sessions_window_prof$ConnectionEndDateTime[
-      sessions_window_prof$Responsive &
-        (sessions_window_prof$ConnectionEndDateTime > max_end_connection_dttm)
+    # From the potentially responsive sessions, randomly select the configured
+    # share. `sample.int` on the count, not `sample()` on the indices: with a
+    # single eligible row `sample(idx, 1)` draws from `1:idx` instead.
+    n_responsive <- round(length(potentially_responsive_idx) * ratio)
+    set.seed(1234)
+    responsive_idx <- potentially_responsive_idx[
+      sample.int(length(potentially_responsive_idx), n_responsive)
+    ]
+    non_responsive_idx <- setdiff(potentially_responsive_idx, responsive_idx)
+    sessions_group$Responsive[responsive_idx] <- TRUE
+    sessions_group$Responsive[non_responsive_idx] <- FALSE
+
+    # For the `Responsive` sessions, limit the `ConnectionEndDateTime` to the
+    # window's end
+    sessions_group$ConnectionEndDateTime[
+      sessions_group$Responsive %in% TRUE &
+        (sessions_group$ConnectionEndDateTime > max_end_connection_dttm)
     ] <- max_end_connection_dttm
-    sessions_window_prof$ConnectionHours <- round(
+    sessions_group$ConnectionHours <- round(
       as.numeric(
-        sessions_window_prof$ConnectionEndDateTime -
-          sessions_window_prof$ConnectionStartDateTime,
+        sessions_group$ConnectionEndDateTime -
+          sessions_group$ConnectionStartDateTime,
         unit = "hours"
       ),
       2
     )
 
-    sessions_considered <- bind_rows(
-      sessions_considered,
-      sessions_window_prof
-    )
+    sessions_considered <- bind_rows(sessions_considered, sessions_group)
   }
 
   return(sessions_considered)
@@ -845,7 +958,7 @@ get_setpoints <- function(
         # Capacity available should allow the energy that MUST be charged (the
         # `energy_min` share of the profile's demand) to avoid pushing the
         # demand to the end of the window. In case of capacity limitation, we
-        # increase the capacity available by a factor — only as far as that
+        # increase the capacity available by a factor - only as far as that
         # minimum requires. The scheduler stops every session at its
         # `energy_max` target, so this setpoint is a ceiling, not a target.
         inc_capacity_factor <- max(
@@ -1033,9 +1146,11 @@ smart_charging_window <- function(
       show_progress = FALSE
     )
     sessions_window_flex_final <- results$sessions
+    scheduled_demand <- results$demand
     results_log <- results$log
   } else {
     sessions_window_flex_final <- tibble()
+    scheduled_demand <- tibble(datetime = dttm_seq)
   }
 
   sessions_window_final <- bind_rows(
@@ -1044,13 +1159,28 @@ smart_charging_window <- function(
   )
 
   if (nrow(sessions_window_final) > 0) {
-    sessions_window_final_demand <- get_demand(
-      sessions_window_final,
-      dttm_seq = dttm_seq,
-      by = "Profile"
-    )
+    # The window's demand for the profiles it schedules: the scheduler's exact
+    # per-slot powers for the responsive sessions, plus the unmanaged demand
+    # of the non-responsive ones. Rebuilding the responsive part from the
+    # session rows would round each session's slot power to 2 decimals first,
+    # which is how a setpoint met exactly used to come back a cent above.
     profile_cols <- intersect(window_profiles, names(profiles_demand))
-    profiles_demand[profile_cols] <- sessions_window_final_demand[profile_cols]
+    scheduled_demand <- tibble(datetime = dttm_seq) %>%
+      left_join(scheduled_demand, by = "datetime")
+    unmanaged_demand <- if (nrow(non_responsive_sessions) > 0) {
+      get_demand(non_responsive_sessions, dttm_seq = dttm_seq, by = "Profile")
+    } else {
+      tibble(datetime = dttm_seq)
+    }
+    for (profile in profile_cols) {
+      scheduled <- scheduled_demand[[profile]]
+      unmanaged <- unmanaged_demand[[profile]]
+      if (is.null(scheduled)) scheduled <- 0
+      if (is.null(unmanaged)) unmanaged <- 0
+      scheduled[is.na(scheduled)] <- 0
+      unmanaged[is.na(unmanaged)] <- 0
+      profiles_demand[[profile]] <- scheduled + unmanaged
+    }
   }
 
   sessions_considered <- sessions_window_final
@@ -1131,6 +1261,24 @@ smart_charging_window_parallel <- function(
 }
 
 
+# Scheduler tolerances. Decisions are taken on exact arithmetic against these
+# named thresholds; the returned rows are rounded once, at the end. Up to 1.7.x
+# the requirement was rounded to 2 decimals before the `> 0` test and every
+# session's power was rounded to 2 decimals on the way out, so a cap met
+# exactly came back as 3.01 kW whenever the per-session roundings added up.
+#
+# A flexibility requirement below one watt is floating-point dust, not a
+# request to curtail: acting on it would flip `Flexible`/`Exploited` in every
+# slot and cut spurious segments.
+SCHEDULE_FLEX_TOL_KW <- 0.001
+# A session can only be curtailed if it can give up at least this much power,
+# and counts as charged once this little energy is left. Both unchanged.
+SCHEDULE_MIN_CURTAIL_KW <- 0.1
+SCHEDULE_MIN_ENERGY_KWH <- 0.025
+# Precision of the returned session rows (kW, kWh, hours). Four decimals keep
+# the sum of curtailed powers on the setpoint instead of a cent above it.
+SCHEDULE_OUTPUT_DIGITS <- 4L
+
 #' Schedule sessions according to optimal setpoint
 #'
 #' @param sessions tibble, sessions data set containing the following variables:
@@ -1155,7 +1303,10 @@ smart_charging_window_parallel <- function(
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
 #'
-#' @return list of two elements `sessions` and `log`
+#' @return list of three elements: `sessions` (the schedule, one row per
+#'   constant-power segment), `demand` (the scheduled power per time slot,
+#'   one column per `Profile` when the sessions carry one, else `Demand`,
+#'   summed from the exact per-slot powers) and `log`
 #' @export
 #'
 #' @importFrom dplyr tibble %>% filter mutate arrange desc left_join select mutate_if
@@ -1353,8 +1504,7 @@ schedule_sessions <- function(
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           Flexible = ifelse(
-            # Added error tolerance
-            (.data$EnergyToCharge > 0.025) &
+            (.data$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &
               (.data$MinEnergyToCharge <= .data$PossibleEnergyRest),
             TRUE,
             FALSE
@@ -1394,9 +1544,9 @@ schedule_sessions <- function(
             )
           ),
           Flexible = ifelse(
-            # Added error tolerance
-            (.data$EnergyToCharge > 0.025) &
-              (.data$PowerTimeslot - .data$MinPowerTimeslot > 0.1),
+            (.data$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &
+              (.data$PowerTimeslot - .data$MinPowerTimeslot >
+                SCHEDULE_MIN_CURTAIL_KW),
             TRUE,
             FALSE
           )
@@ -1436,17 +1586,15 @@ schedule_sessions <- function(
       setpoint_power_timeslot <- sessions_timeslot_power
     }
 
-    # Flexibility requirement
-    flex_req <- round(
-      sessions_timeslot_power - setpoint_power_timeslot * (1 + power_th),
-      2
-    )
+    # Flexibility requirement, on exact arithmetic (see SCHEDULE_FLEX_TOL_KW)
+    flex_req <- sessions_timeslot_power -
+      setpoint_power_timeslot * (1 + power_th)
 
     # If demand should be reduced
-    if (flex_req > 0) {
+    if (flex_req > SCHEDULE_FLEX_TOL_KW) {
       if (include_log) {
         log_message <- c(
-          paste("\u2139 Flexibility requirement of", flex_req, "kW"),
+          paste("\u2139 Flexibility requirement of", round(flex_req, 2), "kW"),
           paste(
             "\u2139",
             nrow(sessions_timeslot),
@@ -1521,7 +1669,7 @@ schedule_sessions <- function(
           sessions_timeslot$Exploited[sessions_timeslot$Flexible] <- TRUE
 
           # Update flexibility requirement with power from all shiftable sessions
-          flex_req <- round(flex_req - shift_flex_available, 2)
+          flex_req <- flex_req - shift_flex_available
 
           if (include_log) {
             log_message <- paste0(
@@ -1573,8 +1721,8 @@ schedule_sessions <- function(
               reduction_factor
 
           # Update flexibility requirement
-          flex_provided <- round(max_power_reduction * reduction_factor, 2)
-          flex_req <- round(flex_req - flex_provided, 2)
+          flex_provided <- max_power_reduction * reduction_factor
+          flex_req <- flex_req - flex_provided
         } else {
           flex_provided <- 0
         }
@@ -1584,10 +1732,10 @@ schedule_sessions <- function(
           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
         if (include_log) {
-          if (flex_req > 0) {
+          if (flex_req > SCHEDULE_FLEX_TOL_KW) {
             log_message <- paste0(
               "\u2716 Not enough flexibility available (",
-              flex_provided,
+              round(flex_provided, 2),
               " kW)"
             )
             # message(log_message)
@@ -1742,7 +1890,7 @@ schedule_sessions <- function(
       Energy = .data$Power * .data$ChargingHours
     ) %>%
     summarise_by_segment() %>%
-    mutate_if(is.numeric, round, 2)
+    mutate_if(is.numeric, round, SCHEDULE_OUTPUT_DIGITS)
 
   sessions_sch_flex <- sessions_sch %>%
     select("Session", !any_of(names(sessions_segmented))) %>%
@@ -1755,62 +1903,37 @@ schedule_sessions <- function(
       "ConnectionHoursLeft"
     )
 
+  # The scheduled demand per time slot (and per `Profile` when the sessions
+  # carry one), summed from the exact per-slot powers the scheduler decided.
+  # Rebuilding it from the session rows through `evsim::get_demand()` rounds
+  # every session's slot power to 2 decimals first, and those roundings add up
+  # to a cent above a setpoint that was met exactly.
+  demand_scheduled <- sessions_expanded %>%
+    left_join(
+      sessions_sch %>% select(any_of(c("Session", "Profile"))) %>% distinct(),
+      by = "Session"
+    ) %>%
+    mutate(datetime = .data$Timeslot)
+  if (!("Profile" %in% names(demand_scheduled))) {
+    demand_scheduled$Profile <- "Demand"
+  }
+  demand_scheduled <- demand_scheduled %>%
+    group_by(.data$datetime, .data$Profile) %>%
+    summarise(Power = sum(.data$Power), .groups = "drop") %>%
+    tidyr::pivot_wider(
+      names_from = "Profile",
+      values_from = "Power",
+      values_fill = 0
+    ) %>%
+    arrange(.data$datetime)
+
   return(
     list(
       sessions = sessions_sch_flex,
+      demand = demand_scheduled,
       log = log
     )
   )
-}
-
-
-# Window outliers ---------------------------------------------------------
-
-get_sd_factor <- function(pct = 95) {
-  stats::qnorm(1 - (1 - pct / 100) / 2)
-}
-
-round_to_interval <- function(dbl, interval) {
-  round(dbl / interval) * interval
-}
-
-get_window_not_outliers <- function(sessions, pct, time_resolution) {
-  # Outlier detection needs at least 2 sessions to estimate a spread.
-  # With a single session `sd()` is NA, so it cannot be an outlier: keep it.
-  if (nrow(sessions) < 2) {
-    return(rep(TRUE, nrow(sessions)))
-  }
-  sd_factor <- get_sd_factor(pct)
-  start_time_mean <- mean(as.numeric(sessions$ConnectionStartDateTime))
-  start_time_sd <- sd(as.numeric(sessions$ConnectionStartDateTime))
-  end_time_mean <- mean(as.numeric(sessions$ConnectionEndDateTime))
-  end_time_sd <- sd(as.numeric(sessions$ConnectionEndDateTime))
-  not_outliers <- dplyr::between(
-    as.numeric(sessions$ConnectionStartDateTime),
-    round_to_interval(
-      start_time_mean - sd_factor * start_time_sd,
-      time_resolution * 60
-    ),
-    round_to_interval(
-      start_time_mean + sd_factor * start_time_sd,
-      time_resolution * 60
-    )
-  ) &
-    dplyr::between(
-      as.numeric(sessions$ConnectionEndDateTime),
-      round_to_interval(
-        end_time_mean - sd_factor * end_time_sd,
-        time_resolution * 60
-      ),
-      round_to_interval(
-        end_time_mean + sd_factor * end_time_sd,
-        time_resolution * 60
-      )
-    )
-  # Guard against any remaining NA (e.g. missing connection times): an
-  # undefined bound means we cannot classify the session as an outlier.
-  not_outliers[is.na(not_outliers)] <- TRUE
-  not_outliers
 }
 
 

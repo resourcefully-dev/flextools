@@ -4,13 +4,7 @@
 \alias{set_responsive}
 \title{Set \code{Responsive} column in \code{sessions}}
 \usage{
-set_responsive(
-  sessions_window,
-  dttm_seq,
-  responsive,
-  opt_objective,
-  time_resolution
-)
+set_responsive(sessions_window, dttm_seq, responsive, time_resolution)
 }
 \arguments{
 \item{sessions_window}{tibble, sessions corresponding to a single windows}
@@ -18,9 +12,6 @@ set_responsive(
 \item{dttm_seq}{datetime vector}
 
 \item{responsive}{named list with responsive ratios}
-
-\item{opt_objective}{character, optimization objective being \code{"none"},
-\code{"grid"}, \code{"cost"} or a value between 0 (cost) and 1 (grid).}
 
 \item{time_resolution}{numeric, time resolution in minutes}
 }

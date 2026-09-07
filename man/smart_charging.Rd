@@ -90,7 +90,7 @@ And if \code{charging_power_min = 2}, sessions' charging power can be curtailed 
 \item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
 Every session charges at least this share of the energy it requires. The
 scheduler never curtails, postpones or interrupts a session below it, and the
-setpoint optimization may drop energy down to it — and no further — when the
+setpoint optimization may drop energy down to it - and no further - when the
 grid capacity cannot fit \code{energy_max}. When even this minimum does not fit,
 the grid capacity is relaxed only as far as the minimum-energy profile needs,
 so the minimum is delivered at the expense of the capacity.}
@@ -111,6 +111,12 @@ a list with three elements:
 optimal setpoints (tibble), sessions schedule (tibble) and log messages
 (list of character vectors, one per window). The date-time values in the log
 list are in the time zone of the \code{opt_data}.
+
+A session whose connection crosses an optimization window boundary is split
+into one part per window before scheduling (energy shared by connection
+time), so the sessions schedule carries a \code{Part} column and such a session
+returns several rows per part; its delivered energy is the sum of its rows'
+\code{Energy} grouped by \code{Session}.
 }
 \description{
 This function provides a framework to simulate different smart charging methods

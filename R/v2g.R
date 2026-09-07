@@ -164,7 +164,6 @@ smart_v2g <- function(
           set_responsive(
             dttm_seq[flex_idx],
             responsive,
-            opt_objective,
             time_resolution
           ),
         profiles_demand = profiles_demand[flex_idx, ],

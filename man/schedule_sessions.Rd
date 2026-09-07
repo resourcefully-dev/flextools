@@ -48,7 +48,10 @@ it requires. Must be higher than 0 and at least \code{energy_min}.}
 \item{show_progress}{logical, whether to output the progress bar in the console}
 }
 \value{
-list of two elements \code{sessions} and \code{log}
+list of three elements: \code{sessions} (the schedule, one row per
+constant-power segment), \code{demand} (the scheduled power per time slot,
+one column per \code{Profile} when the sessions carry one, else \code{Demand},
+summed from the exact per-slot powers) and \code{log}
 }
 \description{
 Schedule sessions according to optimal setpoint

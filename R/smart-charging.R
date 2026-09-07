@@ -77,7 +77,7 @@
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' Every session charges at least this share of the energy it requires. The
 #' scheduler never curtails, postpones or interrupts a session below it, and the
-#' setpoint optimization may drop energy down to it — and no further — when the
+#' setpoint optimization may drop energy down to it - and no further - when the
 #' grid capacity cannot fit `energy_max`. When even this minimum does not fit,
 #' the grid capacity is relaxed only as far as the minimum-energy profile needs,
 #' so the minimum is delivered at the expense of the capacity.
@@ -453,6 +453,16 @@ smart_charging <- function(
     opt_dttm_idx <- demand_opt$datetime %in% demand$datetime
     demand_opt[opt_dttm_idx, names(demand)] <- demand
     # demand_opt[is.na(demand_opt)] <- 0 # ReplaceNA
+    # Round once, here, and to the same four decimals as the session rows. Not
+    # to two: the demand is one column per profile and callers sum the
+    # columns, so three profiles each rounded up by half a cent read as a cap
+    # met at 3.00 kW being exceeded at 3.01.
+    demand_cols <- names(demand_opt) != "datetime"
+    demand_opt[demand_cols] <- lapply(
+      demand_opt[demand_cols],
+      round,
+      SCHEDULE_OUTPUT_DIGITS
+    )
 
     log_lst <- map(
       scheduling_lst,
@@ -948,7 +958,7 @@ get_setpoints <- function(
         # Capacity available should allow the energy that MUST be charged (the
         # `energy_min` share of the profile's demand) to avoid pushing the
         # demand to the end of the window. In case of capacity limitation, we
-        # increase the capacity available by a factor — only as far as that
+        # increase the capacity available by a factor - only as far as that
         # minimum requires. The scheduler stops every session at its
         # `energy_max` target, so this setpoint is a ceiling, not a target.
         inc_capacity_factor <- max(
@@ -1136,9 +1146,11 @@ smart_charging_window <- function(
       show_progress = FALSE
     )
     sessions_window_flex_final <- results$sessions
+    scheduled_demand <- results$demand
     results_log <- results$log
   } else {
     sessions_window_flex_final <- tibble()
+    scheduled_demand <- tibble(datetime = dttm_seq)
   }
 
   sessions_window_final <- bind_rows(
@@ -1147,13 +1159,28 @@ smart_charging_window <- function(
   )
 
   if (nrow(sessions_window_final) > 0) {
-    sessions_window_final_demand <- get_demand(
-      sessions_window_final,
-      dttm_seq = dttm_seq,
-      by = "Profile"
-    )
+    # The window's demand for the profiles it schedules: the scheduler's exact
+    # per-slot powers for the responsive sessions, plus the unmanaged demand
+    # of the non-responsive ones. Rebuilding the responsive part from the
+    # session rows would round each session's slot power to 2 decimals first,
+    # which is how a setpoint met exactly used to come back a cent above.
     profile_cols <- intersect(window_profiles, names(profiles_demand))
-    profiles_demand[profile_cols] <- sessions_window_final_demand[profile_cols]
+    scheduled_demand <- tibble(datetime = dttm_seq) %>%
+      left_join(scheduled_demand, by = "datetime")
+    unmanaged_demand <- if (nrow(non_responsive_sessions) > 0) {
+      get_demand(non_responsive_sessions, dttm_seq = dttm_seq, by = "Profile")
+    } else {
+      tibble(datetime = dttm_seq)
+    }
+    for (profile in profile_cols) {
+      scheduled <- scheduled_demand[[profile]]
+      unmanaged <- unmanaged_demand[[profile]]
+      if (is.null(scheduled)) scheduled <- 0
+      if (is.null(unmanaged)) unmanaged <- 0
+      scheduled[is.na(scheduled)] <- 0
+      unmanaged[is.na(unmanaged)] <- 0
+      profiles_demand[[profile]] <- scheduled + unmanaged
+    }
   }
 
   sessions_considered <- sessions_window_final
@@ -1234,6 +1261,24 @@ smart_charging_window_parallel <- function(
 }
 
 
+# Scheduler tolerances. Decisions are taken on exact arithmetic against these
+# named thresholds; the returned rows are rounded once, at the end. Up to 1.7.x
+# the requirement was rounded to 2 decimals before the `> 0` test and every
+# session's power was rounded to 2 decimals on the way out, so a cap met
+# exactly came back as 3.01 kW whenever the per-session roundings added up.
+#
+# A flexibility requirement below one watt is floating-point dust, not a
+# request to curtail: acting on it would flip `Flexible`/`Exploited` in every
+# slot and cut spurious segments.
+SCHEDULE_FLEX_TOL_KW <- 0.001
+# A session can only be curtailed if it can give up at least this much power,
+# and counts as charged once this little energy is left. Both unchanged.
+SCHEDULE_MIN_CURTAIL_KW <- 0.1
+SCHEDULE_MIN_ENERGY_KWH <- 0.025
+# Precision of the returned session rows (kW, kWh, hours). Four decimals keep
+# the sum of curtailed powers on the setpoint instead of a cent above it.
+SCHEDULE_OUTPUT_DIGITS <- 4L
+
 #' Schedule sessions according to optimal setpoint
 #'
 #' @param sessions tibble, sessions data set containing the following variables:
@@ -1258,7 +1303,10 @@ smart_charging_window_parallel <- function(
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
 #'
-#' @return list of two elements `sessions` and `log`
+#' @return list of three elements: `sessions` (the schedule, one row per
+#'   constant-power segment), `demand` (the scheduled power per time slot,
+#'   one column per `Profile` when the sessions carry one, else `Demand`,
+#'   summed from the exact per-slot powers) and `log`
 #' @export
 #'
 #' @importFrom dplyr tibble %>% filter mutate arrange desc left_join select mutate_if
@@ -1456,8 +1504,7 @@ schedule_sessions <- function(
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           Flexible = ifelse(
-            # Added error tolerance
-            (.data$EnergyToCharge > 0.025) &
+            (.data$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &
               (.data$MinEnergyToCharge <= .data$PossibleEnergyRest),
             TRUE,
             FALSE
@@ -1497,9 +1544,9 @@ schedule_sessions <- function(
             )
           ),
           Flexible = ifelse(
-            # Added error tolerance
-            (.data$EnergyToCharge > 0.025) &
-              (.data$PowerTimeslot - .data$MinPowerTimeslot > 0.1),
+            (.data$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &
+              (.data$PowerTimeslot - .data$MinPowerTimeslot >
+                SCHEDULE_MIN_CURTAIL_KW),
             TRUE,
             FALSE
           )
@@ -1539,17 +1586,15 @@ schedule_sessions <- function(
       setpoint_power_timeslot <- sessions_timeslot_power
     }
 
-    # Flexibility requirement
-    flex_req <- round(
-      sessions_timeslot_power - setpoint_power_timeslot * (1 + power_th),
-      2
-    )
+    # Flexibility requirement, on exact arithmetic (see SCHEDULE_FLEX_TOL_KW)
+    flex_req <- sessions_timeslot_power -
+      setpoint_power_timeslot * (1 + power_th)
 
     # If demand should be reduced
-    if (flex_req > 0) {
+    if (flex_req > SCHEDULE_FLEX_TOL_KW) {
       if (include_log) {
         log_message <- c(
-          paste("\u2139 Flexibility requirement of", flex_req, "kW"),
+          paste("\u2139 Flexibility requirement of", round(flex_req, 2), "kW"),
           paste(
             "\u2139",
             nrow(sessions_timeslot),
@@ -1624,7 +1669,7 @@ schedule_sessions <- function(
           sessions_timeslot$Exploited[sessions_timeslot$Flexible] <- TRUE
 
           # Update flexibility requirement with power from all shiftable sessions
-          flex_req <- round(flex_req - shift_flex_available, 2)
+          flex_req <- flex_req - shift_flex_available
 
           if (include_log) {
             log_message <- paste0(
@@ -1676,8 +1721,8 @@ schedule_sessions <- function(
               reduction_factor
 
           # Update flexibility requirement
-          flex_provided <- round(max_power_reduction * reduction_factor, 2)
-          flex_req <- round(flex_req - flex_provided, 2)
+          flex_provided <- max_power_reduction * reduction_factor
+          flex_req <- flex_req - flex_provided
         } else {
           flex_provided <- 0
         }
@@ -1687,10 +1732,10 @@ schedule_sessions <- function(
           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
         if (include_log) {
-          if (flex_req > 0) {
+          if (flex_req > SCHEDULE_FLEX_TOL_KW) {
             log_message <- paste0(
               "\u2716 Not enough flexibility available (",
-              flex_provided,
+              round(flex_provided, 2),
               " kW)"
             )
             # message(log_message)
@@ -1845,7 +1890,7 @@ schedule_sessions <- function(
       Energy = .data$Power * .data$ChargingHours
     ) %>%
     summarise_by_segment() %>%
-    mutate_if(is.numeric, round, 2)
+    mutate_if(is.numeric, round, SCHEDULE_OUTPUT_DIGITS)
 
   sessions_sch_flex <- sessions_sch %>%
     select("Session", !any_of(names(sessions_segmented))) %>%
@@ -1858,9 +1903,34 @@ schedule_sessions <- function(
       "ConnectionHoursLeft"
     )
 
+  # The scheduled demand per time slot (and per `Profile` when the sessions
+  # carry one), summed from the exact per-slot powers the scheduler decided.
+  # Rebuilding it from the session rows through `evsim::get_demand()` rounds
+  # every session's slot power to 2 decimals first, and those roundings add up
+  # to a cent above a setpoint that was met exactly.
+  demand_scheduled <- sessions_expanded %>%
+    left_join(
+      sessions_sch %>% select(any_of(c("Session", "Profile"))) %>% distinct(),
+      by = "Session"
+    ) %>%
+    mutate(datetime = .data$Timeslot)
+  if (!("Profile" %in% names(demand_scheduled))) {
+    demand_scheduled$Profile <- "Demand"
+  }
+  demand_scheduled <- demand_scheduled %>%
+    group_by(.data$datetime, .data$Profile) %>%
+    summarise(Power = sum(.data$Power), .groups = "drop") %>%
+    tidyr::pivot_wider(
+      names_from = "Profile",
+      values_from = "Power",
+      values_fill = 0
+    ) %>%
+    arrange(.data$datetime)
+
   return(
     list(
       sessions = sessions_sch_flex,
+      demand = demand_scheduled,
       log = log
     )
   )

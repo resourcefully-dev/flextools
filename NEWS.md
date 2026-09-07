@@ -40,6 +40,20 @@
 * Fixed: with a single eligible session in a window, the responsive draw used
   `sample(idx, 1)`, which samples from `1:idx` rather than returning `idx`, so
   the wrong row could be marked responsive.
+* **A met capacity no longer comes back one cent over it.** Three roundings
+  to 2 decimals stacked up so that a setpoint of 3.00 kW met exactly was
+  reported as 3.01 (33 of 39 over-cap slots on the reference fleet): the
+  flexibility requirement was rounded before the decision to act, the window
+  demand was rebuilt from the session rows through `evsim::get_demand()`,
+  which rounds each session's slot power, and each profile column of the
+  returned demand was rounded separately while callers sum the columns.
+  Decisions are now taken on exact arithmetic against named tolerances
+  (`SCHEDULE_FLEX_TOL_KW = 0.001`, the unchanged 0.1 kW / 0.025 kWh
+  flexibility thresholds); `schedule_sessions()` returns the scheduled demand
+  per slot (`demand`, summed from the exact per-slot powers) and
+  `smart_charging_window()` uses it instead of rebuilding it; the session rows
+  and the demand profile carry four decimals. The demand of non-responsive
+  sessions still comes from `evsim::get_demand()`.
 * Fixed a latent energy loss for straddling sessions: the window they spilled
   into overwrote the profile's demand with the demand of its own sessions only,
   so the tail of a straddler vanished whenever another session of the same

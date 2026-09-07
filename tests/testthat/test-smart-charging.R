@@ -684,8 +684,8 @@ test_that("energy_min = 0 holds an unreachable capacity instead of relaxing it",
     message = "Relaxing grid capacity"
   )
 
-  expect_lte(max(rowSums(sc$setpoints[-1])), capacity_kw + 0.01)
-  expect_lte(max(rowSums(sc$demand[-1])), capacity_kw + 0.01)
+  expect_lte(max(rowSums(sc$setpoints[-1])), capacity_kw + 1e-3)
+  expect_lte(max(rowSums(sc$demand[-1])), capacity_kw + 1e-3)
 
   # 3 kW over the 12 h the fleet is connected is 36 of the 60 kWh a day.
   pct <- sum(sc$sessions$Energy) / sum(fleet$Energy) * 100
@@ -705,7 +705,7 @@ test_that("energy_min below what fits keeps the capacity and delivers at least t
     message = "Relaxing grid capacity"
   )
 
-  expect_lte(max(rowSums(sc$setpoints[-1])), capacity_kw + 0.01)
+  expect_lte(max(rowSums(sc$setpoints[-1])), capacity_kw + 1e-3)
   expect_gte(sum(sc$sessions$Energy) / sum(fleet$Energy), 0.5)
 })
 
@@ -810,8 +810,8 @@ test_that("a session straddling the window boundary is split and scheduled in bo
   # The cap holds through the boundary, 05:15-06:43 included, from the first
   # window on (the day-1 part before the first window is outside every window).
   in_windows <- sc$demand$datetime >= first_window_start
-  expect_lte(max(rowSums(sc$demand[in_windows, -1])), capacity_kw + 0.01)
-  expect_lte(max(rowSums(sc$setpoints[in_windows, -1])), capacity_kw + 0.01)
+  expect_lte(max(rowSums(sc$demand[in_windows, -1])), capacity_kw + 1e-3)
+  expect_lte(max(rowSums(sc$setpoints[in_windows, -1])), capacity_kw + 1e-3)
 
   # And the energy is delivered: 15 kWh in 8.5 hours under a 3 kW cap fits,
   # so the split turns an unmanaged 11 kW spike into a fully served session.

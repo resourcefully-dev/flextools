@@ -1,3 +1,50 @@
+# flextools 1.8.0
+
+* `smart_charging()` now **splits every session whose connection crosses an
+  optimization window boundary** into one part per window before scheduling,
+  with the energy shared by connection time. Previously such a session belonged
+  to the window it started in, was never marked responsive there because its
+  nominal charging ended past the window, and charged unmanaged at full power
+  — with its raw demand added back into the setpoint, so the setpoint itself
+  exceeded the grid capacity. Its flexibility, all of it on the far side of the
+  boundary, was never used. Now each part is scheduled in the window it is
+  connected in; the sessions schedule gains a `Part` column and a split session
+  returns rows for each part under the same `Session` id (delivered energy is
+  still `sum(Energy)` by `Session`). A part that could not fill one time slot
+  at nominal power is folded into its longest neighbour instead of being
+  emitted — `evsim::get_demand()` renders sub-slot charging as a whole slot at
+  nominal power, which would inflate the optimizer's view of it — so a session
+  arriving shortly before a boundary moves whole into the next window.
+  **This changes results** for any fleet with sessions spanning a window
+  boundary; fleets without such sessions are unaffected (the package's own
+  golden test was re-captured for the two scenarios where the California
+  fixture crosses the 06:00 boundary; the rest is byte-identical to 1.6.0).
+* The responsiveness test "charging ends inside the window" compared against
+  the window's last slot instead of its end, so a session whose charging ended
+  exactly on the next boundary was excluded. Fixed.
+* **The 95% arrival-time band is gone.** Sessions whose connection times fell
+  outside the profile's `mean +- 2 sd` band in a window were "not considered":
+  never scheduled, charged unmanaged at full power, and not counted in the
+  responsive share. The band existed to stop one late arrival from stretching
+  the setpoint span and smearing the profile's energy into slots where only
+  that car was plugged in; the setpoint LP now bounds every slot by the nominal
+  power of the sessions actually connected, which removes that failure mode at
+  the source. Every session that charges inside a window is now considered.
+  `set_responsive()` loses its `opt_objective` argument. **This changes
+  results** for fleets with unusual arrivals.
+* Responsiveness is now looked up per session by its own `Timecycle` and
+  `Profile`, instead of by the window's most common time cycle. A Friday
+  session carried over into Saturday's window keeps Friday's responsiveness;
+  before, it was looked up under Saturday and, when that profile was not
+  configured for Saturday, left unscheduled.
+* Fixed: with a single eligible session in a window, the responsive draw used
+  `sample(idx, 1)`, which samples from `1:idx` rather than returning `idx`, so
+  the wrong row could be marked responsive.
+* Fixed a latent energy loss for straddling sessions: the window they spilled
+  into overwrote the profile's demand with the demand of its own sessions only,
+  so the tail of a straddler vanished whenever another session of the same
+  profile was scheduled that day. No session spills any more.
+
 # flextools 1.7.1
 
 * Fixed: with `energy_min = 0`, two fallback paths of the 1.7.0 energy range

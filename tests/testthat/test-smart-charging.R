@@ -437,11 +437,18 @@ test_that("view_smart_charging_logs errors when there are no log messages", {
 # Energy ratios -----------------------------------------------------------
 
 test_that("results at the default energy ratios are unchanged by the energy range", {
-  # Baseline captured on 1.6.0 (commit 77312479) with exactly these calls,
-  # before `energy_min` entered the setpoint LP and `energy_max` existed. Every
-  # scenario runs at the default ratios (or, for `grid_curtail_min0`, with a
-  # range that a strictly convex objective without a binding capacity must
-  # ignore), so the range machinery must leave the setpoints byte-identical.
+  # Baseline captured with exactly these calls on 1.6.0 (commit 77312479),
+  # before `energy_min` entered the setpoint LP and `energy_max` existed
+  # (1.7.0 left every one of them byte-identical), and re-captured on 1.8.0:
+  # two sessions of this fixture cross the 06:00 boundary and are now split,
+  # and the 95% arrival-time band no longer leaves sessions unscheduled (34
+  # instead of 38 sessions outside every window's schedule for the grid
+  # scenarios, 20 instead of 27 for the capacity ones). Setpoints moved by up
+  # to 10 kW in a slot with the energy conserved; only `none_curtail_cap`,
+  # which never applied the band, is unchanged since 1.6.0. Every scenario
+  # runs at the default ratios (or, for `grid_curtail_min0`, with a range that
+  # a strictly convex objective without a binding capacity must ignore), so
+  # the range machinery must leave the setpoints byte-identical.
   #
   # The scheduler is compared with a tolerance: it rounds to 2 decimals at
   # several points and a rounding tie flips on floating-point dust, so the same
@@ -748,6 +755,267 @@ test_that("without optimization the capacity is only inflated as far as energy_m
 
   expect_lte(max(rowSums(sc_hard$setpoints[-1])), 3 + 0.01)
   expect_gt(max(rowSums(sc_full$setpoints[-1])), 3 + 0.01)
+})
+
+# Window boundaries -------------------------------------------------------
+
+# A session that straddles the 06:00 window boundary the way the one that
+# motivated the split did: arrives 05:15, stays until 14:34, needs 16.28 kWh
+# at 11 kW (so its unmanaged charge would end 06:43, past the window it starts
+# in). One per day; `days` selects which days, so a test can avoid the first
+# day, whose 05:15 part falls before the first window of the sequence.
+straddling_fleet <- function(days = 1:4, profile = "Worktime") {
+  do.call(rbind, lapply(days, function(day) {
+    tibble(
+      Session = paste0("X", day),
+      Timecycle = "Weekday",
+      Profile = profile,
+      ConnectionStartDateTime = lubridate::ymd_hms(
+        "2024-01-10 05:15:00", tz = "UTC"
+      ) + lubridate::days(day),
+      ConnectionHours = 9.32,
+      Power = 11,
+      Energy = 16.28
+    )
+  }))
+}
+
+first_window_start <- lubridate::ymd_hms("2024-01-10 06:00:00", tz = "UTC")
+
+test_that("a session straddling the window boundary is split and scheduled in both windows", {
+  fleet <- straddling_fleet()
+  capacity_kw <- 3
+
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(capacity_kw),
+    opt_objective = "capacity", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Worktime = 1)),
+    power_th = 0, charging_power_min = 0, energy_min = 0
+  ))
+
+  # The 45 minutes before the boundary would carry 1.3 kWh — less than one
+  # slot at 11 kW — so that sliver is folded into the part after the boundary:
+  # the session moves whole into the window where its flexibility is, and is
+  # scheduled there. No session is left with the NA responsiveness that used to
+  # mean "charged unmanaged at 11 kW".
+  starts <- sc$sessions %>%
+    group_by(Session) %>%
+    summarise(start = min(ConnectionStartDateTime), parts = n_distinct(Part), .groups = "drop")
+  expect_true(all(starts$parts == 1))
+  expect_true(all(format(starts$start, "%H:%M") == "06:00"))
+  expect_false(any(is.na(sc$sessions$Responsive)))
+  expect_true(all(sc$sessions$Responsive))
+
+  # The cap holds through the boundary, 05:15-06:43 included, from the first
+  # window on (the day-1 part before the first window is outside every window).
+  in_windows <- sc$demand$datetime >= first_window_start
+  expect_lte(max(rowSums(sc$demand[in_windows, -1])), capacity_kw + 0.01)
+  expect_lte(max(rowSums(sc$setpoints[in_windows, -1])), capacity_kw + 0.01)
+
+  # And the energy is delivered: 15 kWh in 8.5 hours under a 3 kW cap fits,
+  # so the split turns an unmanaged 11 kW spike into a fully served session.
+  charged <- summarise_energy_charged(sc, fleet)
+  expect_true(all(charged$PctEnergyCharged >= 95))
+})
+
+test_that("the split conserves the energy at the default ratios", {
+  fleet <- straddling_fleet()
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(50),
+    opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Worktime = 1)),
+    power_th = 0, charging_power_min = 0
+  ))
+  delivered <- sc$sessions %>%
+    group_by(Session) %>%
+    summarise(Energy = sum(Energy), .groups = "drop")
+  expect_equal(
+    delivered$Energy,
+    fleet$Energy[match(delivered$Session, fleet$Session)],
+    tolerance = 0.01
+  )
+  # The sliver before the boundary was folded forward, so the whole session
+  # sits in the window it is connected in.
+  x2 <- sc$sessions %>% filter(Session == "X2")
+  expect_equal(format(min(x2$ConnectionStartDateTime), "%H:%M"), "06:00")
+  expect_equal(sum(x2$Energy), 16.28, tolerance = 0.01)
+})
+
+test_that("parts share the energy by connection time when both can fill a slot", {
+  # 22:00 -> 10:00 (12 h) across the 06:00 boundary, 11 kW, 33 kWh: 8 h and
+  # 4 h of connection, so 22 and 11 kWh — both well above one slot (2.75 kWh).
+  fleet <- tibble(
+    Session = "HALF",
+    Timecycle = "Weekday",
+    Profile = "Home",
+    ConnectionStartDateTime = lubridate::ymd_hms("2024-01-11 22:00:00", tz = "UTC"),
+    ConnectionHours = 12,
+    Power = 11,
+    Energy = 33
+  )
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(50),
+    opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Home = 1)),
+    power_th = 0, charging_power_min = 0
+  ))
+  by_part <- sc$sessions %>%
+    group_by(Part) %>%
+    summarise(
+      start = min(ConnectionStartDateTime),
+      energy = sum(Energy),
+      .groups = "drop"
+    )
+  expect_equal(by_part$Part, 1:2)
+  expect_equal(format(by_part$start, "%H:%M"), c("22:00", "06:00"))
+  expect_equal(by_part$energy, c(22, 11), tolerance = 0.01)
+})
+
+test_that("a connection spanning three windows becomes three parts", {
+  fleet <- tibble(
+    Session = "LONG",
+    Timecycle = "Weekday",
+    Profile = "Home",
+    ConnectionStartDateTime = lubridate::ymd_hms("2024-01-11 20:00:00", tz = "UTC"),
+    ConnectionHours = 40, # 20:00 -> 12:00 two days later: crosses 06:00 twice
+    Power = 11,
+    Energy = 40
+  )
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(50),
+    opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Home = 1)),
+    power_th = 0, charging_power_min = 0
+  ))
+  expect_equal(sort(unique(sc$sessions$Part)), 1:3)
+  expect_equal(sum(sc$sessions$Energy), 40, tolerance = 0.02)
+})
+
+test_that("a session whose charging ends exactly on the boundary is responsive", {
+  # 22:00 -> 06:00, 87 kWh at 11 kW: charging ends 05:54, inside the window
+  # but after its last slot (05:45), which used to exclude it.
+  fleet <- tibble(
+    Session = "EDGE",
+    Timecycle = "Weekday",
+    Profile = "Home",
+    ConnectionStartDateTime = lubridate::ymd_hms("2024-01-11 22:00:00", tz = "UTC"),
+    ConnectionHours = 8,
+    Power = 11,
+    Energy = 87
+  )
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(50),
+    opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Home = 1)),
+    power_th = 0, charging_power_min = 0
+  ))
+  expect_equal(unique(sc$sessions$Part), 1L)
+  expect_true(all(sc$sessions$Responsive))
+})
+
+test_that("a straddler's tail is not lost when its profile has other sessions in the next window", {
+  # Before the split the window a straddler spilled into overwrote the
+  # profile's demand with its own sessions' demand, dropping the tail.
+  fleet <- bind_rows(
+    straddling_fleet(days = 1:4, profile = "Home"),
+    synthetic_fleet(1) # Home sessions 18:00 -> 06:00 in every window
+  )
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(50),
+    opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Home = 1)),
+    power_th = 0, charging_power_min = 0
+  ))
+  expect_equal(fleet_energy_kwh(sc$demand), sum(fleet$Energy), tolerance = 0.005)
+})
+
+test_that("an unusual arrival time no longer excludes a session from scheduling", {
+  # Eight tightly clustered evening arrivals used to make both a 22:00 arrival
+  # and a 06:00 carried-over part outliers of the profile's 95% band, left to
+  # charge unmanaged. The band is gone: both parts are scheduled.
+  evening <- do.call(rbind, lapply(0:4, function(day) {
+    tibble(
+      Session = paste0("E", day, "_", 1:8),
+      Timecycle = "Weekday",
+      Profile = "Home",
+      ConnectionStartDateTime = lubridate::ymd_hms(
+        "2024-01-10 18:00:00", tz = "UTC"
+      ) +
+        lubridate::days(day) +
+        lubridate::minutes(15 * (0:7)),
+      ConnectionHours = 4,
+      Power = 11,
+      Energy = 8
+    )
+  }))
+  # 22:00 -> 10:00, 33 kWh: the 06:00 -> 10:00 part carries 11 kWh.
+  straddler <- tibble(
+    Session = "LATE",
+    Timecycle = "Weekday",
+    Profile = "Home",
+    ConnectionStartDateTime = lubridate::ymd_hms("2024-01-11 22:00:00", tz = "UTC"),
+    ConnectionHours = 12,
+    Power = 11,
+    Energy = 33
+  )
+  fleet <- bind_rows(evening, straddler)
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(50),
+    opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Home = 1)),
+    power_th = 0, charging_power_min = 0
+  ))
+  late <- sc$sessions %>% filter(Session == "LATE")
+  expect_equal(sort(unique(late$Part)), 1:2)
+  expect_true(all(late$Responsive))
+})
+
+test_that("a carried-over part keeps its own time cycle's responsiveness", {
+  # A Friday Commuters session whose connection reaches into Saturday's
+  # window, where Commuters is not a configured profile. Looked up under the
+  # window's cycle it would find nothing and stay unscheduled; looked up under
+  # its own cycle it is responsive.
+  friday <- tibble(
+    Session = "FRI",
+    Timecycle = "Friday",
+    Profile = "Commuters",
+    ConnectionStartDateTime = lubridate::ymd_hms("2024-01-12 22:00:00", tz = "UTC"),
+    ConnectionHours = 12,
+    Power = 11,
+    Energy = 33
+  )
+  saturday <- tibble(
+    Session = paste0("SAT", 1:3),
+    Timecycle = "Saturday",
+    Profile = "Home",
+    ConnectionStartDateTime = lubridate::ymd_hms("2024-01-13 10:00:00", tz = "UTC") +
+      lubridate::hours(0:2),
+    ConnectionHours = 6,
+    Power = 11,
+    Energy = 20
+  )
+  fleet <- bind_rows(friday, saturday)
+  sc <- suppressMessages(smart_charging(
+    fleet, fleet_opt_data(50),
+    opt_objective = "grid", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(
+      Friday = list(Commuters = 1),
+      Saturday = list(Home = 1)
+    ),
+    power_th = 0, charging_power_min = 0
+  ))
+  fri <- sc$sessions %>% filter(Session == "FRI")
+  expect_equal(sort(unique(fri$Part)), 1:2)
+  expect_true(all(fri$Responsive))
+  expect_true(all(sc$sessions$Responsive[sc$sessions$Session != "FRI"]))
 })
 
 test_that("the energy ratios are validated", {

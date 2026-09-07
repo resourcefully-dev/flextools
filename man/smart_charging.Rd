@@ -111,6 +111,12 @@ a list with three elements:
 optimal setpoints (tibble), sessions schedule (tibble) and log messages
 (list of character vectors, one per window). The date-time values in the log
 list are in the time zone of the \code{opt_data}.
+
+A session whose connection crosses an optimization window boundary is split
+into one part per window before scheduling (energy shared by connection
+time), so the sessions schedule carries a \code{Part} column and such a session
+returns several rows per part; its delivered energy is the sum of its rows'
+\code{Energy} grouped by \code{Session}.
 }
 \description{
 This function provides a framework to simulate different smart charging methods

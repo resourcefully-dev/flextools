@@ -217,7 +217,7 @@ print(sc_results)
 
 This classification is done by the smart charging algorithm according to the optimization window hours, the `method` and the sessions' features:
 
-* **Considered**: charging sessions that charge within the optimization windows and are not considered outliers (their connection times fit the 95% percentile).
+* **Considered**: charging sessions that charge within the optimization windows. A session whose connection crosses a window boundary is split into one part per window (energy shared by connection time), so every part is considered in its own window.
 * **Responsive**: charging sessions that accept to participate in the smart charging program. The ratio of responsive sessions from every EV user profile is configured with the `responsive` parameter.
 * **Flexible**: charging sessions that are flexible in a specific time slot. This depends on the session's features and the scheduling `method` (as described in the [Scheduling algorithm](https://resourcefully-dev.github.io/flextools/articles/smart-charging.html#scheduling-algorithm) section).
 * **Exploited**: charging sessions that have been modified in a a specific time slot. 

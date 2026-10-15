@@ -1,3 +1,24 @@
+# flextools 1.9.0
+
+* New `add_tank_optimization()`: a heat pump charging one thermal tank,
+  optimised on the tank's heat. It mirrors `add_battery_optimization()` (same
+  `opt_data` conventions, windows from `get_flex_windows()`, `"grid"` and
+  numeric weights on OSQP, `"cost"` on HiGHS) with the tank in place of the
+  battery: the compressor's electric power `P` heats the tank at the COP, the
+  `heat_demand` column discharges it, and the level follows
+  `S[t] = S[t-1] * (1 - loss/100)^dt + (cop * P - heat_demand) * dt` inside
+  `[SOCmin, SOCmax]` of `Tcap`, with `0 <= P <= Pc`, `P = 0` where `cop = 0`,
+  and every window ending at least as full as it started. The level carries
+  across windows. `opt_data` gains `heat_demand`, `cop` and `flexible` (the
+  static schedule, run outside every window and in a window with no feasible
+  solution). It returns the compressor's power, with the attributes
+  `infeasible_windows` (the first `datetime` of each window that fell back)
+  and `tank_clamp_kwh` (the heat the clamp into the band at each window start
+  took out of the tank, signed, per row). `SOCini = NULL` means `SOCmax`;
+  `"capacity"` and inputs out of range stop with an error naming the argument.
+* New `get_tank_level()`, the tank's counterpart of `get_storage_level()`: the
+  level in kWh at the start of each slot, applying the clamps it is given.
+
 # flextools 1.8.0
 
 * `smart_charging()` now **splits every session whose connection crosses an

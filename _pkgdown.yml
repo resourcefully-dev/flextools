@@ -14,6 +14,7 @@ reference:
   - contents:
     - optimize_demand
     - add_battery_optimization
+    - add_tank_optimization
   - title: Smart charging
   - contents:
     - smart_charging
@@ -30,6 +31,7 @@ reference:
   - contents:
     - get_storage_losses
     - get_conversion_losses
+    - get_tank_level
   - title: Evaluation of results
   - contents:
     - get_energy_kpis

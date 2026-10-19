@@ -10,8 +10,17 @@
 #'
 #' @inheritParams smart_charging
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
-#' In V2G this is a scheduling-stage guard only; the V2G setpoint path has no
-#' energy range and no `energy_max` yet.
+#' Every session charges at least this share of the energy it requires, net of
+#' discharge. The scheduler never discharges or curtails a session below it,
+#' and the setpoint optimization may drop energy down to it - and no further -
+#' when the grid capacity cannot fit `energy_max`. When even this minimum does
+#' not fit, the grid capacity is relaxed only as far as the minimum-energy
+#' profile needs.
+#' @param energy_max numeric, maximum allowed ratio (between 0 and 1) of required energy.
+#' Every session charges at most this share of the energy it requires, net of
+#' discharge (energy discharged, grossed up by `discharge_eff`, has to be
+#' charged back on top), and the setpoint optimization targets this share for
+#' the responsive sessions. Must be higher than 0 and at least `energy_min`.
 #' @param discharge_eff numeric, discharge efficiency (0, 1], applied to energy
 #'   losses when discharging. For example, 0.9 means that for every 1 kWh
 #'   discharged, 1/0.9 kWh must be recharged.
@@ -31,6 +40,7 @@ smart_v2g <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
@@ -62,6 +72,8 @@ smart_v2g <- function(
       "Error: `sessions` does not contain all required variables (see Arguments description)"
     )
   }
+
+  check_energy_ratios(energy_min, energy_max)
 
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
@@ -179,7 +191,9 @@ smart_v2g <- function(
   setpoints_lst <- get_setpoints_v2g_parallel(
     windows_data,
     opt_objective,
-    lambda
+    lambda,
+    energy_min,
+    energy_max
   )
 
   if (show_progress) {
@@ -192,6 +206,7 @@ smart_v2g <- function(
     power_th,
     charging_power_min,
     energy_min,
+    energy_max,
     discharge_eff,
     include_log
   )
@@ -268,6 +283,10 @@ smart_v2g <- function(
 
 #' Set setpoints for smart V2G
 #'
+#' @param energy_min,energy_max numeric, minimum and maximum share (between 0
+#'   and 1) of each profile's energy the setpoint must carry, net of discharge.
+#'   See [smart_v2g()].
+#'
 #' @keywords internal
 #'
 get_setpoints_v2g <- function(
@@ -275,8 +294,13 @@ get_setpoints_v2g <- function(
   opt_data,
   profiles_demand,
   opt_objective,
-  lambda
+  lambda,
+  energy_min = 1,
+  energy_max = 1
 ) {
+  # Both ratios are shares of the responsive sessions' own demand `LF`; the
+  # non-responsive demand `L_fixed_prof` is added back untouched below.
+  energy_ratio <- c(energy_min, energy_max)
   if (nrow(sessions_window) == 0) {
     return(sessions_window)
   }
@@ -353,7 +377,8 @@ get_setpoints_v2g <- function(
             LFmax = Inf,
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else if (opt_objective == "cost") {
           message(
@@ -368,7 +393,8 @@ get_setpoints_v2g <- function(
             LFmax = Inf,
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else if (opt_objective == "capacity") {
           O <- capacity_v2g_window(
@@ -380,7 +406,8 @@ get_setpoints_v2g <- function(
             LFmax = Inf,
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else if (is.numeric(opt_objective)) {
           message(
@@ -395,7 +422,8 @@ get_setpoints_v2g <- function(
             LFmax = Inf,
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
-            lambda = lambda
+            lambda = lambda,
+            energy_ratio = energy_ratio
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -426,7 +454,13 @@ get_setpoints_v2g <- function(
 }
 
 
-get_setpoints_v2g_parallel <- function(windows_data, opt_objective, lambda) {
+get_setpoints_v2g_parallel <- function(
+  windows_data,
+  opt_objective,
+  lambda,
+  energy_min = 1,
+  energy_max = 1
+) {
   reset_message_once()
 
   purrr::map(
@@ -436,7 +470,9 @@ get_setpoints_v2g_parallel <- function(windows_data, opt_objective, lambda) {
       opt_data = .x$opt_data,
       profiles_demand = .x$profiles_demand,
       opt_objective = opt_objective,
-      lambda = lambda
+      lambda = lambda,
+      energy_min = energy_min,
+      energy_max = energy_max
     )
   )
 }
@@ -449,6 +485,7 @@ smart_v2g_window <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   discharge_eff = 1,
   include_log = FALSE
 ) {
@@ -511,6 +548,7 @@ smart_v2g_window <- function(
       setpoint = setpoint_flex,
       charging_power_min = charging_power_min,
       energy_min = energy_min,
+      energy_max = energy_max,
       discharge_eff = discharge_eff,
       include_log = include_log,
       show_progress = FALSE,
@@ -559,6 +597,7 @@ smart_v2g_window_parallel <- function(
   power_th,
   charging_power_min,
   energy_min,
+  energy_max,
   discharge_eff,
   include_log
 ) {
@@ -577,6 +616,7 @@ smart_v2g_window_parallel <- function(
           power_th = power_th,
           charging_power_min = charging_power_min,
           energy_min = energy_min,
+          energy_max = energy_max,
           discharge_eff = discharge_eff,
           include_log = include_log
         )
@@ -595,6 +635,7 @@ smart_v2g_window_parallel <- function(
             power_th = power_th,
             charging_power_min = charging_power_min,
             energy_min = energy_min,
+            energy_max = energy_max,
             discharge_eff = discharge_eff,
             include_log = include_log
           )
@@ -603,6 +644,7 @@ smart_v2g_window_parallel <- function(
         power_th = power_th,
         charging_power_min = charging_power_min,
         energy_min = energy_min,
+        energy_max = energy_max,
         discharge_eff = discharge_eff,
         include_log = include_log
       )
@@ -618,6 +660,10 @@ smart_v2g_window_parallel <- function(
 #' `demand_grid_v2g_window()` so that discharge is considered when
 #' resolving capacity violations.
 #'
+#' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
+#'   load's energy the optimized load must carry. See
+#'   `demand_capacity_window()`.
+#'
 #' @keywords internal
 #'
 capacity_v2g_window <- function(
@@ -629,7 +675,8 @@ capacity_v2g_window <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -642,32 +689,67 @@ capacity_v2g_window <- function(
   LFmax <- as.numeric(rep_len(LFmax, time_slots))
   import_capacity <- as.numeric(rep_len(import_capacity, time_slots))
   export_capacity <- as.numeric(rep_len(export_capacity, time_slots))
+  energy_ratio <- demand_check_energy_ratio(
+    energy_ratio,
+    direction,
+    time_horizon,
+    time_slots
+  )
+  tol <- optimization_solution_tolerance()
+
+  # As in demand_capacity_window(): an energy target below the requirement is a
+  # uniform scaling of the whole profile before the slice is chosen, and the
+  # floor stays relative to the ORIGINAL profile.
+  LF_target <- if (energy_ratio[2] < 1) round(LF * energy_ratio[2], 2) else LF
+  energy_lb <- if (energy_ratio[1] < 1) {
+    round(energy_ratio[1] * sum(LF), 2)
+  } else {
+    NULL
+  }
 
   slice_solution <- select_capacity_slice(
     G = G,
-    LF = LF,
+    LF = LF_target,
     LS = LS,
     direction = direction,
     time_horizon = time_horizon,
     LFmax = LFmax,
     import_capacity = import_capacity,
-    export_capacity = export_capacity
+    export_capacity = export_capacity,
+    energy_lb = energy_lb
   )
 
   if (is.null(slice_solution)) {
-    # The capacity slice LP is infeasible under the true caps. Rather than
-    # dropping the grid constraints entirely, relax each cap only as far as the
-    # original, unshifted profile already needs (import LS + LF - G, export
-    # G - LS - LF). Slots within their caps keep the true capacity, so the
-    # result can never be worse than the input profile. demand_grid_v2g_window()
-    # (via solve_optimization_window_v2g) is feasible by construction with these
-    # caps because O = LF is a feasible point.
-    tol <- optimization_solution_tolerance()
-    import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
-    export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
-    message_once(
-      "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
-    )
+    # The capacity slice LP is infeasible under the true caps, even after
+    # dropping energy down to the floor. Rather than dropping the grid
+    # constraints entirely, relax each cap only as far as a reference profile
+    # already needs (import LS + LF_ref - G, export G - LS - LF_ref). Slots
+    # within their caps keep the true capacity, so the result can never be
+    # worse than that profile. The reference is the original, unshifted
+    # profile - or, when the energy range admits less, the original profile
+    # scaled down to the minimum energy (see demand_capacity_window()).
+    # demand_grid_v2g_window() (via solve_optimization_window_v2g) is feasible
+    # by construction with these caps because O = LF_ref is a feasible point.
+    LF_ref <- LF
+    fallback_ratio <- c(1, 1)
+    if (energy_ratio[1] < 1 && sum(LF) > 0) {
+      LF_min <- round(LF * energy_ratio[1], 2)
+      if (sum(LF_min) > 0) {
+        LF_ref <- LF_min
+        fallback_ratio <- rep(min(sum(LF_min) / sum(LF), 1), 2)
+      }
+    }
+    import_cap_relaxed <- pmax(import_capacity, LS + LF_ref - G) + tol
+    export_cap_relaxed <- pmax(export_capacity, G - LS - LF_ref) + tol
+    if (identical(LF_ref, LF)) {
+      message_once(
+        "\u26a0\ufe0f Optimization warning: optimization not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
+      )
+    } else {
+      message_once(
+        "\u26a0\ufe0f Optimization warning: even the minimum energy does not fit under the grid capacity in some windows. Relaxing grid capacity to the minimum-energy profile in the affected windows."
+      )
+    }
     return(
       demand_grid_v2g_window(
         G = G,
@@ -678,17 +760,32 @@ capacity_v2g_window <- function(
         LFmax = LFmax,
         import_capacity = import_cap_relaxed,
         export_capacity = export_cap_relaxed,
-        lambda = lambda
+        lambda = lambda,
+        energy_ratio = fallback_ratio
       )
     )
   }
 
   moved_slice <- slice_solution$slice
   if (all(moved_slice == 0)) {
-    return(LF)
+    return(LF_target)
   }
 
-  fixed_load <- round(LF - moved_slice, 2)
+  # The slice LP decided how much of the removed energy is re-added; the grid
+  # LP that places it carries exactly that energy (see
+  # demand_capacity_window()).
+  moved_energy <- sum(moved_slice)
+  added_energy <- sum(slice_solution$added)
+  fixed_load <- round(LF_target - moved_slice, 2)
+  if (added_energy <= tol) {
+    return(fixed_load)
+  }
+  slice_ratio <- if (added_energy < moved_energy - tol) {
+    rep(added_energy / moved_energy, 2)
+  } else {
+    c(1, 1)
+  }
+
   optimized_slice <- demand_grid_v2g_window(
     G = G,
     LF = moved_slice,
@@ -698,7 +795,8 @@ capacity_v2g_window <- function(
     LFmax = round(pmax(LFmax - fixed_load, 0), 2),
     import_capacity = import_capacity,
     export_capacity = export_capacity,
-    lambda = lambda
+    lambda = lambda,
+    energy_ratio = slice_ratio
   )
 
   round(fixed_load + as.numeric(optimized_slice), 2)
@@ -706,6 +804,11 @@ capacity_v2g_window <- function(
 
 
 #' Minimisation of net power with bidirectional flexibility (single window)
+#'
+#' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
+#'   load's energy the optimized load must carry (net of discharge). `c(1, 1)`
+#'   (default) preserves the energy exactly; a range lets the optimizer drop
+#'   energy - down to `min` - when the grid capacity cannot fit `max`.
 #'
 #' @keywords internal
 #'
@@ -718,7 +821,8 @@ demand_grid_v2g_window <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -736,7 +840,8 @@ demand_grid_v2g_window <- function(
     import_capacity,
     export_capacity,
     P,
-    q
+    q,
+    energy_ratio
   )
 }
 
@@ -751,7 +856,8 @@ solve_optimization_window_v2g <- function(
   import_capacity,
   export_capacity,
   P,
-  q
+  q,
+  energy_ratio = c(1, 1)
 ) {
   G <- round(G, 2)
   LF <- round(LF, 2)
@@ -762,7 +868,52 @@ solve_optimization_window_v2g <- function(
     time_horizon <- time_slots
   }
 
-  solve_with_caps <- function(import_cap, export_cap, clamp_to_lf = FALSE) {
+  # Energy the optimized load must carry: by default exactly the profile's own
+  # (`energy_ratio = c(1, 1)`), otherwise the range `[min, max] * sum(LF)`.
+  energy_ratio <- demand_check_energy_ratio(
+    energy_ratio,
+    direction,
+    time_horizon,
+    time_slots
+  )
+  LF_energy <- sum(LF)
+  energy_share <- function(ratio) {
+    if (ratio < 1) round(ratio * LF_energy, 2) else LF_energy
+  }
+  energy_lb <- energy_share(energy_ratio[1])
+  energy_ub <- energy_share(energy_ratio[2])
+  if (energy_lb < energy_ub) {
+    # The objective improves when load is removed, so a range would be read as
+    # "deliver the minimum". Reward each unit of optimized load kept by more
+    # than the objective can gain from dropping it (see demand_solve_window()):
+    # the solver keeps as much energy as the caps admit and shapes it after.
+    base_bounds <- get_bounds_v2g(
+      time_slots,
+      G,
+      LF,
+      LS,
+      direction,
+      time_horizon,
+      LFmax,
+      import_capacity,
+      export_capacity
+    )
+    reward <- demand_energy_reward(
+      P,
+      q,
+      envelope = max(abs(base_bounds$ub_O[is.finite(base_bounds$ub_O)]), 0) +
+        max(abs(LS - G))
+    )
+    q <- q - reward
+  }
+
+  solve_with_caps <- function(
+    import_cap,
+    export_cap,
+    clamp_to_lf = FALSE,
+    energy_floor = energy_lb,
+    energy_ceiling = energy_ub
+  ) {
     bounds <- get_bounds_v2g(
       time_slots,
       G,
@@ -790,8 +941,8 @@ solve_optimization_window_v2g <- function(
       bounds$Amat_energy
     )
     A <- Matrix::Matrix(do.call(rbind, constraint_mats), sparse = TRUE)
-    l_vec <- c(bounds$lb_O, bounds$lb_cumsum, bounds$lb_energy)
-    u_vec <- c(bounds$ub_O, bounds$ub_cumsum, bounds$ub_energy)
+    l_vec <- c(bounds$lb_O, bounds$lb_cumsum, energy_floor)
+    u_vec <- c(bounds$ub_O, bounds$ub_cumsum, energy_ceiling)
 
     solve_osqp(
       P = P,
@@ -808,27 +959,52 @@ solve_optimization_window_v2g <- function(
     return(round(O$x, 2))
   }
 
-  # Fallback solve: the original grid limits make the problem infeasible.
+  # Fallback solves: the original grid limits make the problem infeasible.
   # Instead of removing the grid constraints entirely, raise the per-slot caps
-  # only as far as the ORIGINAL, unshifted profile already needs (import
-  # LS + LF - G, export G - LS - LF). Slots within their caps keep the true
-  # capacity, so the optimiser can never create a violation worse than the input
-  # profile had. This retry is feasible BY CONSTRUCTION: O = LF satisfies energy
-  # equality (sum(O) = sum(LF)) and cumsum bounds (derived from LF) trivially,
-  # the relaxed caps admit its net flows, and clamp_to_lf lifts ub_O to LF when
-  # LFmax would otherwise pull it below. A small tolerance absorbs the 2-decimal
-  # rounding of the bounds.
+  # only as far as a reference profile already needs (import LS + LF_ref - G,
+  # export G - LS - LF_ref). Slots within their caps keep the true capacity, so
+  # the optimiser can never create a violation worse than that profile had.
+  # The retry with the original profile is feasible BY CONSTRUCTION: O = LF
+  # satisfies energy equality (sum(O) = sum(LF)) and cumsum bounds (derived
+  # from LF) trivially, the relaxed caps admit its net flows, and clamp_to_lf
+  # lifts ub_O to LF when LFmax would otherwise pull it below. The
+  # minimum-energy retry tried first is the same construction on the scaled
+  # profile (see demand_solve_window()). A small tolerance absorbs the
+  # 2-decimal rounding of the bounds.
   tol <- optimization_solution_tolerance()
-  import_cap_relaxed <- pmax(import_capacity, LS + LF - G) + tol
-  export_cap_relaxed <- pmax(export_capacity, G - LS - LF) + tol
+  relax_to <- function(LF_ref, energy) {
+    solve_with_caps(
+      pmax(import_capacity, LS + LF_ref - G) + tol,
+      pmax(export_capacity, G - LS - LF_ref) + tol,
+      clamp_to_lf = TRUE,
+      energy_floor = energy,
+      energy_ceiling = energy
+    )
+  }
+
+  # Energy first: when the range admits less than the full profile, relax the
+  # caps only as far as the minimum-energy profile needs and deliver exactly
+  # that minimum. A minimum of 0 is skipped (no profile to relax towards).
+  LF_min <- if (energy_lb < round(LF_energy, 2) && LF_energy > 0) {
+    round(LF * energy_lb / LF_energy, 2)
+  } else {
+    LF
+  }
+  if (!identical(LF_min, LF) && sum(LF_min) > 0) {
+    message_once(
+      "\u26A0\uFE0F V2G optimisation warning: even the minimum energy does not fit under the grid capacity in some windows. Relaxing grid capacity to the minimum-energy profile in the affected windows."
+    )
+    O <- relax_to(LF_min, sum(LF_min))
+    if (demand_highs_is_optimal(O$result)) {
+      return(round(O$x, 2))
+    }
+  }
+
+  # Capacity second: the original, unshifted profile.
   message_once(
     "\u26A0\uFE0F V2G optimisation warning: optimisation not feasible in some windows. Relaxing grid capacity to the original profile in the affected windows."
   )
-  O <- solve_with_caps(
-    import_cap_relaxed,
-    export_cap_relaxed,
-    clamp_to_lf = TRUE
-  )
+  O <- relax_to(LF, LF_energy)
   if (demand_highs_is_optimal(O$result)) {
     return(round(O$x, 2))
   }
@@ -933,6 +1109,7 @@ schedule_sessions_v2g <- function(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE
@@ -981,10 +1158,20 @@ schedule_sessions_v2g <- function(
   ) {
     stop("`discharge_eff` should be a numeric value in (0, 1]")
   }
+  check_energy_ratios(energy_min, energy_max)
 
+  # `energy_max` caps every session at a share of the energy it asked for, as
+  # in schedule_sessions(). The scaled `Energy` is the net target the session
+  # charges towards (`EnergyRequired`, set by `expand_sessions()`), so it stops
+  # charging once it has that share net of discharge (`EnergyToCharge` grows
+  # by the discharged energy grossed up by `discharge_eff`). `energy_min`
+  # keeps meaning "share of the ORIGINAL requirement", hence the floor below is
+  # expressed relative to the target.
+  energy_min_target <- energy_min / energy_max
   sessions_sch <- sessions %>%
     dplyr::filter(.data$ConnectionStartDateTime %in% setpoint$datetime) %>%
     dplyr::mutate(
+      Energy = .data$Energy * energy_max,
       ChargingHours = .data$Energy / .data$Power
     )
 
@@ -1006,7 +1193,8 @@ schedule_sessions_v2g <- function(
       EnergyToCharge = .data$EnergyRequired,
       Flexible = NA,
       Exploited = NA,
-      BatteryCapacity = .data$EnergyRequired * 2, # 50% initial SOC
+      # 50% initial SOC of the ORIGINAL requirement, whatever `energy_max`
+      BatteryCapacity = .data$EnergyRequired / energy_max * 2,
       EnergyInBattery = .data$BatteryCapacity * SOCini # 50% initial SOC
     ) %>%
     left_join(
@@ -1074,7 +1262,7 @@ schedule_sessions_v2g <- function(
         ),
         EnergyCharged = .data$EnergyRequired - .data$EnergyToCharge,
         MinEnergyToCharge = pmax(
-          .data$EnergyRequired * energy_min - .data$EnergyCharged,
+          .data$EnergyRequired * energy_min_target - .data$EnergyCharged,
           0
         ),
         ChargingPowerMin = pmin(

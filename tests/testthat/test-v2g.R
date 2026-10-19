@@ -367,3 +367,170 @@ test_that("combined objective currently reuses grid objective in v2g", {
         tolerance = 1e-6
     )
 })
+
+test_that("energy_max caps the energy charged in v2g, fleet and per session", {
+    required <- sum(sessions$Energy)
+
+    for (objective in c("grid", "capacity")) {
+        v2g_results <- smart_v2g(
+            sessions = sessions,
+            opt_data,
+            opt_objective = objective,
+            window_days = 1,
+            window_start_hour = 0,
+            energy_min = 0.8,
+            energy_max = 0.8
+        )
+
+        # The setpoint targets 80% of the responsive sessions' energy
+        expect_equal(
+            sum(v2g_results$setpoints$Worktime) * 15 / 60,
+            0.8 * required,
+            tolerance = 0.01
+        )
+
+        # The fleet charges 80% of its energy, net of discharge
+        expect_equal(
+            sum(v2g_results$sessions$Energy),
+            0.8 * required,
+            tolerance = 0.01
+        )
+        expect_equal(
+            sum(v2g_results$demand$Worktime) * 15 / 60,
+            0.8 * required,
+            tolerance = 0.01
+        )
+
+        # And so does every session
+        energy <- summarise_energy_charged(v2g_results, sessions)
+        expect_false(any(is.na(energy$EnergyCharged)))
+        pct <- energy$EnergyCharged / energy$EnergyRequired * 100
+        expect_true(all(pct > 79 & pct < 81))
+    }
+})
+
+test_that("energy_max stops a session at its share even after discharging", {
+    v2g_results <- smart_v2g(
+        sessions = sessions,
+        opt_data,
+        opt_objective = "grid",
+        window_days = 1,
+        window_start_hour = 0,
+        energy_min = 0.8,
+        energy_max = 0.8,
+        discharge_eff = 0.9
+    )
+    # Discharging happened, so the losses were charged back on top of the 80%
+    neg_idx <- which(opt_data$import_capacity < 0)
+    expect_true(any(v2g_results$demand$Worktime[neg_idx] < 0))
+
+    energy <- summarise_energy_charged(v2g_results, sessions)
+    pct <- energy$EnergyCharged / energy$EnergyRequired * 100
+    expect_true(all(pct > 79))
+    expect_true(all(pct < 0.8 / 0.9 * 100 + 1))
+})
+
+test_that("energy_max = 1 keeps the v2g results unchanged", {
+    v2g_default <- smart_v2g(
+        sessions = sessions,
+        opt_data,
+        opt_objective = "grid",
+        window_days = 1,
+        window_start_hour = 0
+    )
+    v2g_max_1 <- smart_v2g(
+        sessions = sessions,
+        opt_data,
+        opt_objective = "grid",
+        window_days = 1,
+        window_start_hour = 0,
+        energy_max = 1
+    )
+    expect_equal(v2g_max_1, v2g_default)
+
+    # Totals as produced by flextools 1.9.0, before `energy_max` existed
+    expect_equal(sum(v2g_max_1$demand$Worktime), 1020.97, tolerance = 1e-6)
+    expect_equal(sum(abs(v2g_max_1$demand$Worktime)), 1633.93, tolerance = 1e-6)
+    expect_equal(sum(v2g_max_1$setpoints$Worktime), 1021.06, tolerance = 1e-6)
+
+    v2g_capacity <- smart_v2g(
+        sessions = sessions,
+        opt_data %>% mutate(import_capacity = round(sessions_demand$Worktime * 0.5, 2)),
+        opt_objective = "capacity",
+        window_days = 1,
+        window_start_hour = 0,
+        energy_max = 1
+    )
+    expect_equal(sum(v2g_capacity$demand$Worktime), 1020.86, tolerance = 1e-6)
+    expect_equal(sum(v2g_capacity$setpoints$Worktime), 1020.88, tolerance = 1e-6)
+})
+
+test_that("the v2g setpoint drops energy down to energy_min before relaxing the grid capacity", {
+    # 10 kWh in the first slot, a 2 kW import cap and three slots: at most 6 kWh
+    # fit under the cap.
+    LF <- c(10, 0, 0)
+    args <- list(
+        G = rep(0, 3), LF = LF, LS = rep(0, 3), direction = "forward",
+        time_horizon = NULL, LFmax = Inf,
+        import_capacity = rep(2, 3), export_capacity = rep(0, 3)
+    )
+
+    # A range down to 50% fits 6 kWh under the cap instead of relaxing it
+    O <- do.call(
+        flextools:::demand_grid_v2g_window,
+        c(args, list(energy_ratio = c(0.5, 1)))
+    )
+    expect_equal(sum(O), 6, tolerance = 1e-3)
+    expect_true(all(O <= 2 + 0.02))
+
+    # The capacity objective takes the same route
+    O <- do.call(
+        flextools:::capacity_v2g_window,
+        c(args, list(energy_ratio = c(0.5, 1)))
+    )
+    expect_equal(sum(O), 6, tolerance = 1e-3)
+    expect_true(all(O <= 2 + 0.02))
+
+    # When even the minimum does not fit, the cap is relaxed only as far as the
+    # minimum-energy profile needs, and exactly the minimum is delivered
+    O <- suppressMessages(do.call(
+        flextools:::demand_grid_v2g_window,
+        c(args, list(energy_ratio = c(0.8, 1)))
+    ))
+    expect_equal(sum(O), 8, tolerance = 1e-3)
+    expect_true(all(O <= 8 + 0.02))
+
+    # A range that fits keeps the maximum
+    O <- do.call(
+        flextools:::demand_grid_v2g_window,
+        c(args, list(energy_ratio = c(0.2, 0.5)))
+    )
+    # Each slot is rounded to 2 decimals
+    expect_equal(sum(O), 5, tolerance = 0.01)
+})
+
+test_that("smart_v2g validates energy_min and energy_max", {
+    run_v2g <- function(...) {
+        smart_v2g(
+            sessions = sessions,
+            opt_data,
+            opt_objective = "grid",
+            window_days = 1,
+            window_start_hour = 0,
+            ...
+        )
+    }
+    expect_error(run_v2g(energy_min = 0, energy_max = 0), "energy_max")
+    expect_error(run_v2g(energy_min = 0, energy_max = 1.2), "energy_max")
+    expect_error(run_v2g(energy_min = 0, energy_max = -0.1), "energy_max")
+    expect_error(run_v2g(energy_min = 0, energy_max = "0.8"), "energy_max")
+    expect_error(run_v2g(energy_min = 0, energy_max = c(0.5, 0.8)), "energy_max")
+    expect_error(run_v2g(energy_min = 0, energy_max = NA_real_), "energy_max")
+    expect_error(run_v2g(energy_min = 1.5), "energy_min")
+    expect_error(
+        run_v2g(energy_min = 0.9, energy_max = 0.8),
+        "cannot be higher than `energy_max`"
+    )
+    # The default `energy_min = 1` is above any `energy_max` below 1
+    expect_error(run_v2g(energy_max = 0.8), "cannot be higher than `energy_max`")
+})

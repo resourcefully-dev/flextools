@@ -1,3 +1,18 @@
+# flextools 1.10.0
+
+* `smart_v2g()` gains `energy_max` (default `1`, right after `energy_min`), the
+  same cap `smart_charging(energy_max = )` already has: every session charges
+  at most this share of the energy it requires, net of discharge. Energy
+  discharged still has to be charged back grossed up by `discharge_eff`, so
+  with losses a session takes more than `energy_max` from the grid. The V2G
+  setpoint optimisation now carries between `energy_min` and `energy_max` of
+  the responsive sessions' energy (previously exactly all of it): it targets
+  `energy_max`, drops energy down to `energy_min` before relaxing the grid
+  capacity, and when even the minimum does not fit relaxes the capacity only
+  as far as the minimum-energy profile needs. Both ratios are validated like
+  in `smart_charging()`. With the defaults (`energy_min = energy_max = 1`) the
+  results are unchanged.
+
 # flextools 1.9.0
 
 * New `add_tank_optimization()`: a heat pump charging one thermal tank,

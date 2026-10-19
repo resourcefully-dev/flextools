@@ -14,6 +14,7 @@ smart_v2g(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
@@ -83,8 +84,18 @@ be curtailed until the 50\% of the nominal charging power.
 And if \code{charging_power_min = 2}, sessions' charging power can be curtailed until 2 kW.}
 
 \item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
-In V2G this is a scheduling-stage guard only; the V2G setpoint path has no
-energy range and no \code{energy_max} yet.}
+Every session charges at least this share of the energy it requires, net of
+discharge. The scheduler never discharges or curtails a session below it,
+and the setpoint optimization may drop energy down to it - and no further -
+when the grid capacity cannot fit \code{energy_max}. When even this minimum does
+not fit, the grid capacity is relaxed only as far as the minimum-energy
+profile needs.}
+
+\item{energy_max}{numeric, maximum allowed ratio (between 0 and 1) of required energy.
+Every session charges at most this share of the energy it requires, net of
+discharge (energy discharged, grossed up by \code{discharge_eff}, has to be
+charged back on top), and the setpoint optimization targets this share for
+the responsive sessions. Must be higher than 0 and at least \code{energy_min}.}
 
 \item{discharge_eff}{numeric, discharge efficiency (0, 1], applied to energy
 losses when discharging. For example, 0.9 means that for every 1 kWh

@@ -13,8 +13,14 @@ capacity_v2g_window(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 )
+}
+\arguments{
+\item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
+load's energy the optimized load must carry. See
+\code{demand_capacity_window()}.}
 }
 \description{
 Mirrors \code{demand_capacity_window()} but falls back to

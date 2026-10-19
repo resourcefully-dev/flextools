@@ -13,8 +13,15 @@ demand_grid_v2g_window(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 )
+}
+\arguments{
+\item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
+load's energy the optimized load must carry (net of discharge). \code{c(1, 1)}
+(default) preserves the energy exactly; a range lets the optimizer drop
+energy - down to \code{min} - when the grid capacity cannot fit \code{max}.}
 }
 \description{
 Minimisation of net power with bidirectional flexibility (single window)

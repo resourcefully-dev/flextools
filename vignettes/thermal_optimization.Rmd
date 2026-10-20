@@ -77,7 +77,7 @@ $$
 S_T \ge S_0
 $$
 
-* The heat pump's electric load $P_t + B_t$ is part of the net power of the site, $L_t + P_t + B_t - G_t$, which must stay within the grid import and export capacities, as in the [net power article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html).
+* The heat pump's electric load $P_t + B_t$ is part of the net power of the site, $L_t + P_t + B_t - G_t$, which must stay within the grid import and export capacities, as in the [net power article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html), unless they cannot be met (see [Soft grid capacities](#soft-grid-capacities)).
 
 ## Litres and temperatures
 
@@ -148,7 +148,22 @@ In terms of temperature: the backup heater switches on when, with the compressor
 
 The unmet heat only enters the problem of a window when the window has no solution that holds the band without it. So, without a backup heater and with a band that the compressor can hold, the problem is exactly the one without the backup heater and the unmet heat.
 
-A window can still lack a solution when the **grid capacities** oblige the heat pump to more than it can do (a negative export capacity forcing more load than $P_c + P_b$, or more heat than the tank can store). As for the battery, the capacities are first relaxed as far as the static schedule's own net power needs. If the window has no solution even then, it runs the static `flexible` schedule (kept in the band as described [above](#optimization-windows), so the grid obligation may still be missed) and its first time slot is reported in the attribute `infeasible_windows`.
+## Soft grid capacities
+
+As for the [battery](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization), the grid import and export capacities are **soft**. When a window has no solution that holds the band within them (e.g. a PV surplus above the export capacity that a full tank cannot absorb, or an import capacity too low to cover the heat demand), it is solved with the unmet heat and with a penalised slack on each capacity, $s^I_t$ and $s^E_t$:
+
+$$
+L_t + P_t + B_t - G_t - s^I_t \le IC_t, \qquad G_t - L_t - P_t - B_t - s^E_t \le EC_t
+$$
+
+The slack is bounded by how far the site already misses the capacity without the optimization: for import, with the heat pump running its static schedule $LF_t$; for export, with the heat pump off, since a full tank cannot take any more heat:
+
+$$
+0 \le s^I_t \le \max\left(0,\; L_t + LF_t - G_t - IC_t\right), \qquad
+0 \le s^E_t \le \max\left(0,\; G_t - L_t - EC_t\right)
+$$
+
+It costs $10h$ per kW in the objective, between the backup heater ($2h$) and the unmet heat ($100h$). So the solver uses the compressor and the backup heater to their limits before missing a capacity, and misses an import capacity before leaving heat unmet. The heat pump switched off, with the comfort floor held by unmet heat, always fits these bounds, so **every window has a solution**. When a capacity is still missed, a message says so, and the net power $L_t + P_t + B_t - G_t$ shows where.
 
 
 # Results
@@ -159,7 +174,6 @@ A window can still lack a solution when the **grid capacities** oblige the heat 
 |---|---|
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
 | `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal) |
-| `infeasible_windows` | First `datetime` of every window that ran the static schedule |
 
 The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the results.
 

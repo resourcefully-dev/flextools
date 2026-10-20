@@ -18,10 +18,17 @@
   in the last slot of a window, for what the end-of-window rule lacks).
   The result gains the attributes `backup_kw` and `unmet_heat_kw` (one value
   per row, rounded to 2 decimals). A window the band cannot hold now returns a
-  schedule with unmet heat instead of falling back to `flexible`; only a grid
-  capacity obligation the heat pump cannot meet still falls back (and is
-  reported in `infeasible_windows`). Without a backup heater and in windows
-  whose band holds, the results are unchanged.
+  schedule with unmet heat instead of falling back to `flexible`. Without a
+  backup heater and in windows whose band holds, the results are unchanged.
+* `add_tank_optimization()` makes the grid capacities **soft**, as
+  `add_battery_optimization()` does: a window with no schedule that holds the
+  band within them is solved with the unmet heat and a penalised slack on each
+  capacity (`10 * h` per kW, between the backup heater and the unmet heat),
+  bounded by how far the site misses the capacity with the heat pump running
+  `flexible` (import) or off (export). This replaces the relaxation of the
+  capacities to the static schedule's net flow and the fallback to
+  `flexible`: every window now has a schedule, and **the `infeasible_windows`
+  attribute is gone**. A missed capacity is reported with a message.
 * `add_tank_optimization()` also optimises the **partial windows** the run cuts
   at both ends: when the first slot is not a window start, the slots up to the
   first `window_start_hour` form a leading window (from `SOCini`, with the
@@ -30,7 +37,7 @@
   any window. Previously they ran `flexible`. With `flex_window_hours = 24 *
   window_days` every slot is now optimised.
 * The slots that still run `flexible` (past `flex_window_hours`, or in a
-  fallback window) keep the tank in its band too: the heat they leave short
+  window the solver failed on) keep the tank in its band too: the heat they leave short
   of `SOCmin` is reported as unmet heat, and the compressor stops as a
   thermostat would at `SOCmax` (the returned power there is `flexible` reduced
   to what keeps the level at the top). The level therefore never leaves the

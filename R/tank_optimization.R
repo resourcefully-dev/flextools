@@ -170,6 +170,9 @@ tank_heat_price <- function(L, G, cop, Pc, Pb, objective, lambda, price, scale) 
 #' @param lambda numeric, ramping penalty weight
 #' @param Pb numeric, backup heater cap (kW); 0 means no backup heater
 #' @param soft logical, whether the unmet heat `U` is a variable
+#' @param slack_import_max,slack_export_max numeric vectors, how far each slot
+#'   may miss its import / export capacity (kW), from
+#'   [optimization_slack_ceiling()]; the capacities are hard where they are 0
 #'
 #' @return list of the unrounded `power`, `backup` and `unmet` (kW), or `NULL`
 #'   when the window has no solution
@@ -193,19 +196,40 @@ tank_solve_window <- function(
   objective,
   lambda = 0,
   Pb = 0,
-  soft = FALSE
+  soft = FALSE,
+  slack_import_max = 0,
+  slack_export_max = 0
 ) {
   n <- length(G)
   import_capacity <- as.numeric(rep_len(import_capacity, n))
   export_capacity <- as.numeric(rep_len(export_capacity, n))
+  slack_import_max <- as.numeric(rep_len(slack_import_max, n))
+  slack_export_max <- as.numeric(rep_len(slack_export_max, n))
   with_backup <- Pb > 0
+  soft_caps <- any(slack_import_max > 0) || any(slack_export_max > 0)
 
   # The net flow `L + P + B - G` must stay within the capacities, which for
   # non-negative loads is a box on `P + B`. A negative capacity is an
   # obligation to flow the other way and moves the box the same way.
   lb_load <- pmax(0, G - L - export_capacity)
   ub_load <- G - L + import_capacity
-  if (with_backup) {
+  if (soft_caps) {
+    # Soft capacities: the heat pump's load may miss them by up to the slack
+    # ceilings, through explicit rows on `P + B` with penalised slack (below).
+    # The boxes take the relaxed envelope.
+    cap_lb <- G - L - export_capacity
+    cap_ub <- ub_load
+    lb_load <- pmax(0, cap_lb - slack_export_max)
+    ub_load <- ub_load + slack_import_max
+    lb_P <- rep(0, n)
+    ub_P <- pmax(pmin(ifelse(cop > 0, Pc, 0), ub_load), 0)
+    ub_B <- if (with_backup) pmax(pmin(Pb, ub_load), 0) else rep(0, n)
+    if (any(lb_load > pmin(ub_load, ub_P + ub_B) + 1e-9)) {
+      return(NULL)
+    }
+    lb_total <- lb_load
+    ub_total <- pmax(pmin(ub_load, ub_P + ub_B), lb_load)
+  } else if (with_backup) {
     lb_P <- rep(0, n)
     ub_P <- pmax(pmin(ifelse(cop > 0, Pc, 0), ub_load), 0)
     ub_B <- pmax(pmin(Pb, ub_load), 0)
@@ -244,6 +268,13 @@ tank_solve_window <- function(
   if (soft) {
     idx_U <- nv + seq_len(n)
     nv <- nv + n
+  }
+  idx_si <- integer(0)
+  idx_se <- integer(0)
+  if (soft_caps) {
+    idx_si <- nv + seq_len(n)
+    idx_se <- nv + n + seq_len(n)
+    nv <- nv + 2 * n
   }
   idx_I <- integer(0)
   idx_E <- integer(0)
@@ -288,6 +319,10 @@ tank_solve_window <- function(
     lower <- c(lower, rep(0, n))
     upper <- c(upper, Q + Smax / dt)
   }
+  if (soft_caps) {
+    lower <- c(lower, rep(0, 2 * n))
+    upper <- c(upper, slack_import_max, slack_export_max)
+  }
 
   if (with_flows) {
     # Balance: I_t - E_t - P_t - B_t = L_t - G_t
@@ -318,7 +353,33 @@ tank_solve_window <- function(
     upper <- c(upper, rhs_dyn)
   }
 
-  if (with_backup) {
+  if (soft_caps) {
+    # P_t + B_t - s_i,t <= G_t - L_t + C_imp,t   import capacity, soft
+    # P_t + B_t + s_e,t >= G_t - L_t - C_exp,t   export capacity, soft
+    A_cap <- Matrix::sparseMatrix(
+      i = c(
+        seq_len(n),
+        if (with_backup) seq_len(n),
+        seq_len(n),
+        n + seq_len(n),
+        if (with_backup) n + seq_len(n),
+        n + seq_len(n)
+      ),
+      j = c(idx_P, idx_B, idx_si, idx_P, idx_B, idx_se),
+      x = c(
+        rep(1, n),
+        if (with_backup) rep(1, n),
+        rep(-1, n),
+        rep(1, n),
+        if (with_backup) rep(1, n),
+        rep(1, n)
+      ),
+      dims = c(2 * n, nv)
+    )
+    A <- rbind(A, A_cap)
+    lower <- c(lower, rep(-Inf, n), cap_lb)
+    upper <- c(upper, cap_ub, rep(Inf, n))
+  } else if (with_backup) {
     # Capacity box on the heat pump's total load: lb <= P_t + B_t <= ub
     A_load <- Matrix::sparseMatrix(
       i = rep(seq_len(n), 2),
@@ -336,10 +397,11 @@ tank_solve_window <- function(
     scale <- 1
   }
 
-  # Heat from the backup heater costs more than any compressor heat, and unmet
-  # heat a hundred times more, so the solver runs the compressor first, then
-  # the backup heater, and leaves heat unmet last.
-  if (with_backup || soft) {
+  # Heat from the backup heater costs more than any compressor heat, missing a
+  # grid capacity more still, and unmet heat a hundred times more, so the
+  # solver runs the compressor first, then the backup heater, then misses the
+  # capacity, and leaves heat unmet last.
+  if (with_backup || soft || soft_caps) {
     heat_price <- tank_heat_price(
       L,
       G,
@@ -354,6 +416,7 @@ tank_solve_window <- function(
   }
   c_B <- if (with_backup) 2 * heat_price else 0
   c_U <- if (soft) 100 * heat_price else 0
+  c_S <- if (soft_caps) 10 * heat_price else 0
 
   lambdaMat <- if (lambda > 0) get_lambda_matrix(n) else NULL
 
@@ -362,6 +425,7 @@ tank_solve_window <- function(
     lin <- numeric(nv)
     lin[idx_B] <- c_B
     lin[idx_U] <- c_U
+    lin[c(idx_si, idx_se)] <- c_S
     lin[idx_I] <- PI
     lin[idx_E] <- -PE_clipped
     result <- highs::highs_solve(
@@ -413,6 +477,7 @@ tank_solve_window <- function(
       q[idx_B] <- 2 * w_flow * (L - G) + c_B
     }
     q[idx_U] <- c_U
+    q[c(idx_si, idx_se)] <- c_S
     obj_scale <- max(max(abs(P_quad)), max(abs(q)), 1e-6)
     sol <- solve_osqp(P_quad / obj_scale, q / obj_scale, A, lower, upper)
     if (is.null(sol$x)) {
@@ -421,9 +486,9 @@ tank_solve_window <- function(
     x <- as.numeric(sol$x)
   }
 
-  if (with_backup) {
+  if (with_backup || soft_caps) {
     P <- pmin(pmax(x[idx_P], 0), ub_P)
-    B <- pmin(pmax(x[idx_B], 0), ub_B)
+    B <- if (with_backup) pmin(pmax(x[idx_B], 0), ub_B) else rep(0, n)
   } else {
     P <- pmin(pmax(x[idx_P], lb_P), ub_P)
     B <- rep(0, n)
@@ -664,23 +729,28 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' started.
 #'
 #' The unmet heat only enters a window's problem when the window has no
-#' schedule that holds the band without it; with no backup heater and a band
-#' the compressor can hold, the problem, and so the result, is the one without
-#' either.
+#' schedule that holds the band within the grid capacities without it; with no
+#' backup heater and a band the compressor can hold, the problem, and so the
+#' result, is the one without either.
 #'
-#' @section Grid capacities and fallback:
-#' A window that has no solution holding the band under the grid capacities is
-#' solved again with the capacities relaxed as far as the `flexible` schedule's
-#' own net flow needs. If it still has none, it is solved with the unmet heat
-#' (under the relaxed capacities when they were relaxed). Only a capacity
-#' obligation the heat pump cannot meet at all (a negative capacity forcing more
-#' load than `Pc + Pb`, or more heat than the tank can hold) leaves a window
-#' without a schedule: it runs `flexible` (with the thermostat and the unmet
-#' heat described below, so the grid obligation may still be missed), and its
-#' first `datetime` is reported in the `infeasible_windows` attribute.
+#' @section Soft grid capacities:
+#' As for [add_battery_optimization()], the grid capacities are soft: a window
+#' that has no schedule holding the band within them is solved with the unmet
+#' heat and with a penalised slack on each capacity. The slack is bounded by
+#' how far the site already misses the capacity without optimisation (see
+#' `optimization_slack_ceiling()`): for import, with the heat pump running
+#' `flexible`; for export, with the heat pump off, since a full tank cannot
+#' absorb a surplus. It costs `10 * h` per kW (electric), between the backup
+#' heater and the unmet heat: the solver uses the compressor and the backup
+#' heater to their limits before it misses a capacity, and misses an import
+#' capacity before it leaves heat unmet. The heat pump off with the floor held
+#' by unmet heat always fits these bounds, so **every window has a schedule**.
+#' A capacity left missed is reported with a message; compare the net flow
+#' `static + P + attr(, "backup_kw") - production` with the capacities to find
+#' where.
 #'
-#' The slots that run `flexible` (past `flex_window_hours`, or in a fallback
-#' window) keep the tank in its band too. Below, the heat that would take the
+#' The slots that run `flexible` (past `flex_window_hours`, or in a window the
+#' solver failed on, reported with a message) keep the tank in its band too. Below, the heat that would take the
 #' level under `SOCmin` is reported as unmet heat, as in the optimised slots.
 #' Above, the compressor stops as a thermostat would: its power there is
 #' `flexible` reduced to what keeps the level at `SOCmax`. So the level never
@@ -740,8 +810,6 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' - `unmet_heat_kw`: numeric vector, one value per row, rounded to 2 decimals:
 #'   the unmet heat (kW thermal, not electricity); 0 wherever the demand was
 #'   met.
-#' - `infeasible_windows`: the `datetime` of the first slot of every window that
-#'   fell back to `flexible` (empty when none did).
 #'
 #' The heat pump's electric load is the power plus `attr(, "backup_kw")`.
 #'
@@ -881,7 +949,6 @@ add_tank_optimization <- function(
   P_out <- round(flexible, 2)
   B_out <- numeric(n_rows)
   U_out <- numeric(n_rows)
-  infeasible <- integer(0)
   level <- Tcap * SOCini / 100 # level at the start of slot `pos`
   pos <- 1L
 
@@ -957,37 +1024,36 @@ add_tank_optimization <- function(
     sol <- do.call(tank_solve_window, window_args)
 
     if (is.null(sol)) {
-      # Relax the capacities only as far as the static schedule's own net
-      # flow needs them, as `optimization_slack_ceiling()` bounds the battery.
-      net_static <- L[idx] + flexible[idx] - G[idx]
-      import_relaxed <- pmax(import_capacity[idx], net_static)
-      export_relaxed <- pmax(export_capacity[idx], -net_static)
-      relaxed <- any(import_relaxed != import_capacity[idx]) ||
-        any(export_relaxed != export_capacity[idx])
-      if (relaxed) {
-        window_args$import_capacity <- import_relaxed
-        window_args$export_capacity <- export_relaxed
-        sol <- do.call(tank_solve_window, window_args)
-      }
-
-      if (is.null(sol)) {
-        # The band cannot be held: leave the heat it is missing unmet
-        window_args$soft <- TRUE
-        sol <- do.call(tank_solve_window, window_args)
-      }
-
-      if (relaxed && !is.null(sol)) {
-        message_once(
-          "\u26a0\ufe0f Optimization warning: grid capacity not reachable in some windows. Relaxing it to the static schedule's net flow there."
-        )
-      }
+      # The window has no schedule that holds the band within the grid
+      # capacities. Solve it again with the unmet heat, and with the
+      # capacities soft as for the battery: penalised slack, up to how far
+      # the static schedule (import) or the heat pump switched off (export)
+      # already misses them. Then the heat pump off, with the floor held by
+      # unmet heat, is a solution, so this problem always has one.
+      tol <- optimization_solution_tolerance()
+      slack_import_max <- optimization_slack_ceiling(
+        import_capacity[idx],
+        L[idx] + flexible[idx] - G[idx]
+      )
+      slack_export_max <- optimization_slack_ceiling(
+        export_capacity[idx],
+        G[idx] - L[idx]
+      )
+      slack_import_max[slack_import_max > 0] <-
+        slack_import_max[slack_import_max > 0] + tol
+      slack_export_max[slack_export_max > 0] <-
+        slack_export_max[slack_export_max > 0] + tol
+      window_args$soft <- TRUE
+      window_args$slack_import_max <- slack_import_max
+      window_args$slack_export_max <- slack_export_max
+      sol <- do.call(tank_solve_window, window_args)
     }
 
     if (is.null(sol)) {
+      # Only a solver failure gets here
       message_once(
-        "\u26a0\ufe0f Optimization warning: the heat pump cannot meet the grid capacity obligations in some windows. Using the `flexible` schedule there."
+        "\u26a0\ufe0f Optimization warning: the solver failed in some windows. Using the `flexible` schedule there."
       )
-      infeasible <- c(infeasible, start)
       level <- run_flexible(level, idx)
     } else {
       target <- tank_level_path(
@@ -1015,6 +1081,15 @@ add_tank_optimization <- function(
       P_out[idx] <- rounded$power
       B_out[idx] <- rounded$backup
       U_out[idx] <- rounded$unmet
+      net <- L[idx] + P_out[idx] + B_out[idx] - G[idx]
+      if (
+        any(net > import_capacity[idx] + 0.01) ||
+          any(-net > export_capacity[idx] + 0.01)
+      ) {
+        message_once(
+          "\u26a0\ufe0f Optimization warning: grid capacity not reachable in some slots. The heat pump is operating at its limits there, so the capacity is approached but not met."
+        )
+      }
       if (any(rounded$unmet > 0)) {
         message_once(
           "\u26a0\ufe0f Optimization warning: the heat pump cannot cover the heat demand in some windows. Leaving it unmet there (attribute `unmet_heat_kw`)."
@@ -1030,7 +1105,6 @@ add_tank_optimization <- function(
     run_flexible(level, seq(pos, n_rows))
   }
 
-  attr(P_out, "infeasible_windows") <- dttm_seq[infeasible]
   attr(P_out, "backup_kw") <- B_out
   attr(P_out, "unmet_heat_kw") <- U_out
   P_out

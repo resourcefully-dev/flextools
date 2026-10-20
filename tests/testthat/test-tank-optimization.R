@@ -100,7 +100,6 @@ test_that("one tank: heat and electricity add up and the level stays in the band
   expect_equal(level[7], 3, tolerance = rounding_tol)
   expect_equal(sum(P[7:24]), 18 / 3, tolerance = 0.01)
 
-  expect_length(attr(P, "infeasible_windows"), 0)
 })
 
 test_that("the compressor cap binds", {
@@ -130,7 +129,6 @@ test_that("a window the band cannot hold leaves heat unmet instead of falling ba
     "cannot cover the heat demand"
   )
 
-  expect_length(attr(P, "infeasible_windows"), 0)
   expect_equal(attr(P, "backup_kw"), rep(0, 72))
   unmet <- attr(P, "unmet_heat_kw")
   expect_equal(unmet[-(25:48)], rep(0, 48))
@@ -147,20 +145,53 @@ test_that("a window the band cannot hold leaves heat unmet instead of falling ba
   )
 })
 
-test_that("only a grid obligation the heat pump cannot meet falls back to `flexible`", {
+test_that("a grid obligation the heat pump cannot meet is approached, not abandoned", {
   # An export capacity of -5 kW obliges the site to import 5 kW, and so the
-  # heat pump to draw them, but the compressor draws at most 3 and the static
-  # schedule (5 kW) leaves nothing to relax.
+  # heat pump to draw them, but the compressor draws at most 3 and the
+  # backup heater 1, and the tank must hold the heat.
   d <- tank_data(days = 2, flexible = 5)
   d$export_capacity <- 1000
   d$export_capacity[25:48] <- -5
   expect_message(
-    P <- add_tank_optimization(d, "cost", Tcap = 1000, Pc = 3, SOCini = 0),
-    "grid capacity obligations"
+    P <- add_tank_optimization(d, "cost", Tcap = 1000, Pc = 3, SOCini = 0, Pb = 1),
+    "grid capacity not reachable"
   )
-  expect_equal(attr(P, "infeasible_windows"), d$datetime[25])
-  expect_equal(as.numeric(P[25:48]), d$flexible[25:48])
-  expect_equal(attr(P, "unmet_heat_kw")[25:48], rep(0, 24))
+  expect_null(attr(P, "infeasible_windows"))
+  # Compressor and backup heater run flat out, missing the obligation by 1 kW
+  expect_equal(as.numeric(P[25:48]), rep(3, 24))
+  expect_equal(attr(P, "backup_kw")[25:48], rep(1, 24))
+  expect_equal(attr(P, "unmet_heat_kw"), rep(0, 48))
+
+  # With a small tank the heat has nowhere to go: the heat pump draws what
+  # the tank can still hold, and the level stays in the band
+  P_small <- suppressMessages(
+    add_tank_optimization(d, "cost", Tcap = 30, Pc = 3, SOCini = 0, Pb = 1)
+  )
+  B <- attr(P_small, "backup_kw")
+  path <- tank_path(P_small, d, init = 0, backup = B)
+  expect_lte(max(path), 30 + rounding_tol)
+  expect_equal(tank_balance_gap(P_small, d, init = 0, backup = B), 0, tolerance = 1e-9)
+})
+
+test_that("an import capacity is missed before heat is left unmet", {
+  # A 1 kW import capacity on a 0.5 kW static load leaves the heat pump 0.5 kW,
+  # 1.5 kW of heat against a 3 kW demand. The static schedule draws 1 kW, so
+  # the capacity may be missed by 0.5 kW, which covers the demand exactly.
+  d <- tank_data(heat_demand = 3, static = 0.5, flexible = 1)
+  d$import_capacity <- 1
+  P <- suppressMessages(
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 3, SOCini = 0)
+  )
+  expect_lte(max(d$static + P), 1.5 + 0.01)
+  expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+
+  # With the static schedule within the capacity, there is nothing to miss
+  d$flexible <- 0.5
+  P2 <- suppressMessages(
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 3, SOCini = 0)
+  )
+  expect_lte(max(d$static + P2), 1 + 0.01)
+  expect_equal(sum(attr(P2, "unmet_heat_kw")), 24 * 1.5, tolerance = 0.05)
 })
 
 test_that("every window ends at least as full as it started", {
@@ -348,7 +379,6 @@ test_that("slots that run `flexible` hold the floor with unmet heat", {
     flex_window_hours = 12
   ))
 
-  expect_length(attr(P, "infeasible_windows"), 0)
   expect_equal(as.numeric(P[43:54]), rep(0, 12))
 
   # The tank reaches its floor overnight, and from then on the demand the
@@ -493,7 +523,6 @@ test_that("heat is left unmet only beyond the compressor, the backup and the tan
       expect_equal(sum(B[18:20]), backup_heat, tolerance = 0.02)
       expect_equal(sum(U), 6 - backup_heat, tolerance = 0.02)
       expect_equal(U[-(18:20)], rep(0, 21))
-      expect_length(attr(P, "infeasible_windows"), 0)
 
       path <- tank_path(P, d, init = 3, backup = B, unmet = U)
       expect_gte(min(path), 0 - rounding_tol)
@@ -547,7 +576,6 @@ test_that("the slots before the first window start form a leading window", {
   ))
 
   expect_false(any(P == d$flexible))
-  expect_length(attr(P, "infeasible_windows"), 0)
 
   B <- attr(P, "backup_kw")
   U <- attr(P, "unmet_heat_kw")

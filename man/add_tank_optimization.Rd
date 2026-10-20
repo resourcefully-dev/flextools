@@ -84,8 +84,6 @@ windows and everywhere without a backup heater.
 \item \code{unmet_heat_kw}: numeric vector, one value per row, rounded to 2 decimals:
 the unmet heat (kW thermal, not electricity); 0 wherever the demand was
 met.
-\item \code{infeasible_windows}: the \code{datetime} of the first slot of every window that
-fell back to \code{flexible} (empty when none did).
 }
 
 The heat pump's electric load is the power plus \code{attr(, "backup_kw")}.
@@ -162,25 +160,30 @@ compressor and the backup heater lack to end the window as full as it
 started.
 
 The unmet heat only enters a window's problem when the window has no
-schedule that holds the band without it; with no backup heater and a band
-the compressor can hold, the problem, and so the result, is the one without
-either.
+schedule that holds the band within the grid capacities without it; with no
+backup heater and a band the compressor can hold, the problem, and so the
+result, is the one without either.
 }
 
-\section{Grid capacities and fallback}{
+\section{Soft grid capacities}{
 
-A window that has no solution holding the band under the grid capacities is
-solved again with the capacities relaxed as far as the \code{flexible} schedule's
-own net flow needs. If it still has none, it is solved with the unmet heat
-(under the relaxed capacities when they were relaxed). Only a capacity
-obligation the heat pump cannot meet at all (a negative capacity forcing more
-load than \code{Pc + Pb}, or more heat than the tank can hold) leaves a window
-without a schedule: it runs \code{flexible} (with the thermostat and the unmet
-heat described below, so the grid obligation may still be missed), and its
-first \code{datetime} is reported in the \code{infeasible_windows} attribute.
+As for \code{\link[=add_battery_optimization]{add_battery_optimization()}}, the grid capacities are soft: a window
+that has no schedule holding the band within them is solved with the unmet
+heat and with a penalised slack on each capacity. The slack is bounded by
+how far the site already misses the capacity without optimisation (see
+\code{optimization_slack_ceiling()}): for import, with the heat pump running
+\code{flexible}; for export, with the heat pump off, since a full tank cannot
+absorb a surplus. It costs \code{10 * h} per kW (electric), between the backup
+heater and the unmet heat: the solver uses the compressor and the backup
+heater to their limits before it misses a capacity, and misses an import
+capacity before it leaves heat unmet. The heat pump off with the floor held
+by unmet heat always fits these bounds, so \strong{every window has a schedule}.
+A capacity left missed is reported with a message; compare the net flow
+\code{static + P + attr(, "backup_kw") - production} with the capacities to find
+where.
 
-The slots that run \code{flexible} (past \code{flex_window_hours}, or in a fallback
-window) keep the tank in its band too. Below, the heat that would take the
+The slots that run \code{flexible} (past \code{flex_window_hours}, or in a window the
+solver failed on, reported with a message) keep the tank in its band too. Below, the heat that would take the
 level under \code{SOCmin} is reported as unmet heat, as in the optimised slots.
 Above, the compressor stops as a thermostat would: its power there is
 \code{flexible} reduced to what keeps the level at \code{SOCmax}. So the level never

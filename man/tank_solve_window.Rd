@@ -22,7 +22,9 @@ tank_solve_window(
   objective,
   lambda = 0,
   Pb = 0,
-  soft = FALSE
+  soft = FALSE,
+  slack_import_max = 0,
+  slack_export_max = 0
 )
 }
 \arguments{
@@ -57,6 +59,10 @@ capacities (kW)}
 \item{Pb}{numeric, backup heater cap (kW); 0 means no backup heater}
 
 \item{soft}{logical, whether the unmet heat \code{U} is a variable}
+
+\item{slack_import_max, slack_export_max}{numeric vectors, how far each slot
+may miss its import / export capacity (kW), from
+\code{\link[=optimization_slack_ceiling]{optimization_slack_ceiling()}}; the capacities are hard where they are 0}
 }
 \value{
 list of the unrounded \code{power}, \code{backup} and \code{unmet} (kW), or \code{NULL}

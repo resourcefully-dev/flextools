@@ -504,3 +504,47 @@ test_that("the backup heater runs where the COP is 0, the compressor does not", 
     expect_equal(tank_balance_gap(P, d, init = 3, backup = B), 0, tolerance = 1e-9)
   }
 })
+
+
+# Partial windows --------------------------------------------------------------
+
+test_that("the slots before the first window start form a leading window", {
+  # A run from 00:00 with windows from 06:00: 00:00-05:45 is a leading window,
+  # 06:00-05:45 the next day a full one, and 06:00-23:45 of the second day a
+  # trailing one. The `flexible` schedule (5 kW) is outside the compressor's
+  # range, so no optimised slot can equal it.
+  d <- tank_data(days = 2, resolution = 15, flexible = 5)
+  d$heat_demand <- ifelse(lubridate::hour(d$datetime) %in% 2:4, 6, 1)
+  P <- suppressMessages(add_tank_optimization(
+    d,
+    "cost",
+    Tcap = 6,
+    Pc = 1,
+    SOCmin = 20,
+    SOCini = 50,
+    window_start_hour = 6,
+    flex_window_hours = 24,
+    Pb = 2
+  ))
+
+  expect_false(any(P == d$flexible))
+  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, nrow(d)))
+  expect_length(attr(P, "infeasible_windows"), 0)
+
+  B <- attr(P, "backup_kw")
+  U <- attr(P, "unmet_heat_kw")
+  path <- tank_path(P, d, init = 3, resolution = 15, backup = B, unmet = U)
+  tol <- 0.005 * max(d$cop, 1) * 0.25 * 4 + 1e-9
+  expect_gte(min(path), 6 * 20 / 100 - tol)
+  expect_lte(max(path), 6 + tol)
+  # The leading window ends at least as full as the run started
+  expect_gte(path[25], 3 - tol)
+  # Its peak (18 kWh in 3 hours against 3 kW of compressor heat and a tank
+  # that must end where it started) needs the backup heater before 06:00
+  expect_gt(sum(B[1:24]), 0)
+  expect_equal(
+    tank_balance_gap(P, d, init = 3, resolution = 15, backup = B, unmet = U),
+    0,
+    tolerance = 1e-9
+  )
+})

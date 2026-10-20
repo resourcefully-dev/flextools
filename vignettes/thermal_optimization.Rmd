@@ -79,7 +79,16 @@ $$
 
 * The heat pump's electric load $P_t + B_t$ is part of the net power of the site, $L_t + P_t + B_t - G_t$, which must stay within the grid import and export capacities, as in the [net power article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html).
 
-The level carries from one window to the next. The time slots outside every optimization window run the static schedule of the heat pump, the column `flexible` of `opt_data`.
+## Optimization windows
+
+The level carries from one window to the next, so the windows are solved in order. They are the windows of the other optimization functions, one every `window_days` days from `window_start_hour`, plus the **partial windows** that the run cuts at both ends:
+
+* When the first time slot of the run is not a window start (e.g. a run from 00:00 with `window_start_hour = 6`), the slots up to the first window start form a **leading window**. It starts from `SOCini`, and it must also end at least as full as it started.
+* The slots after the last full window form a **trailing window**.
+
+Both are optimized like any other window. Only the first `flex_window_hours` of every window are optimized, and the slots after them run the static schedule of the heat pump, the column `flexible` of `opt_data`. So with `flex_window_hours = 24` (and `window_days = 1`) **every time slot is optimized**, and the level of the tank never leaves its band.
+
+When a level outside the band reaches the first slot of a window (only possible after slots that ran `flexible`), it is brought back into the band, and the heat this takes is reported in the attribute `tank_clamp_kwh`. With every slot optimized, this only happens after a window that fell back to the static schedule because of the grid capacities (see below).
 
 
 # Objective

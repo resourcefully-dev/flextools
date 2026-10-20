@@ -20,6 +20,16 @@
   capacity obligation the heat pump cannot meet still falls back (and is
   reported in `infeasible_windows`). Without a backup heater and in windows
   whose band holds, the results are unchanged.
+* `add_tank_optimization()` also optimises the **partial windows** the run cuts
+  at both ends: when the first slot is not a window start, the slots up to the
+  first `window_start_hour` form a leading window (from `SOCini`, with the
+  end-of-window rule at its last slot), and the slots after the last full
+  window a trailing one, both limited to their first `flex_window_hours` like
+  any window. Previously they ran `flexible`. With `flex_window_hours = 24 *
+  window_days` every slot is now optimised, and `tank_clamp_kwh` is 0
+  everywhere unless a window fell back to `flexible` (grid capacity
+  obligations only). Runs that start at a window start and end at a window end
+  are unchanged.
 * `get_tank_level()` gains `backup` and `unmet_heat` (default 0), to add the
   attributes above to the balance.
 * New article "Thermal optimization" on the tank model, the backup heater and

@@ -116,10 +116,17 @@ the level never goes below it, and the heat that would have taken it there
 is reported as unmet instead. Every window therefore has a schedule.
 
 The run starts from \code{Tcap * SOCini/100}, and the level carries from one
-window to the next. Slots outside every window (before the first
-\code{window_start_hour}, after the last full window or past
-\code{flex_window_hours}) run the \code{flexible} schedule, without backup heater or
-unmet heat.
+window to the next. The windows are those of the other optimization
+functions (one every \code{window_days} from \code{window_start_hour}), plus the
+partial windows the run cuts at both ends: when the first slot is not a
+window start, the slots up to the first window start form a \strong{leading
+window}, and the slots after the last full window a \strong{trailing window},
+both optimised like any other window (the leading one from \code{SOCini}, both
+with the end-of-window rule at their last slot). Only the first
+\code{flex_window_hours} of every window are optimised, so with
+\code{flex_window_hours = 24 * window_days} every slot is optimised. The slots
+past \code{flex_window_hours} run the \code{flexible} schedule, without backup heater
+or unmet heat.
 }
 \section{Compressor first, backup heater second, unmet heat last}{
 
@@ -173,7 +180,9 @@ the \code{infeasible_windows} attribute.
 
 At the first slot of every window the level is clamped into the band, so a
 level that a fallback window or the slots outside every window left outside
-it does not make the window infeasible from its first slot. The clamp leaves
+it does not make the window infeasible from its first slot. With every slot
+in an optimised window (\code{flex_window_hours = 24 * window_days}), the clamp
+is 0 everywhere unless a window fell back to \code{flexible}. The clamp leaves
 alone a level inside the band, or outside it by less than half a rounding
 step of the returned power (\code{0.005 * max(cop) * dt} kWh, with \code{cop} at least
 1 when there is a backup heater), and is reported per row in the

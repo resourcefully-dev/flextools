@@ -469,6 +469,89 @@ tank_solve_window <- function(
 }
 
 
+#' Optimization windows of the tank, partial ones at both ends included
+#'
+#' The full windows of `get_flex_windows()`, plus a leading window over the
+#' slots before the first window start and a trailing window over the slots
+#' after the last full window, which the run cuts short. Each partial window
+#' keeps the flexible part (the first `flex_window_hours` of its window) that
+#' falls inside the run, so with `flex_window_hours = 24 * window_days` every
+#' slot lies in a window.
+#'
+#' @param dttm_seq datetime vector of the run
+#' @param window_days,window_start_hour,flex_window_hours numeric, as in
+#'   [add_tank_optimization()]
+#'
+#' @return tibble with the columns `start` (first optimised slot) and
+#'   `flex_idx` (list of the optimised slots), ordered by `start`
+#' @keywords internal
+#'
+tank_flex_windows <- function(
+  dttm_seq,
+  window_days,
+  window_start_hour,
+  flex_window_hours
+) {
+  n <- length(dttm_seq)
+  full <- get_flex_windows(
+    dttm_seq = dttm_seq,
+    window_days = window_days,
+    window_start_hour = window_start_hour,
+    flex_window_hours = flex_window_hours
+  )
+  resolution <- as.numeric(dttm_seq[2] - dttm_seq[1], units = "mins")
+  window_length <- round(window_days * 24 * 60 / resolution)
+  flex_length <- round(
+    min(flex_window_hours, 24 * window_days) * 60 / resolution
+  )
+
+  # First window start: the first full window's, or else the next
+  # `window_start_hour` at or after the first slot
+  if (nrow(full)) {
+    first_start <- full$start[1]
+    last_end <- max(full$end)
+  } else {
+    t0 <- dttm_seq[1]
+    next_start <- lubridate::floor_date(t0, "day") +
+      lubridate::hours(window_start_hour)
+    if (next_start < t0) {
+      next_start <- next_start + lubridate::days(1)
+    }
+    first_start <- 1 + round(
+      as.numeric(difftime(next_start, t0, units = "mins")) / resolution
+    )
+    last_end <- min(first_start - 1, n)
+  }
+
+  partial <- list()
+  # Leading window: started before the run, ends at `first_start - 1`
+  if (first_start > 1) {
+    window_start <- first_start - window_length
+    flex_end <- min(window_start + flex_length - 1, first_start - 1, n)
+    if (flex_end >= 1) {
+      partial[[length(partial) + 1]] <- seq(max(window_start, 1), flex_end)
+    }
+  }
+  # Trailing window: starts after the last full window, cut by the run's end
+  if (last_end < n) {
+    window_start <- last_end + 1
+    partial[[length(partial) + 1]] <- seq(
+      window_start,
+      min(window_start + flex_length - 1, n)
+    )
+  }
+
+  windows <- dplyr::bind_rows(
+    dplyr::tibble(start = full$start, flex_idx = full$flex_idx),
+    dplyr::tibble(
+      start = purrr::map_int(partial, ~ as.integer(min(.x))),
+      flex_idx = partial
+    )
+  )
+  windows[order(windows$start), ]
+}
+
+
 #' Check a single number argument
 #' @keywords internal
 tank_check_number <- function(x, name, min = -Inf, max = Inf, min_open = FALSE) {
@@ -541,10 +624,17 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' is reported as unmet instead. Every window therefore has a schedule.
 #'
 #' The run starts from `Tcap * SOCini/100`, and the level carries from one
-#' window to the next. Slots outside every window (before the first
-#' `window_start_hour`, after the last full window or past
-#' `flex_window_hours`) run the `flexible` schedule, without backup heater or
-#' unmet heat.
+#' window to the next. The windows are those of the other optimization
+#' functions (one every `window_days` from `window_start_hour`), plus the
+#' partial windows the run cuts at both ends: when the first slot is not a
+#' window start, the slots up to the first window start form a **leading
+#' window**, and the slots after the last full window a **trailing window**,
+#' both optimised like any other window (the leading one from `SOCini`, both
+#' with the end-of-window rule at their last slot). Only the first
+#' `flex_window_hours` of every window are optimised, so with
+#' `flex_window_hours = 24 * window_days` every slot is optimised. The slots
+#' past `flex_window_hours` run the `flexible` schedule, without backup heater
+#' or unmet heat.
 #'
 #' @section Compressor first, backup heater second, unmet heat last:
 #' The backup heater's electricity is part of the load the objective sees, like
@@ -594,7 +684,9 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'
 #' At the first slot of every window the level is clamped into the band, so a
 #' level that a fallback window or the slots outside every window left outside
-#' it does not make the window infeasible from its first slot. The clamp leaves
+#' it does not make the window infeasible from its first slot. With every slot
+#' in an optimised window (`flex_window_hours = 24 * window_days`), the clamp
+#' is 0 everywhere unless a window fell back to `flexible`. The clamp leaves
 #' alone a level inside the band, or outside it by less than half a rounding
 #' step of the returned power (`0.005 * max(cop) * dt` kWh, with `cop` at least
 #' 1 when there is a backup heater), and is reported per row in the
@@ -789,7 +881,7 @@ add_tank_optimization <- function(
   # rounding, not a level to restore.
   clamp_tol <- 0.005 * max(cop, if (Pb > 0) 1) * dt + 1e-9
 
-  flex_windows <- get_flex_windows(
+  flex_windows <- tank_flex_windows(
     dttm_seq = dttm_seq,
     window_days = window_days,
     window_start_hour = window_start_hour,

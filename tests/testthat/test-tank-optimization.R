@@ -36,7 +36,6 @@ tank_path <- function(
   init,
   loss = 0,
   resolution = 60,
-  clamp = 0,
   backup = 0,
   unmet = 0
 ) {
@@ -48,31 +47,29 @@ tank_path <- function(
     init,
     (1 - loss / 100)^dt,
     dt,
-    clamp,
     backup,
     unmet
   )
 }
 
-# delivered - (demand + losses + change in level + clamp)
+# delivered - (demand + losses + change in level)
 tank_balance_gap <- function(
   P,
   d,
   init,
   loss = 0,
   resolution = 60,
-  clamp = 0,
   backup = 0,
   unmet = 0
 ) {
   dt <- resolution / 60
   k <- (1 - loss / 100)^dt
-  path <- tank_path(P, d, init, loss, resolution, clamp, backup, unmet)
+  path <- tank_path(P, d, init, loss, resolution, backup, unmet)
   n <- length(P)
   delivered <- sum((d$cop * P + backup + unmet) * dt)
   demand <- sum(d$heat_demand * dt)
   losses <- sum((1 - k) * path[seq_len(n)])
-  delivered - (demand + losses + (path[n + 1] - init) + sum(clamp))
+  delivered - (demand + losses + (path[n + 1] - init))
 }
 
 net_cost <- function(P, d) {
@@ -104,7 +101,6 @@ test_that("one tank: heat and electricity add up and the level stays in the band
   expect_equal(sum(P[7:24]), 18 / 3, tolerance = 0.01)
 
   expect_length(attr(P, "infeasible_windows"), 0)
-  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, nrow(d)))
 })
 
 test_that("the compressor cap binds", {
@@ -135,7 +131,6 @@ test_that("a window the band cannot hold leaves heat unmet instead of falling ba
   )
 
   expect_length(attr(P, "infeasible_windows"), 0)
-  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, 72))
   expect_equal(attr(P, "backup_kw"), rep(0, 72))
   unmet <- attr(P, "unmet_heat_kw")
   expect_equal(unmet[-(25:48)], rep(0, 48))
@@ -160,7 +155,7 @@ test_that("only a grid obligation the heat pump cannot meet falls back to `flexi
   d$export_capacity <- 1000
   d$export_capacity[25:48] <- -5
   expect_message(
-    P <- add_tank_optimization(d, "cost", Tcap = 300, Pc = 3, SOCini = 0),
+    P <- add_tank_optimization(d, "cost", Tcap = 1000, Pc = 3, SOCini = 0),
     "grid capacity obligations"
   )
   expect_equal(attr(P, "infeasible_windows"), d$datetime[25])
@@ -334,7 +329,6 @@ test_that("`get_tank_level()` closes the heat balance", {
     d3$cop,
     init = 3,
     loss = 1,
-    clamp = attr(P3, "tank_clamp_kwh"),
     unmet_heat = unmet
   )
   expect_gte(min(level3), 3 * 20 / 100 - 0.01 - rounding_tol)
@@ -356,7 +350,6 @@ test_that("slots that run `flexible` hold the floor with unmet heat", {
 
   expect_length(attr(P, "infeasible_windows"), 0)
   expect_equal(as.numeric(P[43:54]), rep(0, 12))
-  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, 54))
 
   # The tank reaches its floor overnight, and from then on the demand the
   # `flexible` schedule leaves uncovered is unmet
@@ -373,7 +366,7 @@ test_that("slots that run `flexible` hold the floor with unmet heat", {
   )
 })
 
-test_that("a level above the band at a window start is clamped down", {
+test_that("slots that run `flexible` stop the compressor at the top of the band", {
   # The `flexible` schedule before 06:00 and overnight heats 9 kW into a 1 kW
   # demand
   d <- tank_data(days = 3, flexible = 3)[1:54, ]
@@ -386,19 +379,16 @@ test_that("a level above the band at a window start is clamped down", {
     flex_window_hours = 12
   )
 
-  clamp <- attr(P, "tank_clamp_kwh")
-  expect_gt(clamp[7], 0)
-  expect_gt(clamp[31], 0)
-  expect_equal(clamp[-c(7, 31)], rep(0, 52))
+  # The tank starts full: the thermostat holds it there with just the demand
+  # (1/3 kW, in steps of 0.01 kW)
+  expect_true(all(P[1:6] %in% c(0.33, 0.34)))
+  expect_lt(max(P[19:30]), 3)
+  expect_null(attr(P, "tank_clamp_kwh"))
   expect_equal(attr(P, "unmet_heat_kw"), rep(0, 54))
 
-  level <- get_tank_level(P, d$heat_demand, d$cop, init = 10, clamp = clamp)
-  expect_equal(level[31], 10)
-  expect_equal(
-    tank_balance_gap(P, d, init = 10, clamp = clamp),
-    0,
-    tolerance = 1e-9
-  )
+  path <- tank_path(P, d, init = 10)
+  expect_lte(max(path), 10 + rounding_tol)
+  expect_equal(tank_balance_gap(P, d, init = 10), 0, tolerance = 1e-9)
 })
 
 test_that("the compressor does not run where the COP is 0, even with PV surplus", {
@@ -422,10 +412,6 @@ test_that("`get_tank_level()` follows the balance and validates its inputs", {
   expect_equal(
     get_tank_level(rep(0, 5), 0, 3, init = 10, loss = 2, time_resolution = 15)[5],
     round(10 * 0.98, 2)
-  )
-  expect_equal(
-    get_tank_level(c(0, 0, 0), 0, 3, init = 5, clamp = c(0, 2, 0)),
-    c(5, 3, 3)
   )
   expect_error(get_tank_level(1, 1, 3, init = NA), "init")
   expect_error(get_tank_level(1, 1, 3, init = 0, loss = -1), "loss")
@@ -561,7 +547,6 @@ test_that("the slots before the first window start form a leading window", {
   ))
 
   expect_false(any(P == d$flexible))
-  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, nrow(d)))
   expect_length(attr(P, "infeasible_windows"), 0)
 
   B <- attr(P, "backup_kw")

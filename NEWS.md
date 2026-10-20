@@ -27,15 +27,16 @@
   first `window_start_hour` form a leading window (from `SOCini`, with the
   end-of-window rule at its last slot), and the slots after the last full
   window a trailing one, both limited to their first `flex_window_hours` like
-  any window. Previously they ran `flexible`. The slots that still run
-  `flexible` (past `flex_window_hours`, or in a fallback window) hold the
-  comfort floor too, reporting the heat they leave short as unmet heat, so
-  `tank_clamp_kwh` is now only positive: the heat removed when a window starts
-  above `SOCmax`. With `flex_window_hours = 24 *
-  window_days` every slot is now optimised, and `tank_clamp_kwh` is 0
-  everywhere unless a window fell back to `flexible` (grid capacity
-  obligations only). Runs that start at a window start and end at a window end
-  are unchanged.
+  any window. Previously they ran `flexible`. With `flex_window_hours = 24 *
+  window_days` every slot is now optimised.
+* The slots that still run `flexible` (past `flex_window_hours`, or in a
+  fallback window) keep the tank in its band too: the heat they leave short
+  of `SOCmin` is reported as unmet heat, and the compressor stops as a
+  thermostat would at `SOCmax` (the returned power there is `flexible` reduced
+  to what keeps the level at the top). The level therefore never leaves the
+  band, and the clamp into the band at each window start is gone:
+  **`add_tank_optimization()` no longer returns `tank_clamp_kwh`, and
+  `get_tank_level()` loses its `clamp` argument.**
 * `get_tank_level()` gains `backup` and `unmet_heat` (default 0), to add the
   attributes above to the balance.
 * New article "Thermal optimization" on the tank model, the backup heater and

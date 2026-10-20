@@ -11,7 +11,6 @@ get_tank_level(
   init,
   loss = 0,
   time_resolution = 60,
-  clamp = 0,
   backup = 0,
   unmet_heat = 0
 )
@@ -32,10 +31,6 @@ kWh)}
 \item{time_resolution}{numeric, time resolution of the time-series (in
 minutes)}
 
-\item{clamp}{numeric, heat taken out of the tank at the start of each slot
-(kWh): \code{attr(result, "tank_clamp_kwh")} of \code{\link[=add_tank_optimization]{add_tank_optimization()}}, or 0
-for a schedule that was never clamped}
-
 \item{backup}{numeric, backup heater power (kW electric = kW thermal):
 \code{attr(result, "backup_kw")} of \code{\link[=add_tank_optimization]{add_tank_optimization()}}, or 0 without a
 backup heater}
@@ -49,10 +44,6 @@ numeric vector of the level (kWh), rounded to 2 decimals
 \description{
 The tank's counterpart of \code{\link[=get_storage_level]{get_storage_level()}}: the level in kWh thermal at
 the start of each slot, starting from \code{init}, with
-\code{S[t+1] = k * S[t] + (cop[t] * power[t] + backup[t] + unmet_heat[t] - heat_demand[t]) * dt - clamp[t+1]} and \code{k = (1 - loss/100)^dt}, \code{dt} being
-the time resolution in hours.
-}
-\details{
-The function applies only the clamps it is given and never clamps on its
-own, so where the static schedule runs the level can leave the band.
+\code{S[t+1] = k * S[t] + (cop[t] * power[t] + backup[t] + unmet_heat[t] - heat_demand[t]) * dt} and \code{k = (1 - loss/100)^dt}, \code{dt} being the time
+resolution in hours. It never holds the level in a band on its own.
 }

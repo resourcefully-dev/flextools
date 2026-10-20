@@ -75,7 +75,8 @@ heater.}
 \value{
 numeric vector, the compressor's electric power (kW), one value per
 \code{opt_data} row, rounded to 2 decimals: the optimised power in optimised
-windows and \code{flexible} everywhere else. Attributes:
+windows and \code{flexible} everywhere else, reduced where it would heat the
+tank above \code{SOCmax}. Attributes:
 \itemize{
 \item \code{backup_kw}: numeric vector, one value per row, rounded to 2 decimals: the
 backup heater's power (kW electric = kW thermal); 0 outside optimised
@@ -85,9 +86,6 @@ the unmet heat (kW thermal, not electricity); 0 wherever the demand was
 met.
 \item \code{infeasible_windows}: the \code{datetime} of the first slot of every window that
 fell back to \code{flexible} (empty when none did).
-\item \code{tank_clamp_kwh}: numeric vector (kWh thermal), one value per row, 0 except
-at the first slot of a window that started above \code{SOCmax} (positive: the
-heat removed).
 }
 
 The heat pump's electric load is the power plus \code{attr(, "backup_kw")}.
@@ -177,24 +175,17 @@ own net flow needs. If it still has none, it is solved with the unmet heat
 (under the relaxed capacities when they were relaxed). Only a capacity
 obligation the heat pump cannot meet at all (a negative capacity forcing more
 load than \code{Pc + Pb}, or more heat than the tank can hold) leaves a window
-without a schedule: it runs \code{flexible}, its level follows the balance and
-can go above the band (see below), and its first \code{datetime} is reported in
-the \code{infeasible_windows} attribute.
+without a schedule: it runs \code{flexible} (with the thermostat and the unmet
+heat described below, so the grid obligation may still be missed), and its
+first \code{datetime} is reported in the \code{infeasible_windows} attribute.
 
-The comfort floor also holds in the slots that run \code{flexible} (past
-\code{flex_window_hours}, or in a fallback window): the heat that would take the
-level below \code{SOCmin} there is reported as unmet heat too, so the level never
-goes below the floor anywhere. Above \code{SOCmax} it can go, since that heat
-cannot be undone: the next window then starts with the level clamped to
-\code{SOCmax}, and the heat this removes is reported per row in the
-\code{tank_clamp_kwh} attribute (positive, at the first slot of that window). The
-clamp leaves alone a level less than half a rounding step of the returned
-power above the band (\code{0.005 * max(cop) * dt} kWh, with \code{cop} at least 1
-when there is a backup heater). With every slot in an optimised window
-(\code{flex_window_hours = 24 * window_days}), the clamp is 0 everywhere unless a
-window fell back to \code{flexible}. Over the run,
-\verb{sum((cop * P + B + U) * dt) = sum(heat_demand * dt) + losses + (end level - initial level) + sum(tank_clamp_kwh)}; \code{\link[=get_tank_level]{get_tank_level()}} reproduces the
-level.
+The slots that run \code{flexible} (past \code{flex_window_hours}, or in a fallback
+window) keep the tank in its band too. Below, the heat that would take the
+level under \code{SOCmin} is reported as unmet heat, as in the optimised slots.
+Above, the compressor stops as a thermostat would: its power there is
+\code{flexible} reduced to what keeps the level at \code{SOCmax}. So the level never
+leaves the band, and over the run
+\verb{sum((cop * P + B + U) * dt) = sum(heat_demand * dt) + losses + (end level - initial level)}; \code{\link[=get_tank_level]{get_tank_level()}} reproduces the level.
 
 Inputs out of range stop with an error naming the argument; nothing is
 clamped into range, and no zero profile is returned in their place.
@@ -218,7 +209,6 @@ attr(P, "backup_kw")
 attr(P, "unmet_heat_kw")
 get_tank_level(
   P, opt_data$heat_demand, opt_data$cop, init = 3,
-  clamp = attr(P, "tank_clamp_kwh"),
   backup = attr(P, "backup_kw"),
   unmet_heat = attr(P, "unmet_heat_kw")
 )

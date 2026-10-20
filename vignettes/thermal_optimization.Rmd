@@ -106,7 +106,7 @@ The level carries from one window to the next, so the windows are solved in orde
 
 Both are optimized like any other window. Only the first `flex_window_hours` of every window are optimized, and the slots after them run the static schedule of the heat pump, the column `flexible` of `opt_data`. So with `flex_window_hours = 24` (and `window_days = 1`) **every time slot is optimized**, and the level of the tank never leaves its band.
 
-The comfort floor holds in the slots that run `flexible` too: the heat that would take the tank below its floor there is reported as unmet heat, as in the optimized slots. The static schedule can however heat the tank **above** its top. Since the next window must start inside the band, its starting level is then brought down to the top, and the heat this removes is reported in the attribute `tank_clamp_kwh`. With every slot optimized, this only happens after a window that fell back to the static schedule because of the grid capacities (see below).
+The slots that run `flexible` keep the tank in its band too. Below the comfort floor, the heat that would take the tank under it is reported as unmet heat, as in the optimized slots. At the top of the band, the compressor stops as a thermostat would: its power is the static schedule reduced to what keeps the tank at $SOC_{max}$. So the level of the tank never leaves its band, in any time slot.
 
 
 # Objective
@@ -148,7 +148,7 @@ In terms of temperature: the backup heater switches on when, with the compressor
 
 The unmet heat only enters the problem of a window when the window has no solution that holds the band without it. So, without a backup heater and with a band that the compressor can hold, the problem is exactly the one without the backup heater and the unmet heat.
 
-A window can still lack a solution when the **grid capacities** oblige the heat pump to more than it can do (a negative export capacity forcing more load than $P_c + P_b$, or more heat than the tank can store). As for the battery, the capacities are first relaxed as far as the static schedule's own net power needs. If the window has no solution even then, it runs the static `flexible` schedule and its first time slot is reported in the attribute `infeasible_windows`.
+A window can still lack a solution when the **grid capacities** oblige the heat pump to more than it can do (a negative export capacity forcing more load than $P_c + P_b$, or more heat than the tank can store). As for the battery, the capacities are first relaxed as far as the static schedule's own net power needs. If the window has no solution even then, it runs the static `flexible` schedule (kept in the band as described [above](#optimization-windows), so the grid obligation may still be missed) and its first time slot is reported in the attribute `infeasible_windows`.
 
 
 # Results
@@ -159,7 +159,6 @@ A window can still lack a solution when the **grid capacities** oblige the heat 
 |---|---|
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
 | `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal) |
-| `tank_clamp_kwh` | Heat taken out of the tank (kWh thermal) when a window starts above the top of the band |
 | `infeasible_windows` | First `datetime` of every window that ran the static schedule |
 
 The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the results.
@@ -243,7 +242,6 @@ tank_results <- function(opt_data, P) {
       level = get_tank_level(
         P, heat_demand, cop,
         init = Tcap, time_resolution = 15,
-        clamp = attr(P, "tank_clamp_kwh"),
         backup = B,
         unmet_heat = U
       ),

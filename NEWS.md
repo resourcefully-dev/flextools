@@ -1,3 +1,30 @@
+# flextools 1.11.0
+
+* `add_tank_optimization()` gains a resistive **backup heater** and a **soft
+  comfort floor**, so every window has a schedule. The new argument `Pb` (last,
+  default `NULL`) is the backup heater's rating in kW electric (= kW thermal,
+  COP 1); `NULL` or 0 means none. The balance becomes
+  `S[t] = S[t-1] * (1 - loss/100)^dt + (cop * P + B + U - heat_demand) * dt`
+  with `0 <= B <= Pb` (also where `cop = 0`) and the unmet heat `U >= 0`, which
+  holds the level at `SOCmin` when the compressor, the backup heater and the
+  tank cannot. The backup heater's load enters the objective like the
+  compressor's, plus `2 * h` per kW, and the unmet heat costs `100 * h` per kW,
+  `h` being the window's highest value of a kW of load in the objective (the
+  highest absolute price for `"cost"`, the largest derivative of the squared
+  net flow for `"grid"`, both weighted for a numeric objective), so the solver
+  uses the compressor first, then the backup heater, and leaves heat unmet
+  last. The unmet heat only enters a window that has no schedule without it.
+  The result gains the attributes `backup_kw` and `unmet_heat_kw` (one value
+  per row, rounded to 2 decimals). A window the band cannot hold now returns a
+  schedule with unmet heat instead of falling back to `flexible`; only a grid
+  capacity obligation the heat pump cannot meet still falls back (and is
+  reported in `infeasible_windows`). Without a backup heater and in windows
+  whose band holds, the results are unchanged.
+* `get_tank_level()` gains `backup` and `unmet_heat` (default 0), to add the
+  attributes above to the balance.
+* New article "Thermal optimization" on the tank model, the backup heater and
+  the soft comfort floor.
+
 # flextools 1.10.0
 
 * `smart_v2g()` gains `energy_max` (default `1`, right after `energy_min`), the

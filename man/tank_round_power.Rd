@@ -4,7 +4,18 @@
 \alias{tank_round_power}
 \title{Round the compressor power to 2 decimals while tracking the level}
 \usage{
-tank_round_power(target, heat_demand, cop, init, k, dt, Pc)
+tank_round_power(
+  target,
+  heat_demand,
+  cop,
+  init,
+  k,
+  dt,
+  Pc,
+  backup = 0,
+  unmet = 0,
+  Pb = 0
+)
 }
 \arguments{
 \item{target}{numeric vector, level at the end of each slot under the
@@ -21,9 +32,15 @@ unrounded power (kWh)}
 \item{dt}{numeric, slot length in hours}
 
 \item{Pc}{numeric, compressor cap (kW)}
+
+\item{backup}{numeric vector, backup heater power (kW, electric = thermal)}
+
+\item{unmet}{numeric vector, unmet heat (kW thermal)}
+
+\item{Pb}{numeric, backup heater cap (kW), 0 without one}
 }
 \value{
-numeric vector, rounded power (kW)
+list of the rounded \code{power}, \code{backup} and \code{unmet} (kW)
 }
 \description{
 Rounding each slot on its own drifts the level: a third of a kW rounds to
@@ -31,6 +48,8 @@ Rounding each slot on its own drifts the level: a third of a kW rounds to
 COP. Instead each slot takes the 2-decimal power that brings the level
 closest to the level the unrounded solution reaches at the end of that slot,
 so the rounded level never strays further from it than half a rounding step
-of heat.
+of heat. The backup heater and the unmet heat are rounded on their own and
+the compressor makes up their rounding; where the COP is 0 the backup heater
+tracks the level in the compressor's place.
 }
 \keyword{internal}

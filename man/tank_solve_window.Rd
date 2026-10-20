@@ -20,7 +20,9 @@ tank_solve_window(
   k,
   dt,
   objective,
-  lambda = 0
+  lambda = 0,
+  Pb = 0,
+  soft = FALSE
 )
 }
 \arguments{
@@ -51,9 +53,14 @@ capacities (kW)}
 \item{objective}{\code{"grid"}, \code{"cost"} or a number strictly between 0 and 1}
 
 \item{lambda}{numeric, ramping penalty weight}
+
+\item{Pb}{numeric, backup heater cap (kW); 0 means no backup heater}
+
+\item{soft}{logical, whether the unmet heat \code{U} is a variable}
 }
 \value{
-unrounded power (kW), or \code{NULL} when the window has no solution
+list of the unrounded \code{power}, \code{backup} and \code{unmet} (kW), or \code{NULL}
+when the window has no solution
 }
 \description{
 Solve one tank window

@@ -4,7 +4,17 @@
 \alias{tank_level_path}
 \title{Tank level path (unrounded)}
 \usage{
-tank_level_path(power, heat_demand, cop, init, k, dt, clamp = 0)
+tank_level_path(
+  power,
+  heat_demand,
+  cop,
+  init,
+  k,
+  dt,
+  clamp = 0,
+  backup = 0,
+  unmet = 0
+)
 }
 \arguments{
 \item{power}{numeric vector, compressor electric power (kW)}
@@ -20,6 +30,10 @@ tank_level_path(power, heat_demand, cop, init, k, dt, clamp = 0)
 \item{dt}{numeric, slot length in hours}
 
 \item{clamp}{numeric vector, heat taken out at the start of each slot (kWh)}
+
+\item{backup}{numeric vector, backup heater power (kW, electric = thermal)}
+
+\item{unmet}{numeric vector, unmet heat (kW thermal)}
 }
 \value{
 numeric vector of length \code{length(power) + 1}

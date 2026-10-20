@@ -16,7 +16,8 @@ add_tank_optimization(
   window_start_hour = 0,
   flex_window_hours = 24,
   lambda = 0,
-  loss = 0
+  loss = 0,
+  Pb = NULL
 )
 }
 \arguments{
@@ -36,7 +37,7 @@ Optional columns, as in \code{\link[=add_battery_optimization]{add_battery_optim
 \item{opt_objective}{character or numeric. \code{"grid"} (default), \code{"cost"}, or a
 numeric weight \code{w} in \verb{[0, 1]} where \code{w = 1} is pure grid and \code{w = 0} is
 pure cost. \code{"grid"} minimises the squared net grid flow
-\code{static + P - production}; \code{"cost"} minimises the energy cost of it.
+\code{static + P + B - production}; \code{"cost"} minimises the energy cost of it.
 \code{"capacity"} has no tank form and stops with an error.}
 
 \item{Tcap}{numeric, tank capacity (kWh thermal, > 0): the heat between the
@@ -63,78 +64,159 @@ consecutive slots.}
 
 \item{loss}{numeric, standing loss of the tank's level (\% per hour, >= 0), as
 in \code{\link[=get_storage_losses]{get_storage_losses()}}.}
+
+\item{Pb}{numeric, rating of the resistive backup heater (kW electric, which
+is also its kW thermal, >= 0). \code{NULL} (default) or 0 means no backup
+heater.}
 }
 \value{
 numeric vector, the compressor's electric power (kW), one value per
 \code{opt_data} row, rounded to 2 decimals: the optimised power in optimised
 windows and \code{flexible} everywhere else. Attributes:
 \itemize{
+\item \code{backup_kw}: numeric vector, one value per row, rounded to 2 decimals: the
+backup heater's power (kW electric = kW thermal); 0 outside optimised
+windows and everywhere without a backup heater.
+\item \code{unmet_heat_kw}: numeric vector, one value per row, rounded to 2 decimals:
+the unmet heat (kW thermal, not electricity); 0 outside optimised windows
+and wherever the demand was met.
 \item \code{infeasible_windows}: the \code{datetime} of the first slot of every window that
 fell back to \code{flexible} (empty when none did).
 \item \code{tank_clamp_kwh}: numeric vector (kWh thermal), one value per row, 0 except
 at the first slot of a window whose starting level was clamped.
 }
+
+The heat pump's electric load is the power plus \code{attr(, "backup_kw")}.
 }
 \description{
 Optimises the electric power of a heat pump's compressor that charges one
-thermal tank, which the heat demand discharges. It mirrors
-\code{\link[=add_battery_optimization]{add_battery_optimization()}}: the same \code{opt_data} conventions, objectives
-(except \code{"capacity"}), optimization windows and solvers, with the tank in
-place of the battery. The compressor's heat is \code{cop * P}, so there is no
-conversion efficiency: the COP is the conversion.
+thermal tank, which the heat demand discharges, with an optional resistive
+backup heater next to it. It mirrors \code{\link[=add_battery_optimization]{add_battery_optimization()}}: the same
+\code{opt_data} conventions, objectives (except \code{"capacity"}), optimization
+windows and solvers, with the tank in place of the battery. The compressor's
+heat is \code{cop * P}, so there is no conversion efficiency: the COP is the
+conversion. The backup heater turns \code{B} kW of electricity into \code{B} kW of heat.
 }
 \details{
 Per slot of \code{dt} hours, with \code{S} the level in kWh thermal above the band's
 bottom and \code{k = (1 - loss/100)^dt}:
 \itemize{
-\item \code{S[t] = k * S[t-1] + (cop[t] * P[t] - heat_demand[t]) * dt}
+\item \code{S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + U[t] - heat_demand[t]) * dt}
 \item \verb{Tcap * SOCmin/100 <= S[t] <= Tcap * SOCmax/100}
 \item \verb{0 <= P[t] <= Pc}, and \code{P[t] = 0} where \code{cop[t] = 0}
+\item \verb{0 <= B[t] <= Pb}, also where \code{cop[t] = 0}
+\item \code{U[t] >= 0}
 \item every window ends at least as full as it started.
 }
 
-The run starts from \code{Tcap * SOCini/100}, and the level carries from one
-window to the next. Slots outside every window (before the first
-\code{window_start_hour}, after the last full window or past
-\code{flex_window_hours}) run the \code{flexible} schedule.
+\code{B} (the backup heater) is a variable only with \code{Pb > 0}. \code{U} is the \strong{unmet
+heat}: heat the demand asked for that neither the compressor, the backup
+heater nor the tank delivered. It makes the comfort floor \code{SOCmin} soft:
+the level never goes below it, and the heat that would have taken it there
+is reported as unmet instead. Every window therefore has a schedule.
 
-A window that has no solution under the grid capacities is solved again with
-the capacities relaxed as far as the \code{flexible} schedule's own net flow
-needs. If it still has none, the tank cannot hold its band under \code{Pc} or
-cannot reach the end condition: the window runs \code{flexible}, its level follows
-the balance unclamped and can leave the band, and its first \code{datetime} is
-reported in the \code{infeasible_windows} attribute.
+The run starts from \code{Tcap * SOCini/100}, and the level carries from one
+window to the next. The windows are those of the other optimization
+functions (one every \code{window_days} from \code{window_start_hour}), plus the
+partial windows the run cuts at both ends: when the first slot is not a
+window start, the slots up to the first window start form a \strong{leading
+window}, and the slots after the last full window a \strong{trailing window},
+both optimised like any other window (the leading one from \code{SOCini}, both
+with the end-of-window rule at their last slot). Only the first
+\code{flex_window_hours} of every window are optimised, so with
+\code{flex_window_hours = 24 * window_days} every slot is optimised. The slots
+past \code{flex_window_hours} run the \code{flexible} schedule, without backup heater
+or unmet heat.
+}
+\section{Compressor first, backup heater second, unmet heat last}{
+
+The backup heater's electricity is part of the load the objective sees, like
+the compressor's, and \code{U} is not electricity at all. To order the three,
+both carry a linear price per kW of heat and slot in the objective, built
+from the window's \strong{heat price} \code{h}: the highest marginal value a kW of
+electric load can take in the window's objective, divided by the lowest
+positive COP when it is below 1, so that no kWh of compressor heat is worth
+more than \code{h}:
+\itemize{
+\item \code{"cost"}: the highest absolute import or export price of the window
+(EUR/kWh);
+\item \code{"grid"}: the largest derivative of the squared net flow,
+\code{2 * (max|static - production| + Pc + Pb)} (kW);
+\item a weight \code{w}: \code{w} times the grid value (scaled as the grid term of the
+objective is) plus \code{1 - w} times the cost value;
+\item with \code{lambda > 0}, plus the largest derivative of the ramping penalty,
+\code{4 * lambda * Pc}.
+}
+
+The backup heater pays \code{2 * h} per kW on top of its electricity, so it only
+runs for heat the compressor cannot deliver (it never absorbs a PV surplus
+the compressor could), and the unmet heat pays \code{100 * h} per kW, so heat is
+left unmet only when neither the compressor nor the backup heater can
+deliver it.
+
+The unmet heat costs the same in every slot, so the solver may place it in
+any slot where it holds the floor. With the end-of-window rule the shortage
+often lands in the last slots of a window (the heat the compressor lacks to
+refill the tank by the end of it), so read it per window rather than per
+slot.
+
+The unmet heat only enters a window's problem when the window has no
+schedule that holds the band without it; with no backup heater and a band
+the compressor can hold, the problem, and so the result, is the one without
+either.
+}
+
+\section{Grid capacities and fallback}{
+
+A window that has no solution holding the band under the grid capacities is
+solved again with the capacities relaxed as far as the \code{flexible} schedule's
+own net flow needs. If it still has none, it is solved with the unmet heat
+(under the relaxed capacities when they were relaxed). Only a capacity
+obligation the heat pump cannot meet at all (a negative capacity forcing more
+load than \code{Pc + Pb}, or more heat than the tank can hold) leaves a window
+without a schedule: it runs \code{flexible}, its level follows the balance
+unclamped and can leave the band, and its first \code{datetime} is reported in
+the \code{infeasible_windows} attribute.
 
 At the first slot of every window the level is clamped into the band, so a
 level that a fallback window or the slots outside every window left outside
-it does not make the window infeasible from its first slot. The clamp leaves
+it does not make the window infeasible from its first slot. With every slot
+in an optimised window (\code{flex_window_hours = 24 * window_days}), the clamp
+is 0 everywhere unless a window fell back to \code{flexible}. The clamp leaves
 alone a level inside the band, or outside it by less than half a rounding
-step of the returned power (\code{0.005 * max(cop) * dt} kWh), and is reported per
-row in the \code{tank_clamp_kwh} attribute: the level before the clamp minus the
-level after it, so positive where it removed heat above \code{SOCmax} and negative
-where it topped the tank up below \code{SOCmin}. Over the run,
-\verb{sum(cop * P * dt) = sum(heat_demand * dt) + losses + (end level - initial level) + sum(tank_clamp_kwh)}; \code{\link[=get_tank_level]{get_tank_level()}} reproduces the level.
+step of the returned power (\code{0.005 * max(cop) * dt} kWh, with \code{cop} at least
+1 when there is a backup heater), and is reported per row in the
+\code{tank_clamp_kwh} attribute: the level before the clamp minus the level after
+it, so positive where it removed heat above \code{SOCmax} and negative where it
+topped the tank up below \code{SOCmin}. Over the run,
+\verb{sum((cop * P + B + U) * dt) = sum(heat_demand * dt) + losses + (end level - initial level) + sum(tank_clamp_kwh)}; \code{\link[=get_tank_level]{get_tank_level()}} reproduces the
+level.
 
 Inputs out of range stop with an error naming the argument; nothing is
 clamped into range, and no zero profile is returned in their place.
 }
+
 \examples{
 library(dplyr)
 opt_data <- tibble(
   datetime = as.POSIXct("2024-01-01", tz = "UTC") + 3600 * 0:23,
   production = 0,
-  heat_demand = 1,
+  heat_demand = c(rep(1, 17), rep(6, 3), rep(1, 4)),
   cop = 3,
   flexible = 1 / 3,
   price_imported = ifelse(0:23 < 6, 0.1, 0.3),
   price_exported = 0
 )
 P <- add_tank_optimization(
-  opt_data, opt_objective = "cost", Tcap = 3, Pc = 3
+  opt_data, opt_objective = "cost", Tcap = 3, Pc = 1, Pb = 2
 )
+attr(P, "backup_kw")
+attr(P, "unmet_heat_kw")
 get_tank_level(
   P, opt_data$heat_demand, opt_data$cop, init = 3,
-  clamp = attr(P, "tank_clamp_kwh")
+  clamp = attr(P, "tank_clamp_kwh"),
+  backup = attr(P, "backup_kw"),
+  unmet_heat = attr(P, "unmet_heat_kw")
 )
 
 }

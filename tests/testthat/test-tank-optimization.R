@@ -30,7 +30,16 @@ tank_data <- function(
 }
 
 # Unrounded level path, start of each slot plus the end of the last one
-tank_path <- function(P, d, init, loss = 0, resolution = 60, clamp = 0) {
+tank_path <- function(
+  P,
+  d,
+  init,
+  loss = 0,
+  resolution = 60,
+  clamp = 0,
+  backup = 0,
+  unmet = 0
+) {
   dt <- resolution / 60
   tank_level_path(
     P,
@@ -39,17 +48,28 @@ tank_path <- function(P, d, init, loss = 0, resolution = 60, clamp = 0) {
     init,
     (1 - loss / 100)^dt,
     dt,
-    clamp
+    clamp,
+    backup,
+    unmet
   )
 }
 
 # delivered - (demand + losses + change in level + clamp)
-tank_balance_gap <- function(P, d, init, loss = 0, resolution = 60, clamp = 0) {
+tank_balance_gap <- function(
+  P,
+  d,
+  init,
+  loss = 0,
+  resolution = 60,
+  clamp = 0,
+  backup = 0,
+  unmet = 0
+) {
   dt <- resolution / 60
   k <- (1 - loss / 100)^dt
-  path <- tank_path(P, d, init, loss, resolution, clamp)
+  path <- tank_path(P, d, init, loss, resolution, clamp, backup, unmet)
   n <- length(P)
-  delivered <- sum(d$cop * P * dt)
+  delivered <- sum((d$cop * P + backup + unmet) * dt)
   demand <- sum(d$heat_demand * dt)
   losses <- sum((1 - k) * path[seq_len(n)])
   delivered - (demand + losses + (path[n + 1] - init) + sum(clamp))
@@ -98,7 +118,7 @@ test_that("the compressor cap binds", {
   expect_equal(sum(P3[1:6]), 8, tolerance = 0.01)
 })
 
-test_that("an infeasible window falls back to `flexible`, and the next is clamped", {
+test_that("a window the band cannot hold leaves heat unmet instead of falling back", {
   heat_demand <- rep(1, 72)
   heat_demand[24 + 9:11] <- 5
   d <- tank_data(days = 3, heat_demand = heat_demand, flexible = 0.33)
@@ -111,32 +131,41 @@ test_that("an infeasible window falls back to `flexible`, and the next is clampe
       SOCmin = 20,
       SOCini = 100
     ),
-    "cannot hold its band"
+    "cannot cover the heat demand"
   )
 
-  expect_equal(as.numeric(P[25:48]), d$flexible[25:48])
+  expect_length(attr(P, "infeasible_windows"), 0)
+  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, 72))
+  expect_equal(attr(P, "backup_kw"), rep(0, 72))
+  unmet <- attr(P, "unmet_heat_kw")
+  expect_equal(unmet[-(25:48)], rep(0, 48))
+  expect_gt(sum(unmet), 0)
+
+  # The level never leaves the band, and the heat balance closes with the
+  # unmet heat in it
+  path <- tank_path(P, d, init = 3, unmet = unmet)
+  expect_gte(min(path), 3 * 20 / 100 - rounding_tol)
+  expect_equal(
+    tank_balance_gap(P, d, init = 3, unmet = unmet),
+    0,
+    tolerance = 1e-9
+  )
+})
+
+test_that("only a grid obligation the heat pump cannot meet falls back to `flexible`", {
+  # An export capacity of -5 kW obliges the site to import 5 kW, and so the
+  # heat pump to draw them, but the compressor draws at most 3 and the static
+  # schedule (5 kW) leaves nothing to relax.
+  d <- tank_data(days = 2, flexible = 5)
+  d$export_capacity <- 1000
+  d$export_capacity[25:48] <- -5
+  expect_message(
+    P <- add_tank_optimization(d, "cost", Tcap = 300, Pc = 3, SOCini = 0),
+    "grid capacity obligations"
+  )
   expect_equal(attr(P, "infeasible_windows"), d$datetime[25])
-  expect_false(isTRUE(all.equal(as.numeric(P[1:24]), d$flexible[1:24])))
-  expect_false(isTRUE(all.equal(as.numeric(P[49:72]), d$flexible[49:72])))
-
-  clamp <- attr(P, "tank_clamp_kwh")
-  path <- tank_path(P, d, init = 3)
-  expect_lt(clamp[49], 0)
-  expect_equal(clamp[49], path[49] - 3 * 20 / 100)
-  expect_equal(clamp[-49], rep(0, 71))
-
-  # With the third day removed the fallback window is the last: nothing is
-  # clamped.
-  P2 <- suppressMessages(add_tank_optimization(
-    d[1:48, ],
-    "cost",
-    Tcap = 3,
-    Pc = 1,
-    SOCmin = 20,
-    SOCini = 100
-  ))
-  expect_equal(attr(P2, "infeasible_windows"), d$datetime[25])
-  expect_equal(attr(P2, "tank_clamp_kwh"), rep(0, 48))
+  expect_equal(as.numeric(P[25:48]), d$flexible[25:48])
+  expect_equal(attr(P, "unmet_heat_kw")[25:48], rep(0, 24))
 })
 
 test_that("every window ends at least as full as it started", {
@@ -167,7 +196,14 @@ test_that("every window ends at least as full as it started", {
     dt = 1,
     objective = "cost"
   )
-  window_path <- tank_level_path(P_window, d$heat_demand[1:24], d$cop[1:24], 3, 1, 1)
+  window_path <- tank_level_path(
+    P_window$power,
+    d$heat_demand[1:24],
+    d$cop[1:24],
+    3,
+    1,
+    1
+  )
   expect_gte(window_path[25], 3 - optimization_solution_tolerance())
 })
 
@@ -276,19 +312,19 @@ test_that("`get_tank_level()` closes the heat balance", {
     dt = 1,
     objective = "cost"
   )
-  solver_level <- tank_path(P_window, d, 3, loss = 1)
+  solver_level <- tank_path(P_window$power, d, 3, loss = 1)
   expect_lte(max(abs(tank_path(P, d, 3, loss = 1) - solver_level)), rounding_tol)
 
-  # Fixture 3: the clamp closes the balance across the fallback window
+  # Fixture 3: the unmet heat closes the balance where the band cannot hold
   heat_demand <- rep(1, 72)
   heat_demand[24 + 9:11] <- 5
   d3 <- tank_data(days = 3, heat_demand = heat_demand)
   P3 <- suppressMessages(
     add_tank_optimization(d3, "cost", Tcap = 3, Pc = 1, SOCmin = 20, loss = 1)
   )
-  clamp <- attr(P3, "tank_clamp_kwh")
+  unmet <- attr(P3, "unmet_heat_kw")
   expect_equal(
-    tank_balance_gap(P3, d3, init = 3, loss = 1, clamp = clamp),
+    tank_balance_gap(P3, d3, init = 3, loss = 1, unmet = unmet),
     0,
     tolerance = 1e-9
   )
@@ -298,10 +334,10 @@ test_that("`get_tank_level()` closes the heat balance", {
     d3$cop,
     init = 3,
     loss = 1,
-    clamp = clamp
+    clamp = attr(P3, "tank_clamp_kwh"),
+    unmet_heat = unmet
   )
-  expect_equal(level3[49], 3 * 20 / 100)
-  expect_lt(min(level3[25:48]), 3 * 20 / 100)
+  expect_gte(min(level3), 3 * 20 / 100 - 0.01 - rounding_tol)
 })
 
 test_that("a clamp between windows tops the tank up at the next window start", {
@@ -363,4 +399,152 @@ test_that("`get_tank_level()` follows the balance and validates its inputs", {
   expect_error(get_tank_level(1, 1, 3, init = NA), "init")
   expect_error(get_tank_level(1, 1, 3, init = 0, loss = -1), "loss")
   expect_error(get_tank_level(c(1, 1), c(1, 1, 1), 3, init = 0), "heat_demand")
+  # The backup heater and the unmet heat add heat one to one
+  expect_equal(
+    get_tank_level(c(0, 0, 0), 1, 3, init = 2, backup = c(1, 0, 0), unmet = c(0, 2, 0)),
+    c(2, 2, 3)
+  )
+  expect_error(get_tank_level(1, 1, 3, init = 0, backup = NA_real_), "backup")
+})
+
+
+# Backup heater ----------------------------------------------------------------
+
+# Evening peak: 6 kW of heat for 3 hours against a 1 kW compressor at COP 3
+# (3 kW of heat) and a 3 kWh tank. The peak lacks 3 * 3 - 3 = 6 kWh of heat.
+peak_data <- function(...) {
+  heat_demand <- rep(1, 24)
+  heat_demand[18:20] <- 6
+  tank_data(heat_demand = heat_demand, ...)
+}
+
+test_that("the backup heater stays off while the compressor suffices", {
+  production <- rep(0, 24)
+  production[10:16] <- 5 # PV surplus the backup heater could soak up
+  d <- tank_data(production = production)
+  for (objective in list("grid", "cost", 0.5)) {
+    P0 <- add_tank_optimization(d, objective, Tcap = 3, Pc = 3)
+    P <- add_tank_optimization(d, objective, Tcap = 3, Pc = 3, Pb = 2)
+    expect_equal(attr(P, "backup_kw"), rep(0, 24))
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+    expect_equal(sum(P), sum(P0), tolerance = 0.02)
+  }
+  # No backup heater: `Pb = 0` and `Pb = NULL` are the function without one
+  expect_identical(
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 3, Pb = 0),
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 3)
+  )
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Pb = -1), "Pb")
+})
+
+test_that("the backup heater covers what the compressor and the tank cannot", {
+  d <- peak_data()
+  for (objective in list("grid", "cost", 0.5)) {
+    P <- add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Pb = 3)
+    B <- attr(P, "backup_kw")
+    U <- attr(P, "unmet_heat_kw")
+
+    expect_equal(U, rep(0, 24))
+    expect_lte(max(B), 3)
+    # The compressor runs flat out through the peak, and the backup heater
+    # delivers only the heat it lacks, during the peak
+    expect_equal(as.numeric(P[18:20]), rep(1, 3))
+    expect_equal(sum(B), 6, tolerance = 0.02)
+    expect_equal(B[-(18:20)], rep(0, 21))
+
+    path <- tank_path(P, d, init = 3, backup = B)
+    expect_gte(min(path), 0 - rounding_tol)
+    expect_lte(max(path), 3 + rounding_tol)
+    expect_equal(tank_balance_gap(P, d, init = 3, backup = B), 0, tolerance = 1e-9)
+  }
+})
+
+test_that("heat is left unmet only beyond the compressor, the backup and the tank", {
+  d <- peak_data()
+  for (objective in list("grid", "cost", 0.5)) {
+    for (Pb in list(NULL, 1)) {
+      P <- suppressMessages(
+        add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Pb = Pb)
+      )
+      B <- attr(P, "backup_kw")
+      U <- attr(P, "unmet_heat_kw")
+      backup_heat <- if (is.null(Pb)) 0 else 3 * Pb
+
+      # Everything the heat pump has runs through the peak (the compressor
+      # makes up the rounding of the unmet heat, by up to a rounding step)
+      expect_gte(min(P[18:20]), 0.99)
+      expect_equal(sum(B[18:20]), backup_heat, tolerance = 0.02)
+      expect_equal(sum(U), 6 - backup_heat, tolerance = 0.02)
+      expect_equal(U[-(18:20)], rep(0, 21))
+      expect_length(attr(P, "infeasible_windows"), 0)
+
+      path <- tank_path(P, d, init = 3, backup = B, unmet = U)
+      expect_gte(min(path), 0 - rounding_tol)
+      expect_equal(
+        tank_balance_gap(P, d, init = 3, backup = B, unmet = U),
+        0,
+        tolerance = 1e-9
+      )
+    }
+  }
+})
+
+test_that("the backup heater runs where the COP is 0, the compressor does not", {
+  cop <- rep(3, 24)
+  cop[11:15] <- 0
+  heat_demand <- rep(1, 24)
+  heat_demand[11:15] <- 3 # 15 kWh while the compressor is off, 3 kWh tank
+  d <- tank_data(cop = cop, heat_demand = heat_demand)
+  for (objective in list("grid", "cost")) {
+    P <- add_tank_optimization(d, objective, Tcap = 3, Pc = 3, Pb = 3)
+    B <- attr(P, "backup_kw")
+    expect_equal(as.numeric(P[11:15]), rep(0, 5))
+    expect_equal(sum(B[11:15]), 12, tolerance = 0.02)
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+    expect_equal(tank_balance_gap(P, d, init = 3, backup = B), 0, tolerance = 1e-9)
+  }
+})
+
+
+# Partial windows --------------------------------------------------------------
+
+test_that("the slots before the first window start form a leading window", {
+  # A run from 00:00 with windows from 06:00: 00:00-05:45 is a leading window,
+  # 06:00-05:45 the next day a full one, and 06:00-23:45 of the second day a
+  # trailing one. The `flexible` schedule (5 kW) is outside the compressor's
+  # range, so no optimised slot can equal it.
+  d <- tank_data(days = 2, resolution = 15, flexible = 5)
+  d$heat_demand <- ifelse(lubridate::hour(d$datetime) %in% 2:4, 6, 1)
+  P <- suppressMessages(add_tank_optimization(
+    d,
+    "cost",
+    Tcap = 6,
+    Pc = 1,
+    SOCmin = 20,
+    SOCini = 50,
+    window_start_hour = 6,
+    flex_window_hours = 24,
+    Pb = 2
+  ))
+
+  expect_false(any(P == d$flexible))
+  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, nrow(d)))
+  expect_length(attr(P, "infeasible_windows"), 0)
+
+  B <- attr(P, "backup_kw")
+  U <- attr(P, "unmet_heat_kw")
+  path <- tank_path(P, d, init = 3, resolution = 15, backup = B, unmet = U)
+  tol <- 0.005 * max(d$cop, 1) * 0.25 * 4 + 1e-9
+  expect_gte(min(path), 6 * 20 / 100 - tol)
+  expect_lte(max(path), 6 + tol)
+  # The leading window ends at least as full as the run started
+  expect_gte(path[25], 3 - tol)
+  # Its peak (18 kWh in 3 hours against 3 kW of compressor heat and a tank
+  # that must end where it started) needs the backup heater before 06:00
+  expect_gt(sum(B[1:24]), 0)
+  expect_equal(
+    tank_balance_gap(P, d, init = 3, resolution = 15, backup = B, unmet = U),
+    0,
+    tolerance = 1e-9
+  )
 })

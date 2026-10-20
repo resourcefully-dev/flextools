@@ -54,6 +54,7 @@ articles:
       - minimize_net_power
       - minimize_cost
       - combined_optimization
+      - thermal_optimization
       - parallel-processing
   - title: Demand-response
     navbar: Demand-response

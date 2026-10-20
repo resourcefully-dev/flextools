@@ -13,7 +13,9 @@
   highest absolute price for `"cost"`, the largest derivative of the squared
   net flow for `"grid"`, both weighted for a numeric objective), so the solver
   uses the compressor first, then the backup heater, and leaves heat unmet
-  last. The unmet heat only enters a window that has no schedule without it.
+  last. The unmet heat only enters a window that has no schedule without it,
+  and it is only positive in slots where the tank is at its comfort floor (and
+  in the last slot of a window, for what the end-of-window rule lacks).
   The result gains the attributes `backup_kw` and `unmet_heat_kw` (one value
   per row, rounded to 2 decimals). A window the band cannot hold now returns a
   schedule with unmet heat instead of falling back to `flexible`; only a grid
@@ -25,7 +27,11 @@
   first `window_start_hour` form a leading window (from `SOCini`, with the
   end-of-window rule at its last slot), and the slots after the last full
   window a trailing one, both limited to their first `flex_window_hours` like
-  any window. Previously they ran `flexible`. With `flex_window_hours = 24 *
+  any window. Previously they ran `flexible`. The slots that still run
+  `flexible` (past `flex_window_hours`, or in a fallback window) hold the
+  comfort floor too, reporting the heat they leave short as unmet heat, so
+  `tank_clamp_kwh` is now only positive: the heat removed when a window starts
+  above `SOCmax`. With `flex_window_hours = 24 *
   window_days` every slot is now optimised, and `tank_clamp_kwh` is 0
   everywhere unless a window fell back to `flexible` (grid capacity
   obligations only). Runs that start at a window start and end at a window end
@@ -33,7 +39,7 @@
 * `get_tank_level()` gains `backup` and `unmet_heat` (default 0), to add the
   attributes above to the balance.
 * New article "Thermal optimization" on the tank model, the backup heater and
-  the soft comfort floor.
+  the soft comfort floor, with a worked example in litres and degrees.
 
 # flextools 1.10.0
 

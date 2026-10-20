@@ -436,18 +436,21 @@ tank_solve_window <- function(
   U <- if (soft) pmax(x[idx_U], 0) else rep(0, n)
 
   if (soft) {
-    # The unmet heat's price dwarfs the rest of the objective, which costs
-    # OSQP accuracy on the level. Settle `U` on the exact dynamics instead:
-    # just enough to hold the floor and the end condition, never above the
-    # top of the band.
+    # Every slot prices the unmet heat the same, so the solver may place it in
+    # any slot, also where the tank is far above its floor. Settle it on the
+    # exact dynamics instead, keeping `P` and `B`: each slot takes just the
+    # heat that holds the level at the floor, so heat is unmet only where the
+    # tank is at its floor, and the last slot whatever the end condition still
+    # lacks. Unmet heat delivered later is never lost to the standing loss, so
+    # this never adds to it. It also settles the solver's accuracy, which the
+    # unmet heat's price costs on the level.
+    U <- numeric(n)
     s <- S0
     for (t in seq_len(n)) {
-      s_next <- k * s + (cop[t] * P[t] + B[t] + U[t] - Q[t]) * dt
+      s_next <- k * s + (cop[t] * P[t] + B[t] - Q[t]) * dt
       floor_t <- if (t == n) max(Smin, S0) else Smin
       if (s_next < floor_t) {
-        U[t] <- U[t] + (floor_t - s_next) / dt
-      } else if (s_next > Smax && U[t] > 0) {
-        U[t] <- max(U[t] - (s_next - Smax) / dt, 0)
+        U[t] <- (floor_t - s_next) / dt
       }
       s <- k * s + (cop[t] * P[t] + B[t] + U[t] - Q[t]) * dt
     }
@@ -633,8 +636,7 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' with the end-of-window rule at their last slot). Only the first
 #' `flex_window_hours` of every window are optimised, so with
 #' `flex_window_hours = 24 * window_days` every slot is optimised. The slots
-#' past `flex_window_hours` run the `flexible` schedule, without backup heater
-#' or unmet heat.
+#' past `flex_window_hours` run the `flexible` schedule, without backup heater.
 #'
 #' @section Compressor first, backup heater second, unmet heat last:
 #' The backup heater's electricity is part of the load the objective sees, like
@@ -660,11 +662,11 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' left unmet only when neither the compressor nor the backup heater can
 #' deliver it.
 #'
-#' The unmet heat costs the same in every slot, so the solver may place it in
-#' any slot where it holds the floor. With the end-of-window rule the shortage
-#' often lands in the last slots of a window (the heat the compressor lacks to
-#' refill the tank by the end of it), so read it per window rather than per
-#' slot.
+#' Unmet heat appears only in slots where the tank is at its comfort floor:
+#' it is the heat that would have taken the level below it. The only
+#' exception is the last slot of a window, which also takes the heat the
+#' compressor and the backup heater lack to end the window as full as it
+#' started.
 #'
 #' The unmet heat only enters a window's problem when the window has no
 #' schedule that holds the band without it; with no backup heater and a band
@@ -678,21 +680,22 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' (under the relaxed capacities when they were relaxed). Only a capacity
 #' obligation the heat pump cannot meet at all (a negative capacity forcing more
 #' load than `Pc + Pb`, or more heat than the tank can hold) leaves a window
-#' without a schedule: it runs `flexible`, its level follows the balance
-#' unclamped and can leave the band, and its first `datetime` is reported in
+#' without a schedule: it runs `flexible`, its level follows the balance and
+#' can go above the band (see below), and its first `datetime` is reported in
 #' the `infeasible_windows` attribute.
 #'
-#' At the first slot of every window the level is clamped into the band, so a
-#' level that a fallback window or the slots outside every window left outside
-#' it does not make the window infeasible from its first slot. With every slot
-#' in an optimised window (`flex_window_hours = 24 * window_days`), the clamp
-#' is 0 everywhere unless a window fell back to `flexible`. The clamp leaves
-#' alone a level inside the band, or outside it by less than half a rounding
-#' step of the returned power (`0.005 * max(cop) * dt` kWh, with `cop` at least
-#' 1 when there is a backup heater), and is reported per row in the
-#' `tank_clamp_kwh` attribute: the level before the clamp minus the level after
-#' it, so positive where it removed heat above `SOCmax` and negative where it
-#' topped the tank up below `SOCmin`. Over the run,
+#' The comfort floor also holds in the slots that run `flexible` (past
+#' `flex_window_hours`, or in a fallback window): the heat that would take the
+#' level below `SOCmin` there is reported as unmet heat too, so the level never
+#' goes below the floor anywhere. Above `SOCmax` it can go, since that heat
+#' cannot be undone: the next window then starts with the level clamped to
+#' `SOCmax`, and the heat this removes is reported per row in the
+#' `tank_clamp_kwh` attribute (positive, at the first slot of that window). The
+#' clamp leaves alone a level less than half a rounding step of the returned
+#' power above the band (`0.005 * max(cop) * dt` kWh, with `cop` at least 1
+#' when there is a backup heater). With every slot in an optimised window
+#' (`flex_window_hours = 24 * window_days`), the clamp is 0 everywhere unless a
+#' window fell back to `flexible`. Over the run,
 #' `sum((cop * P + B + U) * dt) = sum(heat_demand * dt) + losses + (end level -
 #' initial level) + sum(tank_clamp_kwh)`; [get_tank_level()] reproduces the
 #' level.
@@ -717,7 +720,10 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   `static + P + B - production`; `"cost"` minimises the energy cost of it.
 #'   `"capacity"` has no tank form and stops with an error.
 #' @param Tcap numeric, tank capacity (kWh thermal, > 0): the heat between the
-#'   band's bottom and top.
+#'   band's bottom and top. For a mixed tank of `V` litres between a reference
+#'   temperature `T_ref` and its top temperature `T_max` (degrees C), it is
+#'   `V * 4.186 / 3600 * (T_max - T_ref)`, and a comfort floor at `T_floor`
+#'   is `SOCmin = 100 * (T_floor - T_ref) / (T_max - T_ref)`.
 #' @param Pc numeric, compressor cap (kW electric, > 0).
 #' @param SOCmin numeric, minimum State-of-Charge (%), the comfort floor.
 #' @param SOCmax numeric, maximum State-of-Charge (%).
@@ -743,12 +749,13 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   backup heater's power (kW electric = kW thermal); 0 outside optimised
 #'   windows and everywhere without a backup heater.
 #' - `unmet_heat_kw`: numeric vector, one value per row, rounded to 2 decimals:
-#'   the unmet heat (kW thermal, not electricity); 0 outside optimised windows
-#'   and wherever the demand was met.
+#'   the unmet heat (kW thermal, not electricity); 0 wherever the demand was
+#'   met.
 #' - `infeasible_windows`: the `datetime` of the first slot of every window that
 #'   fell back to `flexible` (empty when none did).
 #' - `tank_clamp_kwh`: numeric vector (kWh thermal), one value per row, 0 except
-#'   at the first slot of a window whose starting level was clamped.
+#'   at the first slot of a window that started above `SOCmax` (positive: the
+#'   heat removed).
 #'
 #' The heat pump's electric load is the power plus `attr(, "backup_kw")`.
 #'
@@ -915,16 +922,32 @@ add_tank_optimization <- function(
     path[length(path)]
   }
 
+  # Slots that run `flexible` hold the comfort floor too: the heat that would
+  # take the level below it is unmet, rounded up to 2 decimals so the level
+  # stays on the floor. Above the band the level runs free, and the next
+  # window start clamps it.
+  run_flexible <- function(level, idx) {
+    for (t in idx) {
+      s_next <- k * level + (cop[t] * P_out[t] - Q[t]) * dt
+      if (s_next < Smin - 1e-9) {
+        U_out[t] <<- ceiling((Smin - s_next) / dt * 100 - 1e-9) / 100
+      }
+      level <- k * level + (cop[t] * P_out[t] + U_out[t] - Q[t]) * dt
+    }
+    level
+  }
+
   for (w in seq_len(nrow(flex_windows))) {
     start <- flex_windows$start[w]
     idx <- flex_windows$flex_idx[[w]]
 
-    # Slots before the window run `flexible`, unclamped
+    # Slots before the window run `flexible`
     if (start > pos) {
-      level <- advance(level, seq(pos, start - 1))
+      level <- run_flexible(level, seq(pos, start - 1))
     }
 
-    # Clamp the starting level into the band
+    # Clamp the starting level into the band. The slots that run `flexible`
+    # hold the floor, so this only takes heat out above the top of the band.
     S0 <- min(max(level, Smin), Smax)
     if (abs(level - S0) > clamp_tol) {
       clamp[start] <- level - S0
@@ -984,6 +1007,7 @@ add_tank_optimization <- function(
         "\u26a0\ufe0f Optimization warning: the heat pump cannot meet the grid capacity obligations in some windows. Using the `flexible` schedule there."
       )
       infeasible <- c(infeasible, start)
+      level <- run_flexible(level, idx)
     } else {
       target <- tank_level_path(
         sol$power,
@@ -1015,10 +1039,14 @@ add_tank_optimization <- function(
           "\u26a0\ufe0f Optimization warning: the heat pump cannot cover the heat demand in some windows. Leaving it unmet there (attribute `unmet_heat_kw`)."
         )
       }
+      level <- advance(level, idx)
     }
 
-    level <- advance(level, idx)
     pos <- max(idx) + 1L
+  }
+  # Slots after the last window run `flexible`
+  if (pos <= n_rows) {
+    run_flexible(level, seq(pos, n_rows))
   }
 
   attr(P_out, "infeasible_windows") <- dttm_seq[infeasible]

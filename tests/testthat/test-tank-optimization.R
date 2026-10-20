@@ -340,11 +340,11 @@ test_that("`get_tank_level()` closes the heat balance", {
   expect_gte(min(level3), 3 * 20 / 100 - 0.01 - rounding_tol)
 })
 
-test_that("a clamp between windows tops the tank up at the next window start", {
+test_that("slots that run `flexible` hold the floor with unmet heat", {
   # Two windows 06:00-18:00; the slots from 18:00 to 06:00 run `flexible`,
   # which draws nothing, against a demand that empties the tank.
   d <- tank_data(days = 3, flexible = 0)[1:54, ]
-  P <- add_tank_optimization(
+  P <- suppressMessages(add_tank_optimization(
     d,
     "grid",
     Tcap = 10,
@@ -352,17 +352,48 @@ test_that("a clamp between windows tops the tank up at the next window start", {
     SOCmin = 20,
     window_start_hour = 6,
     flex_window_hours = 12
-  )
+  ))
 
   expect_length(attr(P, "infeasible_windows"), 0)
-  expect_equal(as.numeric(P[c(1:6, 19:30, 43:54)]), rep(0, 30))
+  expect_equal(as.numeric(P[43:54]), rep(0, 12))
+  expect_equal(attr(P, "tank_clamp_kwh"), rep(0, 54))
+
+  # The tank reaches its floor overnight, and from then on the demand the
+  # `flexible` schedule leaves uncovered is unmet
+  U <- attr(P, "unmet_heat_kw")
+  expect_gt(sum(U[19:30]), 0)
+  expect_equal(U[31:42], rep(0, 12))
+
+  level <- get_tank_level(P, d$heat_demand, d$cop, init = 10, unmet_heat = U)
+  expect_gte(min(level), 10 * 20 / 100 - rounding_tol)
+  expect_equal(
+    tank_balance_gap(P, d, init = 10, unmet = U),
+    0,
+    tolerance = 1e-9
+  )
+})
+
+test_that("a level above the band at a window start is clamped down", {
+  # The `flexible` schedule before 06:00 and overnight heats 9 kW into a 1 kW
+  # demand
+  d <- tank_data(days = 3, flexible = 3)[1:54, ]
+  P <- add_tank_optimization(
+    d,
+    "grid",
+    Tcap = 10,
+    Pc = 3,
+    window_start_hour = 6,
+    flex_window_hours = 12
+  )
 
   clamp <- attr(P, "tank_clamp_kwh")
-  expect_lt(clamp[31], 0)
-  expect_equal(clamp[-31], rep(0, 53))
+  expect_gt(clamp[7], 0)
+  expect_gt(clamp[31], 0)
+  expect_equal(clamp[-c(7, 31)], rep(0, 52))
+  expect_equal(attr(P, "unmet_heat_kw"), rep(0, 54))
 
   level <- get_tank_level(P, d$heat_demand, d$cop, init = 10, clamp = clamp)
-  expect_equal(level[31], 10 * 20 / 100)
+  expect_equal(level[31], 10)
   expect_equal(
     tank_balance_gap(P, d, init = 10, clamp = clamp),
     0,
@@ -480,6 +511,8 @@ test_that("heat is left unmet only beyond the compressor, the backup and the tan
 
       path <- tank_path(P, d, init = 3, backup = B, unmet = U)
       expect_gte(min(path), 0 - rounding_tol)
+      # Heat is unmet only where the tank ends the slot at its floor
+      expect_equal(path[which(U > 0) + 1], rep(0, sum(U > 0)), tolerance = 0.02)
       expect_equal(
         tank_balance_gap(P, d, init = 3, backup = B, unmet = U),
         0,

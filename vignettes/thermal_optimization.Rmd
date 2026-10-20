@@ -79,6 +79,24 @@ $$
 
 * The heat pump's electric load $P_t + B_t$ is part of the net power of the site, $L_t + P_t + B_t - G_t$, which must stay within the grid import and export capacities, as in the [net power article](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html).
 
+## Litres and temperatures
+
+The model counts the heat in the tank in kWh, but a tank is usually described by its **volume** and its **temperatures**. Assuming a mixed tank (one temperature for all its water), the heat it holds above a reference temperature $T_{ref}$ (e.g. the return temperature of the heating circuit) is:
+
+$$
+S = V \cdot c_p \cdot \left(T - T_{ref}\right), \qquad c_p = \frac{4.186}{3600} \approx 0.001163 \; \text{kWh / (L K)}
+$$
+
+So a tank of volume $V$ (L) that can be heated up to $T_{max}$, with a comfort floor at $T_{floor}$, translates into the arguments of `add_tank_optimization()` as:
+
+$$
+T_{cap} = V \cdot c_p \cdot \left(T_{max} - T_{ref}\right), \qquad
+SOC_{min} = 100 \cdot \frac{T_{floor} - T_{ref}}{T_{max} - T_{ref}}, \qquad
+SOC_{max} = 100
+$$
+
+and the level $S_t$ back into the temperature $T_t = T_{ref} + S_t / (V c_p)$. For example, 300 L between a reference of 20 °C and a maximum of 55 °C hold $300 \cdot 0.001163 \cdot 35 \approx 12.2$ kWh, and a comfort floor at 30 °C is $SOC_{min} \approx 28.6\%$.
+
 ## Optimization windows
 
 The level carries from one window to the next, so the windows are solved in order. They are the windows of the other optimization functions, one every `window_days` days from `window_start_hour`, plus the **partial windows** that the run cuts at both ends:
@@ -88,7 +106,7 @@ The level carries from one window to the next, so the windows are solved in orde
 
 Both are optimized like any other window. Only the first `flex_window_hours` of every window are optimized, and the slots after them run the static schedule of the heat pump, the column `flexible` of `opt_data`. So with `flex_window_hours = 24` (and `window_days = 1`) **every time slot is optimized**, and the level of the tank never leaves its band.
 
-When a level outside the band reaches the first slot of a window (only possible after slots that ran `flexible`), it is brought back into the band, and the heat this takes is reported in the attribute `tank_clamp_kwh`. With every slot optimized, this only happens after a window that fell back to the static schedule because of the grid capacities (see below).
+The comfort floor holds in the slots that run `flexible` too: the heat that would take the tank below its floor there is reported as unmet heat, as in the optimized slots. The static schedule can however heat the tank **above** its top. Since the next window must start inside the band, its starting level is then brought down to the top, and the heat this removes is reported in the attribute `tank_clamp_kwh`. With every slot optimized, this only happens after a window that fell back to the static schedule because of the grid capacities (see below).
 
 
 # Objective
@@ -126,7 +144,7 @@ and with `lambda > 0` the largest derivative of the ramping penalty, $4 \lambda 
 
 Without the unmet heat, a window where the compressor and the backup heater cannot keep the tank above $SOC_{min}$ (a cold spell, a compressor too small for the peak, a COP of 0 during a long defrost) would have no solution at all. With it, **every window has a solution**: the level never goes below the comfort floor, and the heat that would have taken it there is reported as unmet. That is why the floor is *soft*: it is the comfort of the building, and not the level of the tank, that gives way.
 
-The unmet heat costs the same in every slot, so the solver is free to place it in any slot where it keeps the level at the floor. Since every window must also end at least as full as it started, the shortage often shows up in the last slots of the window: the tank reaches its floor during the peak, the compressor runs at full power afterwards, and the heat it still lacks to refill the tank by the end of the window is reported as unmet. Read the unmet heat per window, as the heat the building went without in that window, rather than per slot.
+In terms of temperature: the backup heater switches on when, with the compressor at full power, the temperature of the tank would drop below the comfort floor; and **heat is unmet when, even with the backup heater, the temperature would drop below it**. So the unmet heat is only positive while the tank is at its comfort floor. The only exception is the last slot of a window, which also reports the heat the heat pump lacks to end the window as full as it started.
 
 The unmet heat only enters the problem of a window when the window has no solution that holds the band without it. So, without a backup heater and with a band that the compressor can hold, the problem is exactly the one without the backup heater and the unmet heat.
 
@@ -141,7 +159,7 @@ A window can still lack a solution when the **grid capacities** oblige the heat 
 |---|---|
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
 | `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal) |
-| `tank_clamp_kwh` | Heat taken out of the tank (kWh thermal) when its level is brought back into the band at the start of a window |
+| `tank_clamp_kwh` | Heat taken out of the tank (kWh thermal) when a window starts above the top of the band |
 | `infeasible_windows` | First `datetime` of every window that ran the static schedule |
 
 The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the results.
@@ -149,11 +167,11 @@ The electric load of the heat pump is the returned power plus `attr(P, "backup_k
 
 # Example
 
-Package `flextools` provides an example data set of time-series energy and prices profiles, `energy_profiles`. We will use three days of January 2023 with 15-minute resolution, the building consumption as static load and the solar PV production. The data set has no heat demand, so we build one with a morning and an evening peak, and a cold third day where it rises by 80%. The COP of the compressor is 3.2, and drops to 2.7 on the cold day:
+Package `flextools` provides an example data set of time-series energy and prices profiles, `energy_profiles`. We will use three days of January 2023 with 15-minute resolution, the building consumption as static load and the solar PV production. The import prices of this data set are sometimes negative, so we cap the export price at the import price (a feed-in tariff that never pays more than importing costs).
+
+The data set has no heat demand, so we build one with a morning and an evening peak, around a base of 2 kW. The **second day is a cold morning**: its morning peak reaches 12 kW, far above what the compressor can deliver. The COP of the compressor is 3.2, and drops to 2.7 on the cold day:
 
 ```{r}
-cold <- c(1, 1, 1.8)
-
 opt_data <- energy_profiles %>%
   filter(
     datetime >= dmy("09/01/2023", tz = "CET"),
@@ -168,17 +186,22 @@ opt_data <- energy_profiles %>%
     production = solar,
     static = building,
     price_imported,
-    price_exported,
-    heat_demand = cold[day] *
-      (2 + 2.5 * exp(-((hour - 7.5) / 1.2)^2) + 3 * exp(-((hour - 19) / 1.5)^2)),
-    cop = ifelse(day == 3, 2.7, 3.2),
+    price_exported = pmin(price_exported, price_imported),
+    heat_demand = 2 +
+      ifelse(
+        day == 2,
+        10 * exp(-((hour - 8) / 2)^2), # cold morning
+        2.5 * exp(-((hour - 7.5) / 1.2)^2)
+      ) +
+      3 * exp(-((hour - 19) / 1.5)^2),
+    cop = ifelse(day == 2, 2.7, 3.2),
     flexible = heat_demand / cop
   )
 
 head(opt_data)
 ```
 
-The static schedule `flexible` is the heat pump following the heat demand without any storage. The heat demand peaks at `r round(max(opt_data$heat_demand), 1)` kW on the cold day:
+The static schedule `flexible` is the heat pump following the heat demand without any storage:
 
 ```{r, echo=FALSE}
 opt_data %>%
@@ -192,109 +215,117 @@ opt_data %>%
   dyOptions(strokeWidth = 2)
 ```
 
-## Without backup heater
-
-We consider a heat pump with a 2 kW compressor and a 10 kWh tank, with a comfort floor at 20% of the tank, that minimizes the energy cost. On the cold day the compressor delivers at most $2.7 \cdot 2 = 5.4$ kW of heat, so the evening peak needs more heat than the compressor and the tank can provide together:
+The heat pump has a 2 kW compressor and a **300 L tank** that can be heated up to **55 °C**, with a **comfort floor at 30 °C**, taking 20 °C as the reference temperature. We convert them into the tank's capacity and comfort floor as described [above](#litres-and-temperatures):
 
 ```{r}
-P <- add_tank_optimization(
-  opt_data,
-  opt_objective = "cost",
-  Tcap = 10,
-  Pc = 2,
-  SOCmin = 20
-)
+volume <- 300 # L
+T_ref <- 20 # °C
+T_floor <- 30 # °C, comfort floor
+T_max <- 55 # °C
+kwh_per_degree <- volume * 4.186 / 3600 # kWh per °C
+
+Tcap <- kwh_per_degree * (T_max - T_ref)
+SOCmin <- 100 * (T_floor - T_ref) / (T_max - T_ref)
+c(Tcap = Tcap, SOCmin = SOCmin)
 ```
 
-The optimization still returns a schedule for every day, and reports the heat it could not deliver:
+On the cold morning the compressor delivers at most $2.7 \cdot 2 = 5.4$ kW of heat, and the tank, from 55 °C down to 30 °C, `r round(kwh_per_degree * (T_max - T_floor), 1)` kWh: not enough for the peak.
+
+To show the results, a small helper gathers the compressor power, the backup heater, the unmet heat and the temperature of the tank (from the level that `get_tank_level()` computes) for each scenario:
 
 ```{r}
-results <- opt_data %>%
-  mutate(
-    P = P,
-    B = attr(P, "backup_kw"),
-    U = attr(P, "unmet_heat_kw"),
-    level = get_tank_level(
-      P, heat_demand, cop,
-      init = 10, time_resolution = 15,
-      clamp = attr(P, "tank_clamp_kwh"),
-      backup = B,
-      unmet_heat = U
+tank_results <- function(opt_data, P) {
+  opt_data %>%
+    mutate(
+      P = P,
+      B = attr(P, "backup_kw"),
+      U = attr(P, "unmet_heat_kw"),
+      level = get_tank_level(
+        P, heat_demand, cop,
+        init = Tcap, time_resolution = 15,
+        clamp = attr(P, "tank_clamp_kwh"),
+        backup = B,
+        unmet_heat = U
+      ),
+      temperature = T_ref + level / kwh_per_degree
     )
-  )
+}
 
-results %>%
-  group_by(date = date(datetime)) %>%
-  summarise(
-    heat_demand_kWh = sum(heat_demand) / 4,
-    compressor_kWh = sum(P) / 4,
-    backup_kWh = sum(B) / 4,
-    unmet_heat_kWh = sum(U) / 4
-  )
+daily_totals <- function(results) {
+  results %>%
+    group_by(date = date(datetime)) %>%
+    summarise(
+      demand_kWh = sum(heat_demand) / 4,
+      compressor_kWh = sum(P) / 4,
+      backup_kWh = sum(B) / 4,
+      unmet_kWh = sum(U) / 4,
+      min_temp_C = min(temperature)
+    )
+}
 ```
 
 ```{r, echo=FALSE}
 plot_tank <- function(results) {
   results %>%
-    select(datetime, heat_demand, P, B, U, level) %>%
+    mutate(comfort_floor = T_floor) %>%
+    select(datetime, heat_demand, P, B, U, temperature, comfort_floor) %>%
     timefully::plot_ts() %>%
     dyAxis("y", "Power (kW)") %>%
-    dyAxis("y2", "Tank level (kWh)") %>%
+    dyAxis("y2", "Tank temperature (°C)", valueRange = c(T_ref, T_max + 5)) %>%
     dySeries("heat_demand", "Heat demand (kW thermal)", "firebrick", strokePattern = "dashed") %>%
     dySeries("P", "Compressor (kW electric)", "navy") %>%
-    dySeries("B", "Backup heater (kW)", "orange") %>%
+    dySeries("B", "Backup heater (kW)", "orange", fillGraph = TRUE) %>%
     dySeries("U", "Unmet heat (kW thermal)", "red", fillGraph = TRUE) %>%
-    dySeries("level", "Tank level", axis = "y2", color = "green", strokeWidth = 2) %>%
-    dyLimit(10 * 0.2, "Comfort floor", color = "gray") %>%
+    dySeries("temperature", "Tank temperature (°C)", axis = "y2", color = "green", strokeWidth = 2) %>%
+    dySeries("comfort_floor", "Comfort floor (°C)", axis = "y2", color = "gray", strokePattern = "dotted", strokeWidth = 1) %>%
     dyLegend(width = 250, show = "always") %>%
     dyOptions(strokeWidth = 2)
 }
+```
+
+## Without backup heater
+
+First, the heat pump has no backup heater and minimizes the energy cost:
+
+```{r}
+P <- add_tank_optimization(
+  opt_data,
+  opt_objective = "cost",
+  Tcap = Tcap,
+  Pc = 2,
+  SOCmin = SOCmin
+)
+results <- tank_results(opt_data, P)
+daily_totals(results)
+```
+
+```{r, echo=FALSE}
 plot_tank(results)
 ```
 
-The compressor fills the tank during the cheapest hours before each peak. On the first two days the tank and the compressor cover the whole demand. On the cold day the tank empties down to its comfort floor (`r 10 * 0.2` kWh) during the evening peak, and the compressor runs at full power from then until midnight. It still cannot refill the tank to where the day started, and the heat it lacks appears as unmet heat in the last slots of the day. The level never goes below the floor.
+On the first and the last day, the compressor heats the tank up to 55 °C during the cheapest hours before each peak, and the tank covers the peaks without dropping below 30 °C. On the cold morning the tank starts full, and the compressor runs at full power through the peak, but the temperature falls to the comfort floor at around 08:00. From then on, the heat that would take it below 30 °C is reported as **unmet heat**, until the peak is over. The temperature of the tank never goes below the comfort floor: it is the building that goes without that heat.
 
 ## With a backup heater
 
-Now the heat pump also has a 3 kW backup heater (`Pb = 3`):
+Now the heat pump also has a **1.5 kW backup heater** (`Pb = 1.5`):
 
 ```{r}
 P_backup <- add_tank_optimization(
   opt_data,
   opt_objective = "cost",
-  Tcap = 10,
+  Tcap = Tcap,
   Pc = 2,
-  SOCmin = 20,
-  Pb = 3
+  SOCmin = SOCmin,
+  Pb = 1.5
 )
-
-results_backup <- opt_data %>%
-  mutate(
-    P = P_backup,
-    B = attr(P_backup, "backup_kw"),
-    U = attr(P_backup, "unmet_heat_kw"),
-    level = get_tank_level(
-      P, heat_demand, cop,
-      init = 10, time_resolution = 15,
-      clamp = attr(P_backup, "tank_clamp_kwh"),
-      backup = B,
-      unmet_heat = U
-    )
-  )
-
-results_backup %>%
-  group_by(date = date(datetime)) %>%
-  summarise(
-    heat_demand_kWh = sum(heat_demand) / 4,
-    compressor_kWh = sum(P) / 4,
-    backup_kWh = sum(B) / 4,
-    unmet_heat_kWh = sum(U) / 4
-  )
+results_backup <- tank_results(opt_data, P_backup)
+daily_totals(results_backup)
 ```
 
 ```{r, echo=FALSE}
 plot_tank(results_backup)
 ```
 
-The compressor delivers the same energy as before, and the backup heater delivers exactly the heat that was unmet before, only at the end of the cold day, while the compressor is already at full power. No heat is left unmet. On the first two days, where the compressor suffices, the backup heater stays off even though it could run in cheaper hours.
+The compressor runs as before, and the **backup heater switches on** when the compressor at full power can no longer keep the tank above the comfort floor during the cold morning. The optimization looks ahead: it starts the backup heater as soon as the peak starts, rather than when the tank reaches 30 °C, because the heat it adds early is kept in the tank for later. The tank now reaches its comfort floor later, at around 08:45, and **only then is heat left unmet**: the heat that even the compressor and the backup heater together cannot deliver. On the first and the last day the compressor suffices, and the backup heater stays off even though it could run in cheaper hours.
 
+With a larger backup heater (e.g. `Pb = 3`), the unmet heat disappears altogether.

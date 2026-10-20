@@ -4,7 +4,7 @@
 \alias{tank_level_path}
 \title{Tank level path (unrounded)}
 \usage{
-tank_level_path(power, heat_demand, cop, init, k, dt, backup = 0, unmet = 0)
+tank_level_path(power, heat_demand, cop, init, k, dt, backup = 0)
 }
 \arguments{
 \item{power}{numeric vector, compressor electric power (kW)}
@@ -20,13 +20,13 @@ tank_level_path(power, heat_demand, cop, init, k, dt, backup = 0, unmet = 0)
 \item{dt}{numeric, slot length in hours}
 
 \item{backup}{numeric vector, backup heater power (kW, electric = thermal)}
-
-\item{unmet}{numeric vector, unmet heat (kW thermal)}
 }
 \value{
 numeric vector of length \code{length(power) + 1}
 }
 \description{
-The level at the start of each slot, and after the last one.
+The level at the start of each slot, and after the last one. The level
+never goes below 0, the inlet temperature (a tank there gives no more
+heat), except by less than half a rounding step of the power.
 }
 \keyword{internal}

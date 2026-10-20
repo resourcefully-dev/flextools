@@ -4,29 +4,31 @@
   comfort floor**, so every window has a schedule. The new argument `Pb` (last,
   default `NULL`) is the backup heater's rating in kW electric (= kW thermal,
   COP 1); `NULL` or 0 means none. The balance becomes
-  `S[t] = S[t-1] * (1 - loss/100)^dt + (cop * P + B + U - heat_demand) * dt`
-  with `0 <= B <= Pb` (also where `cop = 0`) and the unmet heat `U >= 0`, which
-  holds the level at `SOCmin` when the compressor, the backup heater and the
-  tank cannot. The backup heater's load enters the objective like the
-  compressor's, plus `2 * h` per kW, and the unmet heat costs `100 * h` per kW,
-  `h` being the window's highest value of a kW of load in the objective (the
-  highest absolute price for `"cost"`, the largest derivative of the squared
-  net flow for `"grid"`, both weighted for a numeric objective), so the solver
-  uses the compressor first, then the backup heater, and leaves heat unmet
-  last. The unmet heat only enters a window that has no schedule without it,
-  and it is only positive in slots where the tank is at its comfort floor (and
-  in the last slot of a window, for what the end-of-window rule lacks).
-  The result gains the attributes `backup_kw` and `unmet_heat_kw` (one value
-  per row, rounded to 2 decimals). A window the band cannot hold now returns a
-  schedule with unmet heat instead of falling back to `flexible`. Without a
-  backup heater and in windows whose band holds, the results are unchanged.
+  `S[t] = S[t-1] * (1 - loss/100)^dt + (cop * P + B - heat_demand) * dt`
+  with `0 <= B <= Pb` (also where `cop = 0`). The level is measured above the
+  **inlet water temperature** (`SOC = 0`, where the tank gives no more heat).
+  When the compressor and the backup heater cannot hold `SOCmin`, the tank
+  cools below it, down to the inlet temperature at most, and the heat it gives
+  below the floor, plus the demand it cannot serve at the inlet temperature,
+  is the **unmet heat**. The backup heater's load enters the objective like
+  the compressor's, plus `2 * h` per kW; going below the floor costs
+  `20 * h / dt` per kWh and slot (the end-of-window rule becomes soft at the
+  same price), `h` being the window's highest value of a kW of load in the
+  objective (the highest absolute price for `"cost"`, the largest derivative
+  of the squared net flow for `"grid"`, both weighted for a numeric
+  objective). So the solver uses the compressor first, then the backup
+  heater, and only then lets the tank cool below its floor. The soft floor
+  only enters a window that has no schedule without it. The result gains the
+  attributes `backup_kw` and `unmet_heat_kw` (one value per row, rounded to 2
+  decimals). Without a backup heater and in windows whose band holds, the
+  results are unchanged.
 * `add_tank_optimization()` makes the grid capacities **soft**, as
   `add_battery_optimization()` does: a window with no schedule that holds the
-  band within them is solved with the unmet heat and a penalised slack on each
-  capacity (`10 * h` per kW, between the backup heater and the unmet heat),
-  bounded by how far the site misses the capacity with the heat pump running
-  `flexible` (import) or off (export). This replaces the relaxation of the
-  capacities to the static schedule's net flow and the fallback to
+  band within them is solved with the soft comfort floor and a penalised slack
+  on each capacity (`10 * h` per kW, between the backup heater and the comfort
+  floor), bounded by how far the site misses the capacity with the heat pump
+  running `flexible` (import) or off (export). This replaces the relaxation of
+  the capacities to the static schedule's net flow and the fallback to
   `flexible`: every window now has a schedule, and **the `infeasible_windows`
   attribute is gone**. A missed capacity is reported with a message.
 * `add_tank_optimization()` also optimises the **partial windows** the run cuts
@@ -37,15 +39,15 @@
   any window. Previously they ran `flexible`. With `flex_window_hours = 24 *
   window_days` every slot is now optimised.
 * The slots that still run `flexible` (past `flex_window_hours`, or in a
-  window the solver failed on) keep the tank in its band too: the heat they leave short
-  of `SOCmin` is reported as unmet heat, and the compressor stops as a
-  thermostat would at `SOCmax` (the returned power there is `flexible` reduced
-  to what keeps the level at the top). The level therefore never leaves the
-  band, and the clamp into the band at each window start is gone:
-  **`add_tank_optimization()` no longer returns `tank_clamp_kwh`, and
+  window the solver failed on) behave like the tank too: the compressor stops
+  as a thermostat would at `SOCmax` (the returned power there is `flexible`
+  reduced to what keeps the level at the top), and below the floor the tank
+  cools to the inlet temperature at most, with unmet heat. The level therefore
+  never leaves `[0, SOCmax]`, and the clamp into the band at each window start
+  is gone: **`add_tank_optimization()` no longer returns `tank_clamp_kwh`, and
   `get_tank_level()` loses its `clamp` argument.**
-* `get_tank_level()` gains `backup` and `unmet_heat` (default 0), to add the
-  attributes above to the balance.
+* `get_tank_level()` gains `backup` (default 0) and stops the level at the
+  inlet temperature (0).
 * New article "Thermal optimization" on the tank model, the backup heater and
   the soft comfort floor, with a worked example in litres and degrees.
 

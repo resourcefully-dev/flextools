@@ -29,16 +29,9 @@ tank_data <- function(
   )
 }
 
-# Unrounded level path, start of each slot plus the end of the last one
-tank_path <- function(
-  P,
-  d,
-  init,
-  loss = 0,
-  resolution = 60,
-  backup = 0,
-  unmet = 0
-) {
+# Unrounded level path, start of each slot plus the end of the last one. It
+# stops at the inlet temperature (level 0).
+tank_path <- function(P, d, init, loss = 0, resolution = 60, backup = 0) {
   dt <- resolution / 60
   tank_level_path(
     P,
@@ -47,29 +40,27 @@ tank_path <- function(
     init,
     (1 - loss / 100)^dt,
     dt,
-    backup,
-    unmet
+    backup
   )
 }
 
-# delivered - (demand + losses + change in level)
-tank_balance_gap <- function(
-  P,
-  d,
-  init,
-  loss = 0,
-  resolution = 60,
-  backup = 0,
-  unmet = 0
-) {
+# delivered - (demand served + losses + change in level), the demand served
+# being what the tank could give above the inlet temperature
+tank_balance_gap <- function(P, d, init, loss = 0, resolution = 60, backup = 0) {
   dt <- resolution / 60
   k <- (1 - loss / 100)^dt
-  path <- tank_path(P, d, init, loss, resolution, backup, unmet)
+  path <- tank_path(P, d, init, loss, resolution, backup)
   n <- length(P)
-  delivered <- sum((d$cop * P + backup + unmet) * dt)
-  demand <- sum(d$heat_demand * dt)
+  backup <- rep_len(backup, n)
+  heat_in <- (d$cop * P + backup - d$heat_demand) * dt
+  # Below 0 by more than rounding: demand the tank did not serve
+  s_raw <- k * path[seq_len(n)] + heat_in
+  tol <- 0.005 * max(d$cop, 1) * dt + 1e-9
+  not_served <- sum(ifelse(s_raw < -tol, -s_raw, 0))
+  delivered <- sum((d$cop * P + backup) * dt)
+  served <- sum(d$heat_demand * dt) - not_served
   losses <- sum((1 - k) * path[seq_len(n)])
-  delivered - (demand + losses + (path[n + 1] - init))
+  delivered - (served + losses + (path[n + 1] - init))
 }
 
 net_cost <- function(P, d) {
@@ -113,7 +104,10 @@ test_that("the compressor cap binds", {
   expect_equal(sum(P3[1:6]), 8, tolerance = 0.01)
 })
 
-test_that("a window the band cannot hold leaves heat unmet instead of falling back", {
+test_that("below its comfort floor the tank cools, and that heat is unmet", {
+  # Day 2: 5 kW of heat for 3 hours against 3 kW from the compressor, 6 kWh
+  # short. The tank holds 3 kWh above the inlet temperature (level 0), 2.4 of
+  # them above the comfort floor.
   heat_demand <- rep(1, 72)
   heat_demand[24 + 9:11] <- 5
   d <- tank_data(days = 3, heat_demand = heat_demand, flexible = 0.33)
@@ -126,23 +120,36 @@ test_that("a window the band cannot hold leaves heat unmet instead of falling ba
       SOCmin = 20,
       SOCini = 100
     ),
-    "cannot cover the heat demand"
+    "below its comfort floor"
   )
 
   expect_equal(attr(P, "backup_kw"), rep(0, 72))
   unmet <- attr(P, "unmet_heat_kw")
   expect_equal(unmet[-(25:48)], rep(0, 48))
-  expect_gt(sum(unmet), 0)
+  # Everything beyond the 2.4 kWh above the floor is unmet: the 0.6 kWh the
+  # tank gives below it, and the 3 kWh it cannot give at all
+  expect_equal(sum(unmet), 6 - 2.4, tolerance = 0.02)
 
-  # The level never leaves the band, and the heat balance closes with the
-  # unmet heat in it
-  path <- tank_path(P, d, init = 3, unmet = unmet)
-  expect_gte(min(path), 3 * 20 / 100 - rounding_tol)
-  expect_equal(
-    tank_balance_gap(P, d, init = 3, unmet = unmet),
-    0,
-    tolerance = 1e-9
-  )
+  # The level goes below the floor, down to the inlet temperature and not
+  # below, and the heat balance closes
+  path <- tank_path(P, d, init = 3)
+  expect_equal(min(path[25:49]), 0, tolerance = rounding_tol)
+  expect_gte(min(path), 0)
+  expect_equal(tank_balance_gap(P, d, init = 3), 0, tolerance = 1e-9)
+  # Heat is unmet only in slots that end below the floor
+  expect_true(all(path[which(unmet > 0) + 1] < 3 * 20 / 100))
+
+  # A shorter peak (2 kWh short against 0.6 kWh above an 80 % floor) cools
+  # the tank below its floor without emptying it: 1.4 kWh unmet
+  d2 <- d
+  d2$heat_demand[24 + 10:11] <- 1
+  P2 <- suppressMessages(add_tank_optimization(
+    d2, "cost", Tcap = 3, Pc = 1, SOCmin = 80, SOCini = 100
+  ))
+  expect_equal(sum(attr(P2, "unmet_heat_kw")), 1.4, tolerance = 0.02)
+  path2 <- tank_path(P2, d2, init = 3)
+  expect_lt(min(path2), 3 * 80 / 100 - 1)
+  expect_gt(min(path2), 0)
 })
 
 test_that("a grid obligation the heat pump cannot meet is approached, not abandoned", {
@@ -350,7 +357,7 @@ test_that("`get_tank_level()` closes the heat balance", {
   )
   unmet <- attr(P3, "unmet_heat_kw")
   expect_equal(
-    tank_balance_gap(P3, d3, init = 3, loss = 1, unmet = unmet),
+    tank_balance_gap(P3, d3, init = 3, loss = 1),
     0,
     tolerance = 1e-9
   )
@@ -359,13 +366,12 @@ test_that("`get_tank_level()` closes the heat balance", {
     d3$heat_demand,
     d3$cop,
     init = 3,
-    loss = 1,
-    unmet_heat = unmet
+    loss = 1
   )
-  expect_gte(min(level3), 3 * 20 / 100 - 0.01 - rounding_tol)
+  expect_gte(min(level3), 0 - 0.01 - rounding_tol)
 })
 
-test_that("slots that run `flexible` hold the floor with unmet heat", {
+test_that("slots that run `flexible` leave heat unmet at the inlet temperature", {
   # Two windows 06:00-18:00; the slots from 18:00 to 06:00 run `flexible`,
   # which draws nothing, against a demand that empties the tank.
   d <- tank_data(days = 3, flexible = 0)[1:54, ]
@@ -381,16 +387,17 @@ test_that("slots that run `flexible` hold the floor with unmet heat", {
 
   expect_equal(as.numeric(P[43:54]), rep(0, 12))
 
-  # The tank reaches its floor overnight, and from then on the demand the
-  # `flexible` schedule leaves uncovered is unmet
+  # The tank empties overnight, and once it reaches the inlet temperature the
+  # demand the `flexible` schedule leaves uncovered is unmet
   U <- attr(P, "unmet_heat_kw")
   expect_gt(sum(U[19:30]), 0)
   expect_equal(U[31:42], rep(0, 12))
 
-  level <- get_tank_level(P, d$heat_demand, d$cop, init = 10, unmet_heat = U)
-  expect_gte(min(level), 10 * 20 / 100 - rounding_tol)
+  level <- get_tank_level(P, d$heat_demand, d$cop, init = 10)
+  expect_lt(min(level), 10 * 20 / 100)
+  expect_gte(min(level), 0 - rounding_tol)
   expect_equal(
-    tank_balance_gap(P, d, init = 10, unmet = U),
+    tank_balance_gap(P, d, init = 10),
     0,
     tolerance = 1e-9
   )
@@ -446,10 +453,11 @@ test_that("`get_tank_level()` follows the balance and validates its inputs", {
   expect_error(get_tank_level(1, 1, 3, init = NA), "init")
   expect_error(get_tank_level(1, 1, 3, init = 0, loss = -1), "loss")
   expect_error(get_tank_level(c(1, 1), c(1, 1, 1), 3, init = 0), "heat_demand")
-  # The backup heater and the unmet heat add heat one to one
+  # The backup heater adds heat one to one, and the level stops at the inlet
+  # temperature
   expect_equal(
-    get_tank_level(c(0, 0, 0), 1, 3, init = 2, backup = c(1, 0, 0), unmet = c(0, 2, 0)),
-    c(2, 2, 3)
+    get_tank_level(c(0, 0, 0), 1, 3, init = 1, backup = c(1, 0, 0)),
+    c(1, 1, 0)
   )
   expect_error(get_tank_level(1, 1, 3, init = 0, backup = NA_real_), "backup")
 })
@@ -524,12 +532,12 @@ test_that("heat is left unmet only beyond the compressor, the backup and the tan
       expect_equal(sum(U), 6 - backup_heat, tolerance = 0.02)
       expect_equal(U[-(18:20)], rep(0, 21))
 
-      path <- tank_path(P, d, init = 3, backup = B, unmet = U)
+      path <- tank_path(P, d, init = 3, backup = B)
       expect_gte(min(path), 0 - rounding_tol)
-      # Heat is unmet only where the tank ends the slot at its floor
+      # Heat is unmet only where the tank ends the slot empty (floor 0)
       expect_equal(path[which(U > 0) + 1], rep(0, sum(U > 0)), tolerance = 0.02)
       expect_equal(
-        tank_balance_gap(P, d, init = 3, backup = B, unmet = U),
+        tank_balance_gap(P, d, init = 3, backup = B),
         0,
         tolerance = 1e-9
       )
@@ -579,7 +587,7 @@ test_that("the slots before the first window start form a leading window", {
 
   B <- attr(P, "backup_kw")
   U <- attr(P, "unmet_heat_kw")
-  path <- tank_path(P, d, init = 3, resolution = 15, backup = B, unmet = U)
+  path <- tank_path(P, d, init = 3, resolution = 15, backup = B)
   tol <- 0.005 * max(d$cop, 1) * 0.25 * 4 + 1e-9
   expect_gte(min(path), 6 * 20 / 100 - tol)
   expect_lte(max(path), 6 + tol)
@@ -589,7 +597,7 @@ test_that("the slots before the first window start form a leading window", {
   # that must end where it started) needs the backup heater before 06:00
   expect_gt(sum(B[1:24]), 0)
   expect_equal(
-    tank_balance_gap(P, d, init = 3, resolution = 15, backup = B, unmet = U),
+    tank_balance_gap(P, d, init = 3, resolution = 15, backup = B),
     0,
     tolerance = 1e-9
   )

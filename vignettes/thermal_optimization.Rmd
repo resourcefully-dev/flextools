@@ -16,7 +16,7 @@ Function `add_tank_optimization()` optimizes a **heat pump that charges one ther
 * Minimize the energy cost, with `opt_objective = "cost"` (LP, [HiGHS](https://highs.dev/), or QP when `lambda > 0`)
 * Minimize a weighted combination of net power and cost, with a numeric `opt_objective` between `0` and `1` (QP)
 
-The tank plays the role of the battery: it stores heat, so the compressor can run when electricity is cheap or locally produced, and the tank delivers the heat later. On top of the compressor, the heat pump can have a **resistive backup heater**, and the comfort floor of the tank is **soft**: when neither the compressor, nor the backup heater, nor the tank can cover the heat demand, the optimization reports the missing heat as **unmet heat** instead of failing. In this article, we'll cover the tank model, the backup heater and the soft comfort floor, followed by a worked example.
+The tank plays the role of the battery: it stores heat, so the compressor can run when electricity is cheap or locally produced, and the tank delivers the heat later. On top of the compressor, the heat pump can have a **resistive backup heater**, and the comfort floor of the tank is **soft**: when neither the compressor nor the backup heater can keep the tank above it, the tank keeps giving heat below its comfort temperature, down to the temperature of the inlet water, and the optimization reports that heat as **unmet heat** instead of failing. In this article, we'll cover the tank model, the backup heater and the soft comfort floor, followed by a worked example.
 
 
 # Tank model
@@ -25,29 +25,29 @@ The decision variables of every optimization window, with $T$ time slots of $\De
 
 - $P_t$ : Electric power of the compressor (kW)
 - $B_t$ : Power of the backup heater (kW). It is resistive, so its electric power is also its heat ($COP = 1$). Only a variable when the heat pump has a backup heater (`Pb > 0`)
-- $U_t$ : Unmet heat (kW thermal): heat the demand asked for that nobody delivered. It is not electricity
-- $S_t$ : Level of the tank at the end of slot $t$ (kWh thermal), above the bottom of its band
+- $S_t$ : Level of the tank at the end of slot $t$ (kWh thermal): the heat it holds above the **inlet temperature**, the temperature of the cold water that refills it. At $S_t = 0$ the tank is at the inlet temperature and gives no more heat
 
 And the parameters:
 
 - $Q_t$ : Heat demand (kW thermal), the column `heat_demand` of `opt_data`
 - $COP_t$ : Coefficient of performance of the compressor, the column `cop` of `opt_data`. $COP_t = 0$ means the compressor cannot serve the tank in that slot (e.g. while it defrosts or serves another circuit)
-- $T_{cap}$ : Tank capacity (kWh thermal), `Tcap`
+- $T_{cap}$ : Tank capacity (kWh thermal), `Tcap`: the heat between the inlet temperature and the top of the tank
 - $P_c$ : Maximum electric power of the compressor, `Pc`
 - $P_b$ : Rating of the backup heater, `Pb` (`NULL` or `0` without one)
-- $SOC_{min}$, $SOC_{max}$ : Comfort floor and top of the band of the tank (%)
+- $SOC_{min}$ : Comfort floor of the tank (%), the lowest level that still delivers heat at the comfort temperature
+- $SOC_{max}$ : Top of the tank (%)
 - $l$ : Standing loss of the tank (% per hour), `loss`
 - $S_0$ : Level before the first slot of the window
 
 The level of the tank follows the heat balance:
 
 $$
-S_t = S_{t-1} \left(1 - \frac{l}{100}\right)^{\Delta t} + \left(COP_t \cdot P_t + B_t + U_t - Q_t\right) \Delta t \quad t \in T
+S_t = S_{t-1} \left(1 - \frac{l}{100}\right)^{\Delta t} + \left(COP_t \cdot P_t + B_t - Q_t\right) \Delta t \quad t \in T
 $$
 
 with the following constraints:
 
-* The level stays within the band of the tank:
+* The level stays between the comfort floor and the top of the tank. The floor is soft (see [Soft comfort floor](#soft-comfort-floor)): the level can go below it, down to the inlet temperature ($S_t = 0$) at most:
 
 $$
 T_{cap} \frac{SOC_{min}}{100} \le S_t \le T_{cap} \frac{SOC_{max}}{100} \quad t \in T
@@ -65,12 +65,6 @@ $$
 0 \le B_t \le P_b \quad t \in T
 $$
 
-* The unmet heat is never negative:
-
-$$
-U_t \ge 0 \quad t \in T
-$$
-
 * Every window ends at least as full as it started, so that a window does not empty the tank at the expense of the next one:
 
 $$
@@ -81,21 +75,21 @@ $$
 
 ## Litres and temperatures
 
-The model counts the heat in the tank in kWh, but a tank is usually described by its **volume** and its **temperatures**. Assuming a mixed tank (one temperature for all its water), the heat it holds above a reference temperature $T_{ref}$ (e.g. the return temperature of the heating circuit) is:
+The model counts the heat in the tank in kWh, but a tank is usually described by its **volume** and its **temperatures**. Assuming a mixed tank (one temperature for all its water), the heat it holds above the inlet temperature $T_{in}$ is:
 
 $$
-S = V \cdot c_p \cdot \left(T - T_{ref}\right), \qquad c_p = \frac{4.186}{3600} \approx 0.001163 \; \text{kWh / (L K)}
+S = V \cdot c_p \cdot \left(T - T_{in}\right), \qquad c_p = \frac{4.186}{3600} \approx 0.001163 \; \text{kWh / (L K)}
 $$
 
 So a tank of volume $V$ (L) that can be heated up to $T_{max}$, with a comfort floor at $T_{floor}$, translates into the arguments of `add_tank_optimization()` as:
 
 $$
-T_{cap} = V \cdot c_p \cdot \left(T_{max} - T_{ref}\right), \qquad
-SOC_{min} = 100 \cdot \frac{T_{floor} - T_{ref}}{T_{max} - T_{ref}}, \qquad
+T_{cap} = V \cdot c_p \cdot \left(T_{max} - T_{in}\right), \qquad
+SOC_{min} = 100 \cdot \frac{T_{floor} - T_{in}}{T_{max} - T_{in}}, \qquad
 SOC_{max} = 100
 $$
 
-and the level $S_t$ back into the temperature $T_t = T_{ref} + S_t / (V c_p)$. For example, 300 L between a reference of 20 °C and a maximum of 55 °C hold $300 \cdot 0.001163 \cdot 35 \approx 12.2$ kWh, and a comfort floor at 30 °C is $SOC_{min} \approx 28.6\%$.
+and the level $S_t$ back into the temperature $T_t = T_{in} + S_t / (V c_p)$. For example, 300 L between an inlet temperature of 20 °C and a maximum of 55 °C hold $300 \cdot 0.001163 \cdot 35 \approx 12.2$ kWh, and a comfort floor at 30 °C is $SOC_{min} \approx 28.6\%$.
 
 ## Optimization windows
 
@@ -104,30 +98,30 @@ The level carries from one window to the next, so the windows are solved in orde
 * When the first time slot of the run is not a window start (e.g. a run from 00:00 with `window_start_hour = 6`), the slots up to the first window start form a **leading window**. It starts from `SOCini`, and it must also end at least as full as it started.
 * The slots after the last full window form a **trailing window**.
 
-Both are optimized like any other window. Only the first `flex_window_hours` of every window are optimized, and the slots after them run the static schedule of the heat pump, the column `flexible` of `opt_data`. So with `flex_window_hours = 24` (and `window_days = 1`) **every time slot is optimized**, and the level of the tank never leaves its band.
+Both are optimized like any other window. Only the first `flex_window_hours` of every window are optimized, and the slots after them run the static schedule of the heat pump, the column `flexible` of `opt_data`. So with `flex_window_hours = 24` (and `window_days = 1`) **every time slot is optimized**.
 
-The slots that run `flexible` keep the tank in its band too. Below the comfort floor, the heat that would take the tank under it is reported as unmet heat, as in the optimized slots. At the top of the band, the compressor stops as a thermostat would: its power is the static schedule reduced to what keeps the tank at $SOC_{max}$. So the level of the tank never leaves its band, in any time slot.
+The slots that run `flexible` behave like the tank too: at the top, the compressor stops as a thermostat would (its power is the static schedule reduced to what keeps the tank at $SOC_{max}$), and below the comfort floor the tank cools down to the inlet temperature at most, with unmet heat as in the optimized slots.
 
 
 # Objective
 
-The objective is the one of the battery, with the heat pump's electric load $P_t + B_t$ in place of the battery's power, plus two linear terms on the backup heater and on the unmet heat. For the net power objective:
+The objective is the one of the battery, with the heat pump's electric load $P_t + B_t$ in place of the battery's power, plus a linear term on the backup heater. For the net power objective:
 
 $$
-\min_{P_t,\, B_t,\, U_t} \; \sum_{t=1}^{T} \left(L_t + P_t + B_t - G_t\right)^2 + \lambda \sum_{t=1}^{T-1}\left(P_{t+1} - P_t\right)^{2} + \sum_{t=1}^{T} \left(2h \cdot B_t + 100h \cdot U_t\right)
+\min_{P_t,\, B_t} \; \sum_{t=1}^{T} \left(L_t + P_t + B_t - G_t\right)^2 + \lambda \sum_{t=1}^{T-1}\left(P_{t+1} - P_t\right)^{2} + \sum_{t=1}^{T} 2h \cdot B_t
 $$
 
 and for the energy cost objective, with the imported power $I_t$ and exported power $E_t$ of the [cost article](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html) and $I_t - E_t = L_t + P_t + B_t - G_t$:
 
 $$
-\min_{P_t,\, B_t,\, U_t,\, I_t,\, E_t} \; \sum_{t=1}^{T} \Big( I_t \cdot PI_t - E_t \cdot PE_t \Big) + \lambda \sum_{t=1}^{T-1}\left(P_{t+1} - P_t\right)^{2} + \sum_{t=1}^{T} \left(2h \cdot B_t + 100h \cdot U_t\right)
+\min_{P_t,\, B_t,\, I_t,\, E_t} \; \sum_{t=1}^{T} \Big( I_t \cdot PI_t - E_t \cdot PE_t \Big) + \lambda \sum_{t=1}^{T-1}\left(P_{t+1} - P_t\right)^{2} + \sum_{t=1}^{T} 2h \cdot B_t
 $$
 
-The weighted objective combines both as described in the [combined optimization article](https://resourcefully-dev.github.io/flextools/articles/combined_optimization.html), with the same two linear terms.
+The weighted objective combines both as described in the [combined optimization article](https://resourcefully-dev.github.io/flextools/articles/combined_optimization.html), with the same linear term. When the comfort floor or the grid capacities cannot be held, the window gets the further terms described below.
 
-## Compressor first, backup heater second, unmet heat last
+## Compressor first, backup heater second, comfort last
 
-The two linear terms order the three sources of heat. They are built from the **heat price** $h$ of the window: the highest value that one kW of electric load can take in the window's objective, divided by the lowest positive COP when it is below 1, so that no kWh of heat from the compressor is worth more than $h$:
+The linear terms order the ways to cover the heat demand. They are built from the **heat price** $h$ of the window: the highest value that one kW of electric load can take in the window's objective, divided by the lowest positive COP when it is below 1, so that no kWh of heat from the compressor is worth more than $h$:
 
 | Objective | Heat price $h$ |
 |---|---|
@@ -138,19 +132,30 @@ The two linear terms order the three sources of heat. They are built from the **
 and with `lambda > 0` the largest derivative of the ramping penalty, $4 \lambda P_c$, is added to it. Then:
 
 * **The backup heater** pays $2h$ per kW of heat on top of its electricity, which the objective already sees like the compressor's. Its heat is therefore always more expensive than the compressor's, so it only runs for the heat the compressor cannot deliver, either because the compressor is at $P_c$, or because its COP is 0. It never runs to absorb a PV surplus or a cheap hour that the compressor could absorb.
-* **The unmet heat** pays $100h$ per kW, a hundred times the heat price. It is only used when neither the compressor nor the backup heater can deliver the heat.
+* **Missing a grid capacity** costs $10h$ per kW (see [Soft grid capacities](#soft-grid-capacities)).
+* **Going below the comfort floor** costs $20h / \Delta t$ per kWh below it and time slot, more than any kWh of heat the compressor, the backup heater or a missed grid capacity can deliver. So the tank only cools below its floor when they cannot hold it, and is brought back above it as soon as they can.
 
 ## Soft comfort floor
 
-Without the unmet heat, a window where the compressor and the backup heater cannot keep the tank above $SOC_{min}$ (a cold spell, a compressor too small for the peak, a COP of 0 during a long defrost) would have no solution at all. With it, **every window has a solution**: the level never goes below the comfort floor, and the heat that would have taken it there is reported as unmet. That is why the floor is *soft*: it is the comfort of the building, and not the level of the tank, that gives way.
+Without a soft floor, a window where the compressor and the backup heater cannot keep the tank above $SOC_{min}$ (a cold spell, a compressor too small for the peak, a COP of 0 during a long defrost) would have no solution at all. A real tank, in that case, keeps giving heat: its water gets colder than the comfort temperature, down to the temperature of the inlet water, and from there it gives no more. The optimization does the same. When a window has no solution that holds the floor, it is solved again with:
 
-In terms of temperature: the backup heater switches on when, with the compressor at full power, the temperature of the tank would drop below the comfort floor; and **heat is unmet when, even with the backup heater, the temperature would drop below it**. So the unmet heat is only positive while the tank is at its comfort floor. The only exception is the last slot of a window, which also reports the heat the heat pump lacks to end the window as full as it started.
+* the level between the inlet temperature and the top, $0 \le S_t \le T_{cap} \frac{SOC_{max}}{100}$;
+* the depth below the floor, $D_t \ge T_{cap} \frac{SOC_{min}}{100} - S_t$, priced at $20h / \Delta t$ per kWh and slot;
+* the end condition $S_T \ge S_0$ missed by $R \ge 0$ at the same price, so that a tank that has been drained does not have to be refilled by the end of the window at any cost.
 
-The unmet heat only enters the problem of a window when the window has no solution that holds the band without it. So, without a backup heater and with a band that the compressor can hold, the problem is exactly the one without the backup heater and the unmet heat.
+**Every window has a solution** then. The **unmet heat** $U_t$ is the heat the tank gives from below its comfort floor, plus the demand it cannot serve at all once it is at the inlet temperature. With $\tilde S_t = S_{t-1} (1 - l/100)^{\Delta t} + (COP_t P_t + B_t - Q_t) \Delta t$ the level the balance asks for (and $S_t = \max(\tilde S_t, 0)$ the level the tank reaches):
+
+$$
+U_t \, \Delta t = \max\left(0,\; \min\left(T_{cap} \frac{SOC_{min}}{100},\; S_{t-1} (1 - l/100)^{\Delta t}\right) - \tilde S_t\right)
+$$
+
+So in terms of temperature: the backup heater switches on when, with the compressor at full power, the temperature of the tank would drop below the comfort floor; and **heat is unmet whenever, even with the backup heater, the temperature drops below the comfort floor**. The temperature then keeps falling with the demand, to the inlet temperature at most. The unmet heat is a report: it is not part of the heat balance of the tank.
+
+The soft floor only enters the problem of a window when the window has no solution that holds the floor. So, without a backup heater and with a band that the compressor can hold, the problem is exactly the one without it.
 
 ## Soft grid capacities
 
-As for the [battery](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization), the grid import and export capacities are **soft**. When a window has no solution that holds the band within them (e.g. a PV surplus above the export capacity that a full tank cannot absorb, or an import capacity too low to cover the heat demand), it is solved with the unmet heat and with a penalised slack on each capacity, $s^I_t$ and $s^E_t$:
+As for the [battery](https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization), the grid import and export capacities are **soft**. When a window has no solution that holds the band within them (e.g. a PV surplus above the export capacity that a full tank cannot absorb, or an import capacity too low to cover the heat demand), it is solved with the soft comfort floor and with a penalised slack on each capacity, $s^I_t$ and $s^E_t$:
 
 $$
 L_t + P_t + B_t - G_t - s^I_t \le IC_t, \qquad G_t - L_t - P_t - B_t - s^E_t \le EC_t
@@ -163,7 +168,7 @@ $$
 0 \le s^E_t \le \max\left(0,\; G_t - L_t - EC_t\right)
 $$
 
-It costs $10h$ per kW in the objective, between the backup heater ($2h$) and the unmet heat ($100h$). So the solver uses the compressor and the backup heater to their limits before missing a capacity, and misses an import capacity before leaving heat unmet. The heat pump switched off, with the comfort floor held by unmet heat, always fits these bounds, so **every window has a solution**. When a capacity is still missed, a message says so, and the net power $L_t + P_t + B_t - G_t$ shows where.
+It costs $10h$ per kW in the objective, between the backup heater and going below the comfort floor. So the solver uses the compressor and the backup heater to their limits before missing a capacity, and misses an import capacity before letting the tank cool below its floor. The heat pump switched off, with the tank cooling, always fits these bounds, so **every window has a solution**. When a capacity is still missed, a message says so, and the net power $L_t + P_t + B_t - G_t$ shows where.
 
 
 # Results
@@ -173,9 +178,9 @@ It costs $10h$ per kW in the objective, between the backup heater ($2h$) and the
 | Attribute | Content |
 |---|---|
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
-| `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal) |
+| `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal): the heat the tank gave from below its comfort floor, plus the demand it could not serve at the inlet temperature |
 
-The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the results.
+The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater, stopping at the inlet temperature.
 
 
 # Example
@@ -228,21 +233,21 @@ opt_data %>%
   dyOptions(strokeWidth = 2)
 ```
 
-The heat pump has a 2 kW compressor and a **300 L tank** that can be heated up to **55 °C**, with a **comfort floor at 30 °C**, taking 20 °C as the reference temperature. We convert them into the tank's capacity and comfort floor as described [above](#litres-and-temperatures):
+The heat pump has a 2 kW compressor and a **300 L tank** that can be heated up to **55 °C**, with a **comfort floor at 30 °C**, refilled with inlet water at **20 °C**. We convert them into the tank's capacity and comfort floor as described [above](#litres-and-temperatures):
 
 ```{r}
 volume <- 300 # L
-T_ref <- 20 # °C
+T_in <- 20 # °C, inlet water
 T_floor <- 30 # °C, comfort floor
 T_max <- 55 # °C
 kwh_per_degree <- volume * 4.186 / 3600 # kWh per °C
 
-Tcap <- kwh_per_degree * (T_max - T_ref)
-SOCmin <- 100 * (T_floor - T_ref) / (T_max - T_ref)
+Tcap <- kwh_per_degree * (T_max - T_in)
+SOCmin <- 100 * (T_floor - T_in) / (T_max - T_in)
 c(Tcap = Tcap, SOCmin = SOCmin)
 ```
 
-On the cold morning the compressor delivers at most $2.7 \cdot 2 = 5.4$ kW of heat, and the tank, from 55 °C down to 30 °C, `r round(kwh_per_degree * (T_max - T_floor), 1)` kWh: not enough for the peak.
+The tank always holds its 300 L, since the inlet water refills whatever is drawn: it is its temperature that tells how much heat it holds. From 55 °C down to the 30 °C floor it can give `r round(kwh_per_degree * (T_max - T_floor), 1)` kWh at a comfortable temperature, and `r round(kwh_per_degree * (T_floor - T_in), 1)` kWh more, colder, down to the 20 °C of the inlet water. On the cold morning the compressor delivers at most $2.7 \cdot 2 = 5.4$ kW of heat: not enough for the peak.
 
 To show the results, a small helper gathers the compressor power, the backup heater, the unmet heat and the temperature of the tank (from the level that `get_tank_level()` computes) for each scenario:
 
@@ -256,10 +261,9 @@ tank_results <- function(opt_data, P) {
       level = get_tank_level(
         P, heat_demand, cop,
         init = Tcap, time_resolution = 15,
-        backup = B,
-        unmet_heat = U
+        backup = B
       ),
-      temperature = T_ref + level / kwh_per_degree
+      temperature = T_in + level / kwh_per_degree
     )
 }
 
@@ -283,7 +287,7 @@ plot_tank <- function(results) {
     select(datetime, heat_demand, P, B, U, temperature, comfort_floor) %>%
     timefully::plot_ts() %>%
     dyAxis("y", "Power (kW)") %>%
-    dyAxis("y2", "Tank temperature (°C)", valueRange = c(T_ref, T_max + 5)) %>%
+    dyAxis("y2", "Tank temperature (°C)", valueRange = c(T_in, T_max + 5)) %>%
     dySeries("heat_demand", "Heat demand (kW thermal)", "firebrick", strokePattern = "dashed") %>%
     dySeries("P", "Compressor (kW electric)", "navy") %>%
     dySeries("B", "Backup heater (kW)", "orange", fillGraph = TRUE) %>%
@@ -315,7 +319,7 @@ daily_totals(results)
 plot_tank(results)
 ```
 
-On the first and the last day, the compressor heats the tank up to 55 °C during the cheapest hours before each peak, and the tank covers the peaks without dropping below 30 °C. On the cold morning the tank starts full, and the compressor runs at full power through the peak, but the temperature falls to the comfort floor at around 08:00. From then on, the heat that would take it below 30 °C is reported as **unmet heat**, until the peak is over. The temperature of the tank never goes below the comfort floor: it is the building that goes without that heat.
+On the first and the last day, the compressor heats the tank up to 55 °C during the cheapest hours before each peak, and the tank covers the peaks without dropping below 30 °C. On the cold morning the tank starts full, and the compressor runs at full power through the peak, but the temperature falls below the comfort floor at around 08:00 and down to the inlet temperature (20 °C) at around 09:00, where the tank gives no more heat. All the heat the tank gives below 30 °C, and the demand it cannot serve at all at 20 °C, is reported as **unmet heat**. Once the peak is over, the compressor brings the tank back above its floor.
 
 ## With a backup heater
 
@@ -338,6 +342,6 @@ daily_totals(results_backup)
 plot_tank(results_backup)
 ```
 
-The compressor runs as before, and the **backup heater switches on** when the compressor at full power can no longer keep the tank above the comfort floor during the cold morning. The optimization looks ahead: it starts the backup heater as soon as the peak starts, rather than when the tank reaches 30 °C, because the heat it adds early is kept in the tank for later. The tank now reaches its comfort floor later, at around 08:45, and **only then is heat left unmet**: the heat that even the compressor and the backup heater together cannot deliver. On the first and the last day the compressor suffices, and the backup heater stays off even though it could run in cheaper hours.
+The compressor runs as before, and the **backup heater switches on** when the compressor at full power can no longer keep the tank above the comfort floor during the cold morning. The optimization looks ahead: it starts the backup heater as soon as the peak starts, rather than when the tank reaches 30 °C, because the heat it adds early is kept in the tank for later. The tank now reaches its comfort floor later, at around 08:45, and **only then is heat unmet**: the tank cools to about 24 °C, and the heat it gives below 30 °C is what even the compressor and the backup heater together cannot deliver. Right after the peak, the backup heater keeps running with the compressor until the tank is back above its floor. On the first and the last day the compressor suffices, and the backup heater stays off even though it could run in cheaper hours.
 
-With a larger backup heater (e.g. `Pb = 3`), the unmet heat disappears altogether.
+With a larger backup heater (e.g. `Pb = 3`), the tank stays above its floor and the unmet heat disappears altogether.

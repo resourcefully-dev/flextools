@@ -11,8 +11,7 @@ get_tank_level(
   init,
   loss = 0,
   time_resolution = 60,
-  backup = 0,
-  unmet_heat = 0
+  backup = 0
 )
 }
 \arguments{
@@ -34,9 +33,6 @@ minutes)}
 \item{backup}{numeric, backup heater power (kW electric = kW thermal):
 \code{attr(result, "backup_kw")} of \code{\link[=add_tank_optimization]{add_tank_optimization()}}, or 0 without a
 backup heater}
-
-\item{unmet_heat}{numeric, unmet heat (kW thermal):
-\code{attr(result, "unmet_heat_kw")} of \code{\link[=add_tank_optimization]{add_tank_optimization()}}, or 0}
 }
 \value{
 numeric vector of the level (kWh), rounded to 2 decimals
@@ -44,6 +40,7 @@ numeric vector of the level (kWh), rounded to 2 decimals
 \description{
 The tank's counterpart of \code{\link[=get_storage_level]{get_storage_level()}}: the level in kWh thermal at
 the start of each slot, starting from \code{init}, with
-\code{S[t+1] = k * S[t] + (cop[t] * power[t] + backup[t] + unmet_heat[t] - heat_demand[t]) * dt} and \code{k = (1 - loss/100)^dt}, \code{dt} being the time
-resolution in hours. It never holds the level in a band on its own.
+\code{S[t+1] = max(k * S[t] + (cop[t] * power[t] + backup[t] - heat_demand[t]) * dt, 0)} and \code{k = (1 - loss/100)^dt}, \code{dt} being the time resolution in
+hours. Level 0 is the inlet temperature: an empty tank gives no more heat,
+and the demand it cannot serve is unmet heat.
 }

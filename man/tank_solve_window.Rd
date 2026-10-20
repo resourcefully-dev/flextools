@@ -58,15 +58,16 @@ capacities (kW)}
 
 \item{Pb}{numeric, backup heater cap (kW); 0 means no backup heater}
 
-\item{soft}{logical, whether the unmet heat \code{U} is a variable}
+\item{soft}{logical, whether the comfort floor is soft: the level may go
+down to the inlet temperature, below the floor at a price}
 
 \item{slack_import_max, slack_export_max}{numeric vectors, how far each slot
 may miss its import / export capacity (kW), from
 \code{\link[=optimization_slack_ceiling]{optimization_slack_ceiling()}}; the capacities are hard where they are 0}
 }
 \value{
-list of the unrounded \code{power}, \code{backup} and \code{unmet} (kW), or \code{NULL}
-when the window has no solution
+list of the unrounded \code{power} and \code{backup} (kW), or \code{NULL} when the
+window has no solution
 }
 \description{
 Solve one tank window

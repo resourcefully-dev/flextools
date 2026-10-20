@@ -41,10 +41,11 @@ pure cost. \code{"grid"} minimises the squared net grid flow
 \code{"capacity"} has no tank form and stops with an error.}
 
 \item{Tcap}{numeric, tank capacity (kWh thermal, > 0): the heat between the
-band's bottom and top. For a mixed tank of \code{V} litres between a reference
-temperature \code{T_ref} and its top temperature \code{T_max} (degrees C), it is
-\code{V * 4.186 / 3600 * (T_max - T_ref)}, and a comfort floor at \code{T_floor}
-is \code{SOCmin = 100 * (T_floor - T_ref) / (T_max - T_ref)}.}
+inlet water temperature (\code{SOC = 0}, where the tank gives no more heat) and
+the top. For a mixed tank of \code{V} litres between the inlet temperature
+\code{T_in} and its top temperature \code{T_max} (degrees C), it is
+\code{V * 4.186 / 3600 * (T_max - T_in)}, and a comfort floor at \code{T_floor} is
+\code{SOCmin = 100 * (T_floor - T_in) / (T_max - T_in)}.}
 
 \item{Pc}{numeric, compressor cap (kW electric, > 0).}
 
@@ -82,8 +83,10 @@ tank above \code{SOCmax}. Attributes:
 backup heater's power (kW electric = kW thermal); 0 outside optimised
 windows and everywhere without a backup heater.
 \item \code{unmet_heat_kw}: numeric vector, one value per row, rounded to 2 decimals:
-the unmet heat (kW thermal, not electricity); 0 wherever the demand was
-met.
+the unmet heat (kW thermal, not electricity): the heat the tank gave from
+below its comfort floor in that slot, plus the demand it could not serve
+at the inlet temperature; 0 wherever the tank stayed at or above its floor.
+It is a report, not part of the balance.
 }
 
 The heat pump's electric load is the power plus \code{attr(, "backup_kw")}.
@@ -98,22 +101,23 @@ heat is \code{cop * P}, so there is no conversion efficiency: the COP is the
 conversion. The backup heater turns \code{B} kW of electricity into \code{B} kW of heat.
 }
 \details{
-Per slot of \code{dt} hours, with \code{S} the level in kWh thermal above the band's
-bottom and \code{k = (1 - loss/100)^dt}:
+Per slot of \code{dt} hours, with \code{S} the level in kWh thermal above the inlet
+water temperature (level 0, \code{SOC = 0}) and \code{k = (1 - loss/100)^dt}:
 \itemize{
-\item \code{S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + U[t] - heat_demand[t]) * dt}
+\item \code{S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] - heat_demand[t]) * dt}
 \item \verb{Tcap * SOCmin/100 <= S[t] <= Tcap * SOCmax/100}
 \item \verb{0 <= P[t] <= Pc}, and \code{P[t] = 0} where \code{cop[t] = 0}
 \item \verb{0 <= B[t] <= Pb}, also where \code{cop[t] = 0}
-\item \code{U[t] >= 0}
 \item every window ends at least as full as it started.
 }
 
-\code{B} (the backup heater) is a variable only with \code{Pb > 0}. \code{U} is the \strong{unmet
-heat}: heat the demand asked for that neither the compressor, the backup
-heater nor the tank delivered. It makes the comfort floor \code{SOCmin} soft:
-the level never goes below it, and the heat that would have taken it there
-is reported as unmet instead. Every window therefore has a schedule.
+\code{B} (the backup heater) is a variable only with \code{Pb > 0}. The comfort floor
+\code{SOCmin} is \strong{soft}: when the compressor and the backup heater cannot hold
+it, the tank keeps giving heat below it, cooling down to the inlet
+temperature (level 0) at most, as a real tank would. The heat it gives from
+below the floor, plus the demand it cannot serve at all once it is at the
+inlet temperature, is the \strong{unmet heat}. Every window therefore has a
+schedule.
 
 The run starts from \code{Tcap * SOCini/100}, and the level carries from one
 window to the next. The windows are those of the other optimization
@@ -130,9 +134,9 @@ past \code{flex_window_hours} run the \code{flexible} schedule, without backup h
 \section{Compressor first, backup heater second, unmet heat last}{
 
 The backup heater's electricity is part of the load the objective sees, like
-the compressor's, and \code{U} is not electricity at all. To order the three,
-both carry a linear price per kW of heat and slot in the objective, built
-from the window's \strong{heat price} \code{h}: the highest marginal value a kW of
+the compressor's. To use it only after the compressor, and to cool the tank
+below its floor only after both, the objective prices them from the
+window's \strong{heat price} \code{h}: the highest marginal value a kW of
 electric load can take in the window's objective, divided by the lowest
 positive COP when it is below 1, so that no kWh of compressor heat is worth
 more than \code{h}:
@@ -149,46 +153,45 @@ objective is) plus \code{1 - w} times the cost value;
 
 The backup heater pays \code{2 * h} per kW on top of its electricity, so it only
 runs for heat the compressor cannot deliver (it never absorbs a PV surplus
-the compressor could), and the unmet heat pays \code{100 * h} per kW, so heat is
-left unmet only when neither the compressor nor the backup heater can
-deliver it.
+the compressor could).
 
-Unmet heat appears only in slots where the tank is at its comfort floor:
-it is the heat that would have taken the level below it. The only
-exception is the last slot of a window, which also takes the heat the
-compressor and the backup heater lack to end the window as full as it
-started.
-
-The unmet heat only enters a window's problem when the window has no
-schedule that holds the band within the grid capacities without it; with no
-backup heater and a band the compressor can hold, the problem, and so the
-result, is the one without either.
+When a window has no schedule that holds the band within the grid
+capacities, it is solved again with a soft floor: the level may go down to
+0, and every kWh below \code{SOCmin} costs \code{20 * h / dt} per slot, more than
+any kWh of heat the compressor, the backup heater or a missed grid capacity
+(below) can deliver. So the tank only cools below its floor when they
+cannot hold it, and is brought back above it as soon as they can. The end
+condition becomes soft at the same price, so a drained tank does not have
+to be refilled by the end of the window. Without a backup heater and with a
+band the compressor can hold, the problem, and so the result, is the one
+without any of this.
 }
 
 \section{Soft grid capacities}{
 
 As for \code{\link[=add_battery_optimization]{add_battery_optimization()}}, the grid capacities are soft: a window
-that has no schedule holding the band within them is solved with the unmet
-heat and with a penalised slack on each capacity. The slack is bounded by
+that has no schedule holding the band within them is solved with the soft
+comfort floor and with a penalised slack on each capacity. The slack is bounded by
 how far the site already misses the capacity without optimisation (see
 \code{optimization_slack_ceiling()}): for import, with the heat pump running
 \code{flexible}; for export, with the heat pump off, since a full tank cannot
 absorb a surplus. It costs \code{10 * h} per kW (electric), between the backup
-heater and the unmet heat: the solver uses the compressor and the backup
+heater and the comfort floor: the solver uses the compressor and the backup
 heater to their limits before it misses a capacity, and misses an import
-capacity before it leaves heat unmet. The heat pump off with the floor held
-by unmet heat always fits these bounds, so \strong{every window has a schedule}.
+capacity before it lets the tank cool below its floor. The heat pump off
+with the tank cooling always fits these bounds, so \strong{every window has a
+schedule}.
 A capacity left missed is reported with a message; compare the net flow
 \code{static + P + attr(, "backup_kw") - production} with the capacities to find
 where.
 
 The slots that run \code{flexible} (past \code{flex_window_hours}, or in a window the
-solver failed on, reported with a message) keep the tank in its band too. Below, the heat that would take the
-level under \code{SOCmin} is reported as unmet heat, as in the optimised slots.
-Above, the compressor stops as a thermostat would: its power there is
-\code{flexible} reduced to what keeps the level at \code{SOCmax}. So the level never
-leaves the band, and over the run
-\verb{sum((cop * P + B + U) * dt) = sum(heat_demand * dt) + losses + (end level - initial level)}; \code{\link[=get_tank_level]{get_tank_level()}} reproduces the level.
+solver failed on, reported with a message) keep the tank below its top: the
+compressor stops as a thermostat would, its power there being \code{flexible}
+reduced to what keeps the level at \code{SOCmax}. Below the floor they cool the
+tank down to the inlet temperature at most, with unmet heat as above. So the
+level stays between 0 and \code{SOCmax} everywhere, and \code{\link[=get_tank_level]{get_tank_level()}}
+reproduces it.
 
 Inputs out of range stop with an error naming the argument; nothing is
 clamped into range, and no zero profile is returned in their place.
@@ -212,8 +215,7 @@ attr(P, "backup_kw")
 attr(P, "unmet_heat_kw")
 get_tank_level(
   P, opt_data$heat_demand, opt_data$cop, init = 3,
-  backup = attr(P, "backup_kw"),
-  unmet_heat = attr(P, "unmet_heat_kw")
+  backup = attr(P, "backup_kw")
 )
 
 }

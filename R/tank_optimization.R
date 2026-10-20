@@ -3,20 +3,20 @@
 # A heat pump charging one thermal tank. The compressor's electric power `P`
 # is the decision, the heat demand `Q` discharges the tank, and the COP `cop`
 # converts one into the other. A resistive backup heater `B` (COP 1) can add
-# heat next to the compressor, and the unmet heat `U` is the heat nobody
-# delivered, which keeps every window feasible. Per slot of `dt` hours, with
-# the level `S` in kWh thermal above the band's bottom:
+# heat next to the compressor. Per slot of `dt` hours, with the level `S` in
+# kWh thermal above the inlet temperature (level 0):
 #
-#   S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + U[t] - Q[t]) * dt
+#   S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] - Q[t]) * dt
 #   Smin <= S[t] <= Smax                              k = (1 - loss/100)^dt
 #   0 <= P[t] <= Pc,  P[t] = 0 where cop[t] = 0
 #   0 <= B[t] <= Pb   (also where cop[t] = 0)
-#   U[t] >= 0
 #   S[last slot of a window] >= S[slot before its first]
 #
-# `B` is a variable only with a backup heater (`Pb > 0`), and `U` only when the
-# window has no schedule that holds the band without it, so with neither the
-# problem is exactly the one without them.
+# A window with no schedule that holds this is solved again with a soft
+# comfort floor (the level may go down to 0, with the depth below `Smin`
+# penalised, plus `U` for the demand the tank cannot serve at 0) and soft grid
+# capacities. `B` is a variable only with a backup heater (`Pb > 0`), so
+# without one, and where the band holds, the problem is the one without them.
 #
 # The level carries from one window to the next, so windows are solved in
 # order, and every slot no window optimises runs the static `flexible`
@@ -25,7 +25,9 @@
 
 #' Tank level path (unrounded)
 #'
-#' The level at the start of each slot, and after the last one.
+#' The level at the start of each slot, and after the last one. The level
+#' never goes below 0, the inlet temperature (a tank there gives no more
+#' heat), except by less than half a rounding step of the power.
 #'
 #' @param power numeric vector, compressor electric power (kW)
 #' @param heat_demand numeric vector, heat demand (kW thermal)
@@ -34,7 +36,6 @@
 #' @param k numeric, per-slot retention `(1 - loss/100)^dt`
 #' @param dt numeric, slot length in hours
 #' @param backup numeric vector, backup heater power (kW, electric = thermal)
-#' @param unmet numeric vector, unmet heat (kW thermal)
 #'
 #' @return numeric vector of length `length(power) + 1`
 #' @keywords internal
@@ -46,16 +47,21 @@ tank_level_path <- function(
   init,
   k,
   dt,
-  backup = 0,
-  unmet = 0
+  backup = 0
 ) {
   n <- length(power)
-  heat_in <- (cop * power + backup + unmet - heat_demand) * dt
+  heat_in <- (cop * power + backup - heat_demand) * dt
+  # A level below 0 by less than half a rounding step of the power is the
+  # power's rounding, which the next slot makes up
+  tol <- 0.005 * max(cop, 1) * dt + 1e-9
   level <- numeric(n + 1)
   s <- init
   for (t in seq_len(n)) {
     level[t] <- s
     s <- k * s + heat_in[t]
+    if (s < -tol) {
+      s <- 0
+    }
   }
   level[n + 1] <- s
   level
@@ -69,17 +75,20 @@ tank_level_path <- function(
 #' COP. Instead each slot takes the 2-decimal power that brings the level
 #' closest to the level the unrounded solution reaches at the end of that slot,
 #' so the rounded level never strays further from it than half a rounding step
-#' of heat. The backup heater and the unmet heat are rounded on their own and
-#' the compressor makes up their rounding; where the COP is 0 the backup heater
-#' tracks the level in the compressor's place.
+#' of heat. The backup heater is rounded on its own and the compressor makes up
+#' its rounding; where the COP is 0 the backup heater tracks the level in the
+#' compressor's place.
 #'
 #' @inheritParams tank_level_path
 #' @param target numeric vector, level at the end of each slot under the
 #'   unrounded power (kWh)
 #' @param Pc numeric, compressor cap (kW)
 #' @param Pb numeric, backup heater cap (kW), 0 without one
+#' @param power numeric vector, the unrounded power (kW). Where the tank ends a
+#'   slot empty, the demand it leaves unserved is not for the rounding to make
+#'   up: the power there stays within a rounding step of it.
 #'
-#' @return list of the rounded `power`, `backup` and `unmet` (kW)
+#' @return list of the rounded `power` and `backup` (kW)
 #' @keywords internal
 #'
 tank_round_power <- function(
@@ -91,28 +100,40 @@ tank_round_power <- function(
   dt,
   Pc,
   backup = 0,
-  unmet = 0,
-  Pb = 0
+  Pb = 0,
+  power = NULL
 ) {
   n <- length(target)
+  b_raw <- rep_len(backup, n)
   p_max <- floor(Pc * 100 + 1e-9) / 100
   b_max <- floor(Pb * 100 + 1e-9) / 100
+  tol <- 0.005 * max(cop, 1) * dt + 1e-9
   backup <- pmin(pmax(round(rep_len(backup, n), 2), 0), b_max)
-  unmet <- pmax(round(rep_len(unmet, n), 2), 0)
   out <- numeric(n)
   s <- init
   for (t in seq_len(n)) {
-    need <- target[t] - k * s + (heat_demand[t] - backup[t] - unmet[t]) * dt
+    need <- target[t] - k * s + (heat_demand[t] - backup[t]) * dt
+    empty <- !is.null(power) && target[t] <= 1e-9
     if (cop[t] > 0) {
       p <- need / (cop[t] * dt)
+      if (empty) {
+        p <- min(p, power[t] + 0.01)
+      }
       out[t] <- min(max(round(p, 2), 0), p_max)
     } else if (b_max > 0) {
       b <- backup[t] + need / dt
+      if (empty) {
+        b <- min(b, b_raw[t] + 0.01)
+      }
       backup[t] <- min(max(round(b, 2), 0), b_max)
     }
-    s <- k * s + (cop[t] * out[t] + backup[t] + unmet[t] - heat_demand[t]) * dt
+    s <- k * s + (cop[t] * out[t] + backup[t] - heat_demand[t]) * dt
+    # A level below 0 by more than rounding is demand the tank did not serve
+    if (s < -tol) {
+      s <- 0
+    }
   }
-  list(power = out, backup = backup, unmet = unmet)
+  list(power = out, backup = backup)
 }
 
 
@@ -151,6 +172,81 @@ tank_heat_price <- function(L, G, cop, Pc, Pb, objective, lambda, price, scale) 
 }
 
 
+#' Unmet heat of a schedule
+#'
+#' Per slot, the heat the tank gives from below its comfort floor, plus the
+#' heat demand it cannot serve at all once it is at the inlet temperature
+#' (level 0). Standing losses below the floor are not counted, and neither is
+#' a slot whose gap is within half a rounding step of the power.
+#'
+#' @inheritParams tank_level_path
+#' @param Smin numeric, comfort floor (kWh)
+#' @param tol numeric, gap ignored (kWh)
+#'
+#' @return numeric vector, unmet heat per slot (kW thermal), rounded to 2
+#'   decimals
+#' @keywords internal
+#'
+tank_unmet_heat <- function(
+  power,
+  heat_demand,
+  cop,
+  init,
+  k,
+  dt,
+  backup,
+  Smin,
+  tol = 0
+) {
+  n <- length(power)
+  unmet <- numeric(n)
+  s <- init
+  for (t in seq_len(n)) {
+    base <- k * s
+    s_raw <- base + (cop[t] * power[t] + backup[t] - heat_demand[t]) * dt
+    # Below the floor, and below the inlet temperature (not served at all)
+    gap <- max(min(Smin, base) - s_raw, 0)
+    if (gap > tol) {
+      unmet[t] <- gap / dt
+    }
+    s <- if (s_raw < -tol) 0 else s_raw
+  }
+  round(unmet, 2)
+}
+
+
+#' Least heat a window cannot give at the inlet temperature
+#'
+#' The heat demand the tank cannot serve at the inlet temperature (level 0)
+#' with the compressor and the backup heater at full power whenever the tank
+#' has room, the compressor first: no schedule leaves less.
+#'
+#' @inheritParams tank_solve_window
+#' @param ub_P,ub_B,ub_total numeric vectors, caps of the compressor, the
+#'   backup heater and their sum (kW)
+#'
+#' @return numeric vector, heat not served per slot (kW thermal)
+#' @keywords internal
+#'
+tank_min_unmet <- function(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total) {
+  n <- length(Q)
+  U <- numeric(n)
+  s <- S0
+  for (t in seq_len(n)) {
+    P <- min(ub_P[t], ub_total[t])
+    B <- min(ub_B[t], ub_total[t] - P)
+    heat <- min(cop[t] * P + B, max(Smax - k * s, 0) / dt + Q[t])
+    s_next <- k * s + (heat - Q[t]) * dt
+    if (s_next < 0) {
+      U[t] <- -s_next / dt
+      s_next <- 0
+    }
+    s <- s_next
+  }
+  U
+}
+
+
 #' Solve one tank window
 #'
 #' @param G numeric vector, production (kW)
@@ -169,13 +265,14 @@ tank_heat_price <- function(L, G, cop, Pc, Pb, objective, lambda, price, scale) 
 #' @param objective `"grid"`, `"cost"` or a number strictly between 0 and 1
 #' @param lambda numeric, ramping penalty weight
 #' @param Pb numeric, backup heater cap (kW); 0 means no backup heater
-#' @param soft logical, whether the unmet heat `U` is a variable
+#' @param soft logical, whether the comfort floor is soft: the level may go
+#'   down to the inlet temperature, below the floor at a price
 #' @param slack_import_max,slack_export_max numeric vectors, how far each slot
 #'   may miss its import / export capacity (kW), from
 #'   [optimization_slack_ceiling()]; the capacities are hard where they are 0
 #'
-#' @return list of the unrounded `power`, `backup` and `unmet` (kW), or `NULL`
-#'   when the window has no solution
+#' @return list of the unrounded `power` and `backup` (kW), or `NULL` when the
+#'   window has no solution
 #' @keywords internal
 #'
 tank_solve_window <- function(
@@ -250,10 +347,27 @@ tank_solve_window <- function(
     ub_total <- ub_P
   }
 
-  lb_S <- rep(Smin, n)
   ub_S <- rep(Smax, n)
-  # End condition: the window ends at least as full as it started
-  lb_S[n] <- max(Smin, S0)
+  # End condition: the window ends at least as full as it started (or at the
+  # floor, when it started below it)
+  S_end <- max(Smin, S0)
+  if (soft) {
+    # Soft comfort floor: the level may go down to the inlet temperature
+    # (level 0), with the depth below the floor `D` penalised, and the end
+    # condition missed by `R`, penalised too. Unmet heat is only the heat the
+    # tank cannot give at the inlet temperature.
+    lb_S <- rep(0, n)
+    U_max <- tank_min_unmet(
+      Q, cop, S0, k, dt,
+      Smax = Smax,
+      ub_P = ub_P,
+      ub_B = if (with_backup) ub_B else rep(0, n),
+      ub_total = ub_total
+    )
+  } else {
+    lb_S <- rep(Smin, n)
+    lb_S[n] <- S_end
+  }
 
   with_flows <- !identical(objective, "grid")
   idx_P <- seq_len(n)
@@ -265,9 +379,13 @@ tank_solve_window <- function(
     idx_B <- nv + seq_len(n)
     nv <- nv + n
   }
+  idx_D <- integer(0)
+  idx_R <- integer(0)
   if (soft) {
     idx_U <- nv + seq_len(n)
-    nv <- nv + n
+    idx_D <- nv + n + seq_len(n)
+    idx_R <- nv + 2 * n + 1
+    nv <- nv + 2 * n + 1
   }
   idx_si <- integer(0)
   idx_se <- integer(0)
@@ -315,9 +433,10 @@ tank_solve_window <- function(
     upper <- c(upper, ub_B)
   }
   if (soft) {
-    # No slot needs more than its demand plus refilling the whole band
-    lower <- c(lower, rep(0, n))
-    upper <- c(upper, Q + Smax / dt)
+    # U: no slot needs more than its demand plus refilling the whole band.
+    # D: at most the floor. R: at most the end level.
+    lower <- c(lower, rep(0, n), rep(0, n), 0)
+    upper <- c(upper, Q + Smax / dt, rep(Smin, n), S_end)
   }
   if (soft_caps) {
     lower <- c(lower, rep(0, 2 * n))
@@ -392,15 +511,33 @@ tank_solve_window <- function(
     upper <- c(upper, ub_load)
   }
 
+  if (soft) {
+    # S_t + D_t >= Smin            depth below the comfort floor
+    # S_n + R >= S_end             end condition, soft
+    # sum(U) <= the least unmet heat any schedule needs
+    A_soft <- Matrix::sparseMatrix(
+      i = c(seq_len(n), seq_len(n), n + 1, n + 1, rep(n + 2, n)),
+      j = c(idx_S, idx_D, idx_S[n], idx_R, idx_U),
+      x = rep(1, 3 * n + 2),
+      dims = c(n + 2, nv)
+    )
+    A <- rbind(A, A_soft)
+    lower <- c(lower, rep(Smin, n), S_end, 0)
+    upper <- c(upper, rep(Inf, n), Inf, sum(U_max) + 1e-6)
+  }
+
   scale <- if (with_flows) mean(PI)^2 else 1
   if (!is.finite(scale) || scale <= 0) {
     scale <- 1
   }
 
-  # Heat from the backup heater costs more than any compressor heat, missing a
-  # grid capacity more still, and unmet heat a hundred times more, so the
-  # solver runs the compressor first, then the backup heater, then misses the
-  # capacity, and leaves heat unmet last.
+  # Heat from the backup heater costs more than any compressor heat, and
+  # missing a grid capacity more still. Going below the comfort floor costs
+  # more per kWh and slot than any of them per kWh of heat, so the solver
+  # runs the compressor first, then the backup heater, then misses the
+  # capacity, and only then lets the tank cool below its floor. The demand the
+  # tank cannot serve at the inlet temperature (`U`) is capped at the least
+  # any schedule leaves instead of priced.
   if (with_backup || soft || soft_caps) {
     heat_price <- tank_heat_price(
       L,
@@ -415,7 +552,8 @@ tank_solve_window <- function(
     )
   }
   c_B <- if (with_backup) 2 * heat_price else 0
-  c_U <- if (soft) 100 * heat_price else 0
+  c_U <- 0
+  c_D <- if (soft) 20 * heat_price / dt else 0
   c_S <- if (soft_caps) 10 * heat_price else 0
 
   lambdaMat <- if (lambda > 0) get_lambda_matrix(n) else NULL
@@ -425,6 +563,7 @@ tank_solve_window <- function(
     lin <- numeric(nv)
     lin[idx_B] <- c_B
     lin[idx_U] <- c_U
+    lin[c(idx_D, idx_R)] <- c_D
     lin[c(idx_si, idx_se)] <- c_S
     lin[idx_I] <- PI
     lin[idx_E] <- -PE_clipped
@@ -477,6 +616,7 @@ tank_solve_window <- function(
       q[idx_B] <- 2 * w_flow * (L - G) + c_B
     }
     q[idx_U] <- c_U
+    q[c(idx_D, idx_R)] <- c_D
     q[c(idx_si, idx_se)] <- c_S
     obj_scale <- max(max(abs(P_quad)), max(abs(q)), 1e-6)
     sol <- solve_osqp(P_quad / obj_scale, q / obj_scale, A, lower, upper)
@@ -493,42 +633,22 @@ tank_solve_window <- function(
     P <- pmin(pmax(x[idx_P], lb_P), ub_P)
     B <- rep(0, n)
   }
-  U <- if (soft) pmax(x[idx_U], 0) else rep(0, n)
-
-  if (soft) {
-    # Every slot prices the unmet heat the same, so the solver may place it in
-    # any slot, also where the tank is far above its floor. Settle it on the
-    # exact dynamics instead, keeping `P` and `B`: each slot takes just the
-    # heat that holds the level at the floor, so heat is unmet only where the
-    # tank is at its floor, and the last slot whatever the end condition still
-    # lacks. Unmet heat delivered later is never lost to the standing loss, so
-    # this never adds to it. It also settles the solver's accuracy, which the
-    # unmet heat's price costs on the level.
-    U <- numeric(n)
-    s <- S0
-    for (t in seq_len(n)) {
-      s_next <- k * s + (cop[t] * P[t] + B[t] - Q[t]) * dt
-      floor_t <- if (t == n) max(Smin, S0) else Smin
-      if (s_next < floor_t) {
-        U[t] <- (floor_t - s_next) / dt
-      }
-      s <- k * s + (cop[t] * P[t] + B[t] + U[t] - Q[t]) * dt
-    }
-  }
 
   # OSQP declares an infeasible problem as such, but its accuracy is absolute,
   # so check the power it returns against the band once more on the exact
   # dynamics before trusting it.
-  level <- tank_level_path(P, Q, cop, S0, k, dt, backup = B, unmet = U)[-1]
+  # The level stops at the inlet temperature: the heat `U` the solver lets in
+  # there is demand the tank does not serve
+  level <- tank_level_path(P, Q, cop, S0, k, dt, backup = B)[-1]
   tol <- 1e-3
   if (
-    any(level < Smin - tol) ||
+    any(level < (if (soft) 0 else Smin) - tol) ||
       any(level > Smax + tol) ||
-      level[n] < S0 - tol
+      (!soft && level[n] < S0 - tol)
   ) {
     return(NULL)
   }
-  list(power = P, backup = B, unmet = U)
+  list(power = P, backup = B)
 }
 
 
@@ -670,21 +790,22 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' heat is `cop * P`, so there is no conversion efficiency: the COP is the
 #' conversion. The backup heater turns `B` kW of electricity into `B` kW of heat.
 #'
-#' Per slot of `dt` hours, with `S` the level in kWh thermal above the band's
-#' bottom and `k = (1 - loss/100)^dt`:
+#' Per slot of `dt` hours, with `S` the level in kWh thermal above the inlet
+#' water temperature (level 0, `SOC = 0`) and `k = (1 - loss/100)^dt`:
 #'
-#' - `S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + U[t] - heat_demand[t]) * dt`
+#' - `S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] - heat_demand[t]) * dt`
 #' - `Tcap * SOCmin/100 <= S[t] <= Tcap * SOCmax/100`
 #' - `0 <= P[t] <= Pc`, and `P[t] = 0` where `cop[t] = 0`
 #' - `0 <= B[t] <= Pb`, also where `cop[t] = 0`
-#' - `U[t] >= 0`
 #' - every window ends at least as full as it started.
 #'
-#' `B` (the backup heater) is a variable only with `Pb > 0`. `U` is the **unmet
-#' heat**: heat the demand asked for that neither the compressor, the backup
-#' heater nor the tank delivered. It makes the comfort floor `SOCmin` soft:
-#' the level never goes below it, and the heat that would have taken it there
-#' is reported as unmet instead. Every window therefore has a schedule.
+#' `B` (the backup heater) is a variable only with `Pb > 0`. The comfort floor
+#' `SOCmin` is **soft**: when the compressor and the backup heater cannot hold
+#' it, the tank keeps giving heat below it, cooling down to the inlet
+#' temperature (level 0) at most, as a real tank would. The heat it gives from
+#' below the floor, plus the demand it cannot serve at all once it is at the
+#' inlet temperature, is the **unmet heat**. Every window therefore has a
+#' schedule.
 #'
 #' The run starts from `Tcap * SOCini/100`, and the level carries from one
 #' window to the next. The windows are those of the other optimization
@@ -700,9 +821,9 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'
 #' @section Compressor first, backup heater second, unmet heat last:
 #' The backup heater's electricity is part of the load the objective sees, like
-#' the compressor's, and `U` is not electricity at all. To order the three,
-#' both carry a linear price per kW of heat and slot in the objective, built
-#' from the window's **heat price** `h`: the highest marginal value a kW of
+#' the compressor's. To use it only after the compressor, and to cool the tank
+#' below its floor only after both, the objective prices them from the
+#' window's **heat price** `h`: the highest marginal value a kW of
 #' electric load can take in the window's objective, divided by the lowest
 #' positive COP when it is below 1, so that no kWh of compressor heat is worth
 #' more than `h`:
@@ -718,45 +839,43 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'
 #' The backup heater pays `2 * h` per kW on top of its electricity, so it only
 #' runs for heat the compressor cannot deliver (it never absorbs a PV surplus
-#' the compressor could), and the unmet heat pays `100 * h` per kW, so heat is
-#' left unmet only when neither the compressor nor the backup heater can
-#' deliver it.
+#' the compressor could).
 #'
-#' Unmet heat appears only in slots where the tank is at its comfort floor:
-#' it is the heat that would have taken the level below it. The only
-#' exception is the last slot of a window, which also takes the heat the
-#' compressor and the backup heater lack to end the window as full as it
-#' started.
-#'
-#' The unmet heat only enters a window's problem when the window has no
-#' schedule that holds the band within the grid capacities without it; with no
-#' backup heater and a band the compressor can hold, the problem, and so the
-#' result, is the one without either.
+#' When a window has no schedule that holds the band within the grid
+#' capacities, it is solved again with a soft floor: the level may go down to
+#' 0, and every kWh below `SOCmin` costs `20 * h / dt` per slot, more than
+#' any kWh of heat the compressor, the backup heater or a missed grid capacity
+#' (below) can deliver. So the tank only cools below its floor when they
+#' cannot hold it, and is brought back above it as soon as they can. The end
+#' condition becomes soft at the same price, so a drained tank does not have
+#' to be refilled by the end of the window. Without a backup heater and with a
+#' band the compressor can hold, the problem, and so the result, is the one
+#' without any of this.
 #'
 #' @section Soft grid capacities:
 #' As for [add_battery_optimization()], the grid capacities are soft: a window
-#' that has no schedule holding the band within them is solved with the unmet
-#' heat and with a penalised slack on each capacity. The slack is bounded by
+#' that has no schedule holding the band within them is solved with the soft
+#' comfort floor and with a penalised slack on each capacity. The slack is bounded by
 #' how far the site already misses the capacity without optimisation (see
 #' `optimization_slack_ceiling()`): for import, with the heat pump running
 #' `flexible`; for export, with the heat pump off, since a full tank cannot
 #' absorb a surplus. It costs `10 * h` per kW (electric), between the backup
-#' heater and the unmet heat: the solver uses the compressor and the backup
+#' heater and the comfort floor: the solver uses the compressor and the backup
 #' heater to their limits before it misses a capacity, and misses an import
-#' capacity before it leaves heat unmet. The heat pump off with the floor held
-#' by unmet heat always fits these bounds, so **every window has a schedule**.
+#' capacity before it lets the tank cool below its floor. The heat pump off
+#' with the tank cooling always fits these bounds, so **every window has a
+#' schedule**.
 #' A capacity left missed is reported with a message; compare the net flow
 #' `static + P + attr(, "backup_kw") - production` with the capacities to find
 #' where.
 #'
 #' The slots that run `flexible` (past `flex_window_hours`, or in a window the
-#' solver failed on, reported with a message) keep the tank in its band too. Below, the heat that would take the
-#' level under `SOCmin` is reported as unmet heat, as in the optimised slots.
-#' Above, the compressor stops as a thermostat would: its power there is
-#' `flexible` reduced to what keeps the level at `SOCmax`. So the level never
-#' leaves the band, and over the run
-#' `sum((cop * P + B + U) * dt) = sum(heat_demand * dt) + losses + (end level -
-#' initial level)`; [get_tank_level()] reproduces the level.
+#' solver failed on, reported with a message) keep the tank below its top: the
+#' compressor stops as a thermostat would, its power there being `flexible`
+#' reduced to what keeps the level at `SOCmax`. Below the floor they cool the
+#' tank down to the inlet temperature at most, with unmet heat as above. So the
+#' level stays between 0 and `SOCmax` everywhere, and [get_tank_level()]
+#' reproduces it.
 #'
 #' Inputs out of range stop with an error naming the argument; nothing is
 #' clamped into range, and no zero profile is returned in their place.
@@ -778,10 +897,11 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   `static + P + B - production`; `"cost"` minimises the energy cost of it.
 #'   `"capacity"` has no tank form and stops with an error.
 #' @param Tcap numeric, tank capacity (kWh thermal, > 0): the heat between the
-#'   band's bottom and top. For a mixed tank of `V` litres between a reference
-#'   temperature `T_ref` and its top temperature `T_max` (degrees C), it is
-#'   `V * 4.186 / 3600 * (T_max - T_ref)`, and a comfort floor at `T_floor`
-#'   is `SOCmin = 100 * (T_floor - T_ref) / (T_max - T_ref)`.
+#'   inlet water temperature (`SOC = 0`, where the tank gives no more heat) and
+#'   the top. For a mixed tank of `V` litres between the inlet temperature
+#'   `T_in` and its top temperature `T_max` (degrees C), it is
+#'   `V * 4.186 / 3600 * (T_max - T_in)`, and a comfort floor at `T_floor` is
+#'   `SOCmin = 100 * (T_floor - T_in) / (T_max - T_in)`.
 #' @param Pc numeric, compressor cap (kW electric, > 0).
 #' @param SOCmin numeric, minimum State-of-Charge (%), the comfort floor.
 #' @param SOCmax numeric, maximum State-of-Charge (%).
@@ -808,8 +928,10 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   backup heater's power (kW electric = kW thermal); 0 outside optimised
 #'   windows and everywhere without a backup heater.
 #' - `unmet_heat_kw`: numeric vector, one value per row, rounded to 2 decimals:
-#'   the unmet heat (kW thermal, not electricity); 0 wherever the demand was
-#'   met.
+#'   the unmet heat (kW thermal, not electricity): the heat the tank gave from
+#'   below its comfort floor in that slot, plus the demand it could not serve
+#'   at the inlet temperature; 0 wherever the tank stayed at or above its floor.
+#'   It is a report, not part of the balance.
 #'
 #' The heat pump's electric load is the power plus `attr(, "backup_kw")`.
 #'
@@ -836,8 +958,7 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' attr(P, "unmet_heat_kw")
 #' get_tank_level(
 #'   P, opt_data$heat_demand, opt_data$cop, init = 3,
-#'   backup = attr(P, "backup_kw"),
-#'   unmet_heat = attr(P, "unmet_heat_kw")
+#'   backup = attr(P, "backup_kw")
 #' )
 #'
 add_tank_optimization <- function(
@@ -948,7 +1069,6 @@ add_tank_optimization <- function(
 
   P_out <- round(flexible, 2)
   B_out <- numeric(n_rows)
-  U_out <- numeric(n_rows)
   level <- Tcap * SOCini / 100 # level at the start of slot `pos`
   pos <- 1L
 
@@ -963,16 +1083,14 @@ add_tank_optimization <- function(
       level,
       k,
       dt,
-      backup = B_out[idx],
-      unmet = U_out[idx]
+      backup = B_out[idx]
     )
     path[length(path)]
   }
 
-  # Slots that run `flexible` keep the tank in its band too. Above, the
-  # compressor stops as a thermostat would, at the 2-decimal power that keeps
-  # the level at the top; below, the heat that would take the level under the
-  # floor is unmet, rounded up to 2 decimals so the level stays on the floor.
+  # Slots that run `flexible` keep the tank below its top too: the compressor
+  # stops as a thermostat would, at the 2-decimal power that keeps the level
+  # at the top. Below, the tank cools down to the inlet temperature at most.
   run_flexible <- function(level, idx) {
     for (t in idx) {
       s_next <- k * level + (cop[t] * P_out[t] - Q[t]) * dt
@@ -981,10 +1099,7 @@ add_tank_optimization <- function(
         P_out[t] <<- max(floor(p_fit * 100 + 1e-9) / 100, 0)
         s_next <- k * level + (cop[t] * P_out[t] - Q[t]) * dt
       }
-      if (s_next < Smin - 1e-9) {
-        U_out[t] <<- ceiling((Smin - s_next) / dt * 100 - 1e-9) / 100
-      }
-      level <- k * level + (cop[t] * P_out[t] + U_out[t] - Q[t]) * dt
+      level <- if (s_next < -1e-9) 0 else s_next
     }
     level
   }
@@ -998,9 +1113,9 @@ add_tank_optimization <- function(
       level <- run_flexible(level, seq(pos, start - 1))
     }
 
-    # Every slot keeps the level in the band, up to rounding, which the
-    # solver does not need to see
-    S0 <- min(max(level, Smin), Smax)
+    # Every slot keeps the level between the inlet temperature and the top,
+    # up to rounding, which the solver does not need to see
+    S0 <- min(max(level, 0), Smax)
 
     window_args <- list(
       G = G[idx],
@@ -1063,8 +1178,7 @@ add_tank_optimization <- function(
         S0,
         k,
         dt,
-        backup = sol$backup,
-        unmet = sol$unmet
+        backup = sol$backup
       )[-1]
       rounded <- tank_round_power(
         target,
@@ -1075,12 +1189,11 @@ add_tank_optimization <- function(
         dt,
         Pc,
         backup = sol$backup,
-        unmet = sol$unmet,
-        Pb = Pb
+        Pb = Pb,
+        power = sol$power
       )
       P_out[idx] <- rounded$power
       B_out[idx] <- rounded$backup
-      U_out[idx] <- rounded$unmet
       net <- L[idx] + P_out[idx] + B_out[idx] - G[idx]
       if (
         any(net > import_capacity[idx] + 0.01) ||
@@ -1088,11 +1201,6 @@ add_tank_optimization <- function(
       ) {
         message_once(
           "\u26a0\ufe0f Optimization warning: grid capacity not reachable in some slots. The heat pump is operating at its limits there, so the capacity is approached but not met."
-        )
-      }
-      if (any(rounded$unmet > 0)) {
-        message_once(
-          "\u26a0\ufe0f Optimization warning: the heat pump cannot cover the heat demand in some windows. Leaving it unmet there (attribute `unmet_heat_kw`)."
         )
       }
       level <- advance(level, idx)
@@ -1105,6 +1213,25 @@ add_tank_optimization <- function(
     run_flexible(level, seq(pos, n_rows))
   }
 
+  # Unmet heat: what the tank gave from below its comfort floor, or could not
+  # give at all at the inlet temperature
+  U_out <- tank_unmet_heat(
+    P_out,
+    Q,
+    cop,
+    Tcap * SOCini / 100,
+    k,
+    dt,
+    backup = B_out,
+    Smin = Smin,
+    tol = 0.005 * max(cop, 1) * dt
+  )
+  if (any(U_out > 0)) {
+    message(
+      "\u26a0\ufe0f Optimization warning: the tank goes below its comfort floor in some slots. That heat is unmet (attribute `unmet_heat_kw`)."
+    )
+  }
+
   attr(P_out, "backup_kw") <- B_out
   attr(P_out, "unmet_heat_kw") <- U_out
   P_out
@@ -1115,9 +1242,10 @@ add_tank_optimization <- function(
 #'
 #' The tank's counterpart of [get_storage_level()]: the level in kWh thermal at
 #' the start of each slot, starting from `init`, with
-#' `S[t+1] = k * S[t] + (cop[t] * power[t] + backup[t] + unmet_heat[t] -
-#' heat_demand[t]) * dt` and `k = (1 - loss/100)^dt`, `dt` being the time
-#' resolution in hours. It never holds the level in a band on its own.
+#' `S[t+1] = max(k * S[t] + (cop[t] * power[t] + backup[t] - heat_demand[t]) *
+#' dt, 0)` and `k = (1 - loss/100)^dt`, `dt` being the time resolution in
+#' hours. Level 0 is the inlet temperature: an empty tank gives no more heat,
+#' and the demand it cannot serve is unmet heat.
 #'
 #' @param power numeric vector, compressor electric power (kW), such as the
 #'   result of [add_tank_optimization()]
@@ -1131,8 +1259,6 @@ add_tank_optimization <- function(
 #' @param backup numeric, backup heater power (kW electric = kW thermal):
 #'   `attr(result, "backup_kw")` of [add_tank_optimization()], or 0 without a
 #'   backup heater
-#' @param unmet_heat numeric, unmet heat (kW thermal):
-#'   `attr(result, "unmet_heat_kw")` of [add_tank_optimization()], or 0
 #'
 #' @return numeric vector of the level (kWh), rounded to 2 decimals
 #' @export
@@ -1144,11 +1270,10 @@ get_tank_level <- function(
   init,
   loss = 0,
   time_resolution = 60,
-  backup = 0,
-  unmet_heat = 0
+  backup = 0
 ) {
   n <- length(power)
-  for (arg in c("heat_demand", "cop", "backup", "unmet_heat")) {
+  for (arg in c("heat_demand", "cop", "backup")) {
     value <- get(arg)
     if (!is.numeric(value) || !(length(value) %in% c(1, n)) || anyNA(value)) {
       stop(
@@ -1179,8 +1304,7 @@ get_tank_level <- function(
     init,
     k,
     dt,
-    rep_len(backup, n),
-    rep_len(unmet_heat, n)
+    rep_len(backup, n)
   )
   round(level[seq_len(n)], 2)
 }

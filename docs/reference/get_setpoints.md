@@ -10,7 +10,9 @@ get_setpoints(
   opt_data,
   profiles_demand,
   opt_objective,
-  lambda
+  lambda,
+  energy_min = 1,
+  energy_max = 1
 )
 ```
 
@@ -35,3 +37,9 @@ get_setpoints(
 - lambda:
 
   numeric, penalty on change for the flexible load.
+
+- energy_min, energy_max:
+
+  numeric, minimum and maximum share (between 0 and 1) of each profile's
+  energy the setpoint must carry. See
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md).

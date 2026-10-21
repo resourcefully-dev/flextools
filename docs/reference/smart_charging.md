@@ -21,6 +21,7 @@ smart_charging(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0
@@ -51,6 +52,13 @@ smart_charging(
 
   - `export_capacity`: maximum exported power from the grid (in kW), for
     example the contracted power with the energy company.
+
+  - `load_capacity`: maximum charging power (in kW) allowed for the
+    flexible EV demand at every time slot. By default the algorithm
+    already limits the optimized setpoint to the nominal power of the
+    connected EVs (the physical charging envelope). This variable can be
+    used to tighten that limit further (e.g. a charging point or
+    transformer power limit).
 
   - `production`: local power generation (in kW). This is used when
     `opt_objective = "grid"`.
@@ -121,6 +129,21 @@ smart_charging(
 - energy_min:
 
   numeric, minimum allowed ratio (between 0 and 1) of required energy.
+  Every session charges at least this share of the energy it requires.
+  The scheduler never curtails, postpones or interrupts a session below
+  it, and the setpoint optimization may drop energy down to it - and no
+  further - when the grid capacity cannot fit `energy_max`. When even
+  this minimum does not fit, the grid capacity is relaxed only as far as
+  the minimum-energy profile needs, so the minimum is delivered at the
+  expense of the capacity.
+
+- energy_max:
+
+  numeric, maximum allowed ratio (between 0 and 1) of required energy.
+  Every session charges at most this share of the energy it requires,
+  and the setpoint optimization targets exactly this share for the
+  responsive sessions. Lower it to save energy or cost. Must be higher
+  than 0 and at least `energy_min`.
 
 - include_log:
 
@@ -141,6 +164,12 @@ a list with three elements: optimal setpoints (tibble), sessions
 schedule (tibble) and log messages (list of character vectors, one per
 window). The date-time values in the log list are in the time zone of
 the `opt_data`.
+
+A session whose connection crosses an optimization window boundary is
+split into one part per window before scheduling (energy shared by
+connection time), so the sessions schedule carries a `Part` column and
+such a session returns several rows per part; its delivered energy is
+the sum of its rows' `Energy` grouped by `Session`.
 
 ## Details
 

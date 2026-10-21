@@ -16,6 +16,14 @@ capacity_v2g_window(
   LFmax,
   import_capacity,
   export_capacity,
-  lambda = 0
+  lambda = 0,
+  energy_ratio = c(1, 1)
 )
 ```
+
+## Arguments
+
+- energy_ratio:
+
+  numeric vector `c(min, max)`, share of the flexible load's energy the
+  optimized load must carry. See `demand_capacity_window()`.

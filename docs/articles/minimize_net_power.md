@@ -281,28 +281,88 @@ assume a lossless battery ($`\eta_c = \eta_d = 1`$). Round-trip losses
 are only embedded in the state-of-charge constraints of the [cost
 objective](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization).
 
-**Infeasible windows.** As in the demand case, when the grid capacities
-make a window infeasible each capacity is raised only as far as the
-*pre-battery* profile already requires, i.e. $`\max(IC_t,\; L_t - G_t)`$
-and $`\max(EC_t,\; G_t - L_t)`$, which guarantees that $`B = 0`$ is a
-feasible point. If OSQP does not converge, a greedy forward-pass
-heuristic clipped to the feasible box is used, and as a last resort the
-battery is disabled for that window.
+**Unreachable capacities.** A capacity the battery cannot meet is
+*approached*, not dropped. Instead of a hard box, each direction carries
+a slack variable $`s^I_t,\, s^E_t \ge 0`$ measuring by how much the slot
+misses its capacity:
+
+``` math
+B_t - s^I_t \;\le\; G_t - L_t + IC_t, \qquad B_t + s^E_t \;\ge\; G_t - L_t - EC_t \quad t \in T
+```
+
+The slack is bounded by how far the *pre-battery* profile already missed
+the capacity,
+
+``` math
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+```
+
+and penalised in the objective. Three consequences follow: $`B = 0`$
+with the slack at its ceiling is always feasible, so a window can never
+be infeasible; the result is never worse than the profile the battery
+started from; and slots that *can* meet their capacity have a ceiling of
+zero, so they stay hard capped. Where the capacity is out of reach, the
+penalty makes the battery spend its full physical capability approaching
+it instead of reverting to plain flattening.
+
+When no slot misses its capacity — including the default of no capacity
+limits at all — every ceiling is zero, the slack variables are dropped,
+and the problem reduces exactly to the box-constrained one above.
+
+**Forced flows.** A *negative* $`IC_t`$ is an obligation to export at
+least $`|IC_t|`$, and a negative $`EC_t`$ an obligation to import. The
+constraint $`-EC_t \le L_t + B_t - G_t \le IC_t`$ covers both without
+special casing. Because the slack penalty dominates the objective, such
+an obligation outranks it: the battery meets the capacity first and
+flattens second.
+
+If OSQP does not converge, a greedy forward-pass heuristic clipped to
+the feasible box is used, and as a last resort the battery is disabled
+for that window.
 
 ### Grid capacity objective
 
 Like for the demand, the `"capacity"` objective for the battery only
 targets the power that exceeds the grid connection capacity, rather than
-flattening the whole net power profile. It reuses exactly the net power
-formulation above, but first **curtails the usable battery capacity** to
-the amount of energy that actually has to be displaced:
+flattening the whole net power profile. It keeps **every constraint** of
+the net power formulation above — the same box, state of charge, energy
+balance and slack rows — and changes only the objective, to the **least
+battery** that satisfies them:
 
 ``` math
-B_{cap}^{curtail} = \min\!\left(1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(G_t - L_t - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(L_t - G_t - IC_t,\; 0\right)\right),\;\; B_{cap}\right)
+\min_{B_t} \; \sum_{t=1}^{T} B_t^2 + \lambda \sum_{t=1}^{T-1}\left(B_{t+1} - B_t\right)^{2}
 ```
 
-The two sums are the total energy exported above the export capacity and
-imported above the import capacity by the original (pre-battery)
-profile. The 1% headroom ensures the resulting problem is strictly
-feasible. If the original profile causes no violation at all,
-$`B_{cap}^{curtail} = 0`$ and the battery is left idle for that window.
+The capacity is already enforced by the constraints, so the objective no
+longer has to mention the net power at all. Dropping the
+$`\left(L_t - G_t\right)`$ term is the whole difference between the two
+objectives: with it, the optimizer flattens the profile and spends
+whatever battery it is given; without it, it spends as little as the
+capacity allows.
+
+Two consequences are worth spelling out, because they are what makes
+this objective answer a different question from `"grid"`:
+
+- **The battery discharges onto the capacity, not below it.** Since the
+  quadratic penalises battery power rather than net power, every kW of
+  discharge past the binding capacity costs the objective and buys
+  nothing. The net profile therefore rests exactly on $`IC_t`$ (or
+  $`-EC_t`$) through the violation and is left untouched elsewhere, and
+  the energy that has to be given back is recharged at the lowest power
+  the window allows.
+
+- **The nameplate no longer decides how hard the battery works** — the
+  capacity does. Two batteries that can both clear a window return the
+  *same* profile, so the objective can be used to find the minimum
+  battery a congestion limit requires. Earlier versions instead reserved
+  a slice of the battery sized to the overshoot volume and ran the net
+  power objective on that slice; the reserve was a proxy for “use as
+  little as possible” that both under- and over-shot, since a reserve
+  too small could not clear the window while a reserve large enough was
+  still spent flattening.
+
+If the pre-battery profile violates neither capacity in a window, there
+is nothing to solve — the least battery that keeps it within its limits
+is no battery — and the window returns $`B_t = 0`$ without calling the
+solver.

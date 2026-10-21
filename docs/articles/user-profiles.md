@@ -283,8 +283,7 @@ summarise_smart_charging_sessions(sc_results) %>%
 | Workdays  | Visit    | Considered | Responsive     |          2 |  18 |
 | Workdays  | Visit    | Considered | Non responsive |          9 |  82 |
 | Workdays  | Visit    | Responsive | Flexible       |          2 | 100 |
-| Workdays  | Visit    | Flexible   | Exploited      |          1 |  50 |
-| Workdays  | Visit    | Flexible   | Not exploited  |          1 |  50 |
+| Workdays  | Visit    | Flexible   | Exploited      |          2 | 100 |
 | Workdays  | Worktime | Total      | Considered     |          9 | 100 |
 | Workdays  | Worktime | Considered | Responsive     |          5 |  56 |
 | Workdays  | Worktime | Considered | Non responsive |          4 |  44 |

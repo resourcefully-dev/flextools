@@ -44,10 +44,38 @@ add_battery_optimization(
 
   - `price_exported`: energy export price (required for cost/combined)
 
+  `import_capacity` and `export_capacity` constrain the **net** grid
+  flow. A negative value is therefore an obligation to flow the other
+  way: `import_capacity = -100` requires at least 100 kW of export in
+  that slot, as a congestion contract might. Such an obligation outranks
+  `opt_objective` — the battery meets the capacity first and optimises
+  second.
+
+  A capacity the battery cannot physically reach is *approached*, not
+  dropped: the battery operates at its limit and a warning is emitted
+  once. The result is still guaranteed never to be worse than the
+  profile without a battery, and slots that can meet their capacity
+  remain strictly capped. The unavoidable miss is *concentrated*: the
+  capacity is met exactly for as many slots as the battery's energy
+  covers, rather than spread thinly so that every slot ends marginally
+  over. Both leave the same volume unserved, but only the former reduces
+  the number of slots in violation (see
+  [`get_energy_kpis()`](https://resourcefully-dev.github.io/flextools/reference/get_energy_kpis.md)'s
+  `congestion_time`).
+
 - opt_objective:
 
   character or numeric. `"grid"` (default), `"capacity"`, `"cost"`, or a
   numeric weight `w` where `w=1` is pure grid and `w=0` is pure cost.
+
+  `"grid"` minimises the net grid flow, so it flattens the profile with
+  whatever battery it is given. `"capacity"` instead minimises the
+  *battery usage* that keeps the net flow inside `import_capacity` and
+  `export_capacity`: windows within both capacities are left untouched,
+  and in the windows that are not, the battery discharges onto the
+  capacity line rather than below it and recharges at the lowest power
+  the window allows. Use it to size the minimum battery a congestion
+  limit needs; use `"grid"` to minimise the peak itself.
 
 - Bcap:
 
@@ -103,11 +131,14 @@ add_battery_optimization(
 
 - cycle_cost:
 
-  numeric, degradation cost per kWh cycled (Euro/kWh). Default 0. Adds a
-  linear penalty on battery discharge so the optimizer trades off energy
-  cost savings against battery wear. When positive, the problem is
-  solved as a pure LP (no binary variables) which is substantially
-  faster than the default MILP.
+  numeric, degradation cost of one full cycle, in Euro per `Bcap` kWh
+  discharged (NOT Euro/kWh). Default 0. Divided by `Bcap` internally to
+  obtain the per-kWh penalty, so a battery costing `p` Euro/kWh and
+  rated for `n` cycles has `cycle_cost = p * Bcap / n`. Adds a linear
+  penalty on battery discharge so the optimizer trades off energy cost
+  savings against battery wear. When positive, the problem is solved as
+  a pure LP (no binary variables) which is substantially faster than the
+  default MILP.
 
 ## Value
 

@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -24,6 +24,7 @@
     <li><a class="dropdown-item" href="../articles/minimize_net_power.html">Net power optimization</a></li>
     <li><a class="dropdown-item" href="../articles/minimize_cost.html">Energy cost optimization</a></li>
     <li><a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a></li>
+    <li><a class="dropdown-item" href="../articles/thermal_optimization.html">Thermal optimization</a></li>
     <li><a class="dropdown-item" href="../articles/parallel-processing.html">Parallel processing</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Demand-response</h6></li>
@@ -58,6 +59,7 @@
 <span>  power_th <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  charging_power_min <span class="op">=</span> <span class="fl">0.5</span>,</span>
 <span>  energy_min <span class="op">=</span> <span class="fl">1</span>,</span>
+<span>  energy_max <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  include_log <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  show_progress <span class="op">=</span> <span class="cn">TRUE</span></span>
 <span><span class="op">)</span></span></code></pre></div>
@@ -95,7 +97,15 @@ be curtailed until the 50% of the nominal charging power (i.e. <code>Power</code
 
 
 <dt id="arg-energy-min">energy_min<a class="anchor" aria-label="anchor" href="#arg-energy-min"></a></dt>
-<dd><p>numeric, minimum allowed ratio (between 0 and 1) of required energy.</p></dd>
+<dd><p>numeric, minimum allowed ratio (between 0 and 1) of required energy.
+A session is never curtailed, postponed or interrupted below this share of
+the energy it requires, whatever the setpoint says.</p></dd>
+
+
+<dt id="arg-energy-max">energy_max<a class="anchor" aria-label="anchor" href="#arg-energy-max"></a></dt>
+<dd><p>numeric, maximum allowed ratio (between 0 and 1) of required energy.
+Every session stops charging once it has received this share of the energy
+it requires. Must be higher than 0 and at least <code>energy_min</code>.</p></dd>
 
 
 <dt id="arg-include-log">include_log<a class="anchor" aria-label="anchor" href="#arg-include-log"></a></dt>
@@ -108,7 +118,10 @@ be curtailed until the 50% of the nominal charging power (i.e. <code>Power</code
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
-    <p>list of two elements <code>sessions</code> and <code>log</code></p>
+    <p>list of three elements: <code>sessions</code> (the schedule, one row per
+constant-power segment), <code>demand</code> (the scheduled power per time slot,
+one column per <code>Profile</code> when the sessions carry one, else <code>Demand</code>,
+summed from the exact per-slot powers) and <code>log</code></p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

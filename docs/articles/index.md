@@ -8,6 +8,8 @@
   optimization](https://resourcefully-dev.github.io/flextools/articles/minimize_cost.md):
 - [Combined
   optimization](https://resourcefully-dev.github.io/flextools/articles/combined_optimization.md):
+- [Thermal
+  optimization](https://resourcefully-dev.github.io/flextools/articles/thermal_optimization.md):
 - [Parallel
   processing](https://resourcefully-dev.github.io/flextools/articles/parallel-processing.md):
 

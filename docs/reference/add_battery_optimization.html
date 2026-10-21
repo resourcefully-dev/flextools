@@ -9,7 +9,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -26,6 +26,7 @@ documentation website."><meta property="og:image" content="https://resourcefully
     <li><a class="dropdown-item" href="../articles/minimize_net_power.html">Net power optimization</a></li>
     <li><a class="dropdown-item" href="../articles/minimize_cost.html">Energy cost optimization</a></li>
     <li><a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a></li>
+    <li><a class="dropdown-item" href="../articles/thermal_optimization.html">Thermal optimization</a></li>
     <li><a class="dropdown-item" href="../articles/parallel-processing.html">Parallel processing</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Demand-response</h6></li>
@@ -86,13 +87,34 @@ Optional columns:</p><ul><li><p><code>static</code>: static power demand (kW)</p
 <li><p><code>export_capacity</code>: max grid export (kW)</p></li>
 <li><p><code>price_imported</code>: energy import price (required for cost/combined)</p></li>
 <li><p><code>price_exported</code>: energy export price (required for cost/combined)</p></li>
-</ul></dd>
+</ul><p><code>import_capacity</code> and <code>export_capacity</code> constrain the <strong>net</strong> grid flow. A
+negative value is therefore an obligation to flow the other way:
+<code>import_capacity = -100</code> requires at least 100 kW of export in that slot, as
+a congestion contract might. Such an obligation outranks <code>opt_objective</code> —
+the battery meets the capacity first and optimises second.</p>
+<p>A capacity the battery cannot physically reach is <em>approached</em>, not dropped:
+the battery operates at its limit and a warning is emitted once. The result
+is still guaranteed never to be worse than the profile without a battery, and
+slots that can meet their capacity remain strictly capped. The unavoidable
+miss is <em>concentrated</em>: the capacity is met exactly for as many slots as the
+battery's energy covers, rather than spread thinly so that every slot ends
+marginally over. Both leave the same volume unserved, but only the former
+reduces the number of slots in violation (see <code><a href="get_energy_kpis.html">get_energy_kpis()</a></code>'s
+<code>congestion_time</code>).</p></dd>
 
 
 <dt id="arg-opt-objective">opt_objective<a class="anchor" aria-label="anchor" href="#arg-opt-objective"></a></dt>
 <dd><p>character or numeric.
 <code>"grid"</code> (default), <code>"capacity"</code>, <code>"cost"</code>, or a numeric weight <code>w</code>
-where <code>w=1</code> is pure grid and <code>w=0</code> is pure cost.</p></dd>
+where <code>w=1</code> is pure grid and <code>w=0</code> is pure cost.</p>
+<p><code>"grid"</code> minimises the net grid flow, so it flattens the profile with
+whatever battery it is given. <code>"capacity"</code> instead minimises the <em>battery
+usage</em> that keeps the net flow inside <code>import_capacity</code> and
+<code>export_capacity</code>: windows within both capacities are left untouched, and in
+the windows that are not, the battery discharges onto the capacity line
+rather than below it and recharges at the lowest power the window allows.
+Use it to size the minimum battery a congestion limit needs; use <code>"grid"</code> to
+minimise the peak itself.</p></dd>
 
 
 <dt id="arg-bcap">Bcap<a class="anchor" aria-label="anchor" href="#arg-bcap"></a></dt>
@@ -147,9 +169,12 @@ See <code>charge_eff</code>.</p></dd>
 
 
 <dt id="arg-cycle-cost">cycle_cost<a class="anchor" aria-label="anchor" href="#arg-cycle-cost"></a></dt>
-<dd><p>numeric, degradation cost per kWh cycled (Euro/kWh). Default 0.
-Adds a linear penalty on battery discharge so the optimizer trades off energy
-cost savings against battery wear. When positive, the problem is solved as a
+<dd><p>numeric, degradation cost of one full cycle, in Euro per
+<code>Bcap</code> kWh discharged (NOT Euro/kWh). Default 0. Divided by <code>Bcap</code>
+internally to obtain the per-kWh penalty, so a battery costing <code>p</code> Euro/kWh
+and rated for <code>n</code> cycles has <code>cycle_cost = p * Bcap / n</code>. Adds a linear
+penalty on battery discharge so the optimizer trades off energy cost
+savings against battery wear. When positive, the problem is solved as a
 pure LP (no binary variables) which is substantially faster than the default MILP.</p></dd>
 
 </dl></div>

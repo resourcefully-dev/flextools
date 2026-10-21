@@ -6,6 +6,8 @@
   : Optimize a vector of flexible demand
 - [`add_battery_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_battery_optimization.md)
   : Battery optimal charging/discharging profile
+- [`add_tank_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_tank_optimization.md)
+  : Heat pump with a thermal tank: optimal compressor profile
 
 ## Smart charging
 
@@ -35,6 +37,10 @@
   : Storage losses over time
 - [`get_conversion_losses()`](https://resourcefully-dev.github.io/flextools/reference/get_conversion_losses.md)
   : Losses due to charging/discharging process
+- [`get_tank_level()`](https://resourcefully-dev.github.io/flextools/reference/get_tank_level.md)
+  : Tank level (thermal energy)
+- [`get_tank_unmet_heat()`](https://resourcefully-dev.github.io/flextools/reference/get_tank_unmet_heat.md)
+  : Unmet heat of a tank schedule
 
 ## Evaluation of results
 

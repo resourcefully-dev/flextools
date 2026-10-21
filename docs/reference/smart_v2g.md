@@ -20,6 +20,7 @@ smart_v2g(
   power_th = 0,
   charging_power_min = 0,
   energy_min = 1,
+  energy_max = 1,
   discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
@@ -51,6 +52,13 @@ smart_v2g(
 
   - `export_capacity`: maximum exported power from the grid (in kW), for
     example the contracted power with the energy company.
+
+  - `load_capacity`: maximum charging power (in kW) allowed for the
+    flexible EV demand at every time slot. By default the algorithm
+    already limits the optimized setpoint to the nominal power of the
+    connected EVs (the physical charging envelope). This variable can be
+    used to tighten that limit further (e.g. a charging point or
+    transformer power limit).
 
   - `production`: local power generation (in kW). This is used when
     `opt_objective = "grid"`.
@@ -114,6 +122,21 @@ smart_v2g(
 - energy_min:
 
   numeric, minimum allowed ratio (between 0 and 1) of required energy.
+  Every session charges at least this share of the energy it requires,
+  net of discharge. The scheduler never discharges or curtails a session
+  below it, and the setpoint optimization may drop energy down to it -
+  and no further - when the grid capacity cannot fit `energy_max`. When
+  even this minimum does not fit, the grid capacity is relaxed only as
+  far as the minimum-energy profile needs.
+
+- energy_max:
+
+  numeric, maximum allowed ratio (between 0 and 1) of required energy.
+  Every session charges at most this share of the energy it requires,
+  net of discharge (energy discharged, grossed up by `discharge_eff`,
+  has to be charged back on top), and the setpoint optimization targets
+  this share for the responsive sessions. Must be higher than 0 and at
+  least `energy_min`.
 
 - discharge_eff:
 

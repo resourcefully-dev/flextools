@@ -12,6 +12,7 @@ schedule_sessions(
   power_th = 0,
   charging_power_min = 0.5,
   energy_min = 1,
+  energy_max = 1,
   include_log = FALSE,
   show_progress = TRUE
 )
@@ -53,7 +54,15 @@ schedule_sessions(
 
 - energy_min:
 
-  numeric, minimum allowed ratio (between 0 and 1) of required energy.
+  numeric, minimum allowed ratio (between 0 and 1) of required energy. A
+  session is never curtailed, postponed or interrupted below this share
+  of the energy it requires, whatever the setpoint says.
+
+- energy_max:
+
+  numeric, maximum allowed ratio (between 0 and 1) of required energy.
+  Every session stops charging once it has received this share of the
+  energy it requires. Must be higher than 0 and at least `energy_min`.
 
 - include_log:
 
@@ -66,4 +75,7 @@ schedule_sessions(
 
 ## Value
 
-list of two elements `sessions` and `log`
+list of three elements: `sessions` (the schedule, one row per
+constant-power segment), `demand` (the scheduled power per time slot,
+one column per `Profile` when the sessions carry one, else `Demand`,
+summed from the exact per-slot powers) and `log`

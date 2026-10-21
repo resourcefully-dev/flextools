@@ -19,7 +19,8 @@ demand_combined_window(
   import_capacity,
   export_capacity,
   w,
-  lambda
+  lambda,
+  energy_ratio = c(1, 1)
 )
 ```
 
@@ -84,6 +85,13 @@ demand_combined_window(
 - lambda:
 
   numeric, penalty on change for the flexible load.
+
+- energy_ratio:
+
+  numeric vector `c(min, max)`, share of the flexible load's energy the
+  optimized load must carry. `c(1, 1)` (default) preserves the energy
+  exactly; a range lets the optimizer drop energy — down to `min` — when
+  the grid capacity cannot fit `max`.
 
 ## Value
 

@@ -228,17 +228,18 @@ differentiating them between *Considered*, *Responsive*, *Flexible* and
     ## Smart charging results as a list of 3 objects: charging sessions, user profiles setpoints and log messages.
     ## Simulation from 2023-05-01 to 2023-05-05 with a time resolution of 15 minutes.
     ## For this time period, there were 3 smart charging windows, where:
-    ##   - 15 sessions were considered ( 100 % of total data set).
-    ##   - 15 sessions were Responsive ( 100 % of considered sessions).
-    ##   - 15 sessions were Flexible ( 100 % of responsive sessions).
-    ##   - 15 sessions were Exploited ( 100 % of flexible sessions).
+    ##   - 11 sessions were considered ( 73 % of total data set).
+    ##   - 11 sessions were Responsive ( 100 % of considered sessions).
+    ##   - 11 sessions were Flexible ( 100 % of responsive sessions).
+    ##   - 11 sessions were Exploited ( 100 % of flexible sessions).
 
 This classification is done by the smart charging algorithm according to
 the optimization window hours, the `method` and the sessions’ features:
 
 - **Considered**: charging sessions that charge within the optimization
-  windows and are not considered outliers (their connection times fit
-  the 95% percentile).
+  windows. A session whose connection crosses a window boundary is split
+  into one part per window (energy shared by connection time), so every
+  part is considered in its own window.
 - **Responsive**: charging sessions that accept to participate in the
   smart charging program. The ratio of responsive sessions from every EV
   user profile is configured with the `responsive` parameter.
@@ -265,14 +266,14 @@ interrupt methods) or between 0 and the nominal power (curtail method).
 In the following example you can see how `Session` “S1” has a different
 `Power` value in different time slots:
 
-| Session | ConnectionStartDateTime | ConnectionEndDateTime | ChargingStartDateTime | ChargingEndDateTime | Power | Energy | ConnectionHours | ChargingHours | Timecycle | Profile | Responsive | Flexible | Exploited | EnergyToCharge | ConnectionHoursLeft |
-|:---|:---|:---|:---|:---|---:|---:|---:|---:|:---|:---|:---|:---|:---|---:|---:|
-| S1 | 2023-05-01 13:45:00 | 2023-05-01 14:00:00 | 2023-05-01 13:45:00 | 2023-05-01 14:00:00 | 3.70 | 0.92 | 0.25 | 0.25 | Workdays | HomeEV | TRUE | TRUE | FALSE | 17.02 | 14.02 |
-| S1 | 2023-05-01 14:00:00 | 2023-05-01 14:15:00 | 2023-05-01 14:00:00 | 2023-05-01 14:15:00 | 2.21 | 0.55 | 0.25 | 0.25 | Workdays | HomeEV | TRUE | TRUE | TRUE | 16.09 | 13.77 |
-| S1 | 2023-05-01 14:15:00 | 2023-05-01 17:30:00 | 2023-05-01 14:15:00 | 2023-05-01 17:30:00 | 1.47 | 4.79 | 3.25 | 3.25 | Workdays | HomeEV | TRUE | TRUE | TRUE | 15.54 | 13.52 |
-| S1 | 2023-05-01 17:30:00 | 2023-05-01 21:45:00 | 2023-05-01 17:30:00 | 2023-05-01 21:45:00 | 1.10 | 4.70 | 4.25 | 4.25 | Workdays | HomeEV | TRUE | TRUE | TRUE | 10.75 | 10.27 |
-| S1 | 2023-05-01 21:45:00 | 2023-05-01 22:30:00 | 2023-05-01 21:45:00 | 2023-05-01 22:30:00 | 0.88 | 0.66 | 0.75 | 0.75 | Workdays | HomeEV | TRUE | TRUE | TRUE | 6.06 | 6.02 |
-| S1 | 2023-05-01 22:30:00 | 2023-05-01 22:45:00 | 2023-05-01 22:30:00 | 2023-05-01 22:45:00 | 0.91 | 0.23 | 0.25 | 0.25 | Workdays | HomeEV | TRUE | TRUE | TRUE | 5.39 | 5.27 |
+| Session | ConnectionStartDateTime | ConnectionEndDateTime | ChargingStartDateTime | ChargingEndDateTime | Power | Energy | ConnectionHours | ChargingHours | Timecycle | Profile | Part | Responsive | Flexible | Exploited | EnergyToCharge | ConnectionHoursLeft |
+|:---|:---|:---|:---|:---|---:|---:|---:|---:|:---|:---|---:|:---|:---|:---|---:|---:|
+| S1 | 2023-05-01 13:45:00 | 2023-05-01 14:00:00 | 2023-05-01 13:45:00 | 2023-05-01 14:00:00 | 3.7000 | 0.9250 | 0.25 | 0.25 | Workdays | HomeEV | 1 | TRUE | TRUE | FALSE | 17.0200 | 14.02 |
+| S1 | 2023-05-01 14:00:00 | 2023-05-01 14:15:00 | 2023-05-01 14:00:00 | 2023-05-01 14:15:00 | 1.9800 | 0.4950 | 0.25 | 0.25 | Workdays | HomeEV | 1 | TRUE | TRUE | TRUE | 16.0950 | 13.77 |
+| S1 | 2023-05-01 14:15:00 | 2023-05-01 17:30:00 | 2023-05-01 14:15:00 | 2023-05-01 17:30:00 | 1.3200 | 4.2900 | 3.25 | 3.25 | Workdays | HomeEV | 1 | TRUE | TRUE | TRUE | 15.6000 | 13.52 |
+| S1 | 2023-05-01 17:30:00 | 2023-05-01 21:45:00 | 2023-05-01 17:30:00 | 2023-05-01 21:45:00 | 0.9900 | 4.2075 | 4.25 | 4.25 | Workdays | HomeEV | 1 | TRUE | TRUE | TRUE | 11.3100 | 10.27 |
+| S1 | 2023-05-01 21:45:00 | 2023-05-01 23:45:00 | 2023-05-01 21:45:00 | 2023-05-01 23:45:00 | 0.7920 | 1.5840 | 2.00 | 2.00 | Workdays | HomeEV | 1 | TRUE | TRUE | TRUE | 7.1025 | 6.02 |
+| S1 | 2023-05-01 23:45:00 | 2023-05-02 00:00:00 | 2023-05-01 23:45:00 | 2023-05-02 00:00:00 | 0.7974 | 0.1994 | 0.25 | 0.25 | Workdays | HomeEV | 1 | TRUE | TRUE | TRUE | 5.5185 | 4.02 |
 
 Coordinated charging sessions
 
@@ -479,7 +480,7 @@ function:
 
 &nbsp;
 
-    ## [1] 157.6218
+    ## [1] 146.6855
 
 ### Energy cost with grid constraints
 
@@ -535,7 +536,7 @@ function:
 
 &nbsp;
 
-    ## [1] 172.0701
+    ## [1] 159.1424
 
 In this case, **the cost optimization is not possible if the grid is
 constrained**.

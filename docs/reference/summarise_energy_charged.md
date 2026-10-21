@@ -55,12 +55,12 @@ summarise_energy_charged(sc_results, sessions)
 #>    Session EnergyRequired EnergyCharged PctEnergyCharged
 #>    <chr>            <dbl>         <dbl>            <dbl>
 #>  1 S1                6.31          6.31              100
-#>  2 S2               22.8          22.7                99
+#>  2 S2               22.8          22.7               100
 #>  3 S3               25.4          24.4                96
 #>  4 S4                7.53          7.17               95
 #>  5 S5               20.7          19.7                95
-#>  6 S6                5.01          4.82               96
-#>  7 S7                8.42          8.41              100
+#>  6 S6                5.01          4.81               96
+#>  7 S7                8.42          8.42              100
 #>  8 S8               17.1          16.9                99
 #>  9 S9               15.7          15.2                97
 #> 10 S10              58.9          55.2                94

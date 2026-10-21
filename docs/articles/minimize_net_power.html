@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -44,6 +44,7 @@
     <li><a class="dropdown-item" href="../articles/minimize_net_power.html">Net power optimization</a></li>
     <li><a class="dropdown-item" href="../articles/minimize_cost.html">Energy cost optimization</a></li>
     <li><a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a></li>
+    <li><a class="dropdown-item" href="../articles/thermal_optimization.html">Thermal optimization</a></li>
     <li><a class="dropdown-item" href="../articles/parallel-processing.html">Parallel processing</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Demand-response</h6></li>
@@ -434,36 +435,94 @@ battery
 Round-trip losses are only embedded in the state-of-charge constraints
 of the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_cost.html#battery-optimization">cost
 objective</a>.</p>
-<p><strong>Infeasible windows.</strong> As in the demand case, when the
-grid capacities make a window infeasible each capacity is raised only as
-far as the <em>pre-battery</em> profile already requires,
-i.e. <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(IC_t,\; L_t - G_t)</annotation></semantics></math>
-and
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mo stretchy="false" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\max(EC_t,\; G_t - L_t)</annotation></semantics></math>,
-which guarantees that
+<p><strong>Unreachable capacities.</strong> A capacity the battery
+cannot meet is <em>approached</em>, not dropped. Instead of a hard box,
+each direction carries a slack variable
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>,</mo><mspace width="0.167em"></mspace><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo>≥</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">s^I_t,\, s^E_t \ge 0</annotation></semantics></math>
+measuring by how much the slot misses its capacity:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>B</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="2.0em"></mspace><msub><mi>B</mi><mi>t</mi></msub><mo>+</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mspace width="0.278em"></mspace><mo>≥</mo><mspace width="0.278em"></mspace><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+B_t - s^I_t \;\le\; G_t - L_t + IC_t, \qquad B_t + s^E_t \;\ge\; G_t - L_t - EC_t \quad t \in T
+</annotation></semantics></math></p>
+<p>The slack is bounded by how far the <em>pre-battery</em> profile
+already missed the capacity,</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+</annotation></semantics></math></p>
+<p>and penalised in the objective. Three consequences follow:
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>B</mi><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">B = 0</annotation></semantics></math>
-is a feasible point. If OSQP does not converge, a greedy forward-pass
-heuristic clipped to the feasible box is used, and as a last resort the
-battery is disabled for that window.</p>
+with the slack at its ceiling is always feasible, so a window can never
+be infeasible; the result is never worse than the profile the battery
+started from; and slots that <em>can</em> meet their capacity have a
+ceiling of zero, so they stay hard capped. Where the capacity is out of
+reach, the penalty makes the battery spend its full physical capability
+approaching it instead of reverting to plain flattening.</p>
+<p>When no slot misses its capacity — including the default of no
+capacity limits at all — every ceiling is zero, the slack variables are
+dropped, and the problem reduces exactly to the box-constrained one
+above.</p>
+<p><strong>Forced flows.</strong> A <em>negative</em>
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>
+is an obligation to export at least
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="false" form="prefix">|</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="false" form="prefix">|</mo></mrow><annotation encoding="application/x-tex">|IC_t|</annotation></semantics></math>,
+and a negative
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>
+an obligation to import. The constraint
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>≤</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">-EC_t \le L_t + B_t - G_t \le IC_t</annotation></semantics></math>
+covers both without special casing. Because the slack penalty dominates
+the objective, such an obligation outranks it: the battery meets the
+capacity first and flattens second.</p>
+<p>If OSQP does not converge, a greedy forward-pass heuristic clipped to
+the feasible box is used, and as a last resort the battery is disabled
+for that window.</p>
 </div>
 <div class="section level3">
 <h3 id="grid-capacity-objective-1">Grid capacity objective<a class="anchor" aria-label="anchor" href="#grid-capacity-objective-1"></a>
 </h3>
 <p>Like for the demand, the <code>"capacity"</code> objective for the
 battery only targets the power that exceeds the grid connection
-capacity, rather than flattening the whole net power profile. It reuses
-exactly the net power formulation above, but first <strong>curtails the
-usable battery capacity</strong> to the amount of energy that actually
-has to be displaced:</p>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mo>=</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>1.01</mn><mo>⋅</mo><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="0.278em"></mspace><mspace width="0.278em"></mspace><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
-B_{cap}^{curtail} = \min\!\left(1.01 \cdot \max\!\left(\sum_{t=1}^{T} \max\!\left(G_t - L_t - EC_t,\; 0\right),\;\; \sum_{t=1}^{T} \max\!\left(L_t - G_t - IC_t,\; 0\right)\right),\;\; B_{cap}\right)
+capacity, rather than flattening the whole net power profile. It keeps
+<strong>every constraint</strong> of the net power formulation above —
+the same box, state of charge, energy balance and slack rows — and
+changes only the objective, to the <strong>least battery</strong> that
+satisfies them:</p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><munder><mi mathvariant="normal">min</mi><msub><mi>B</mi><mi>t</mi></msub></munder><mspace width="0.278em"></mspace><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mi>T</mi></munderover><msubsup><mi>B</mi><mi>t</mi><mn>2</mn></msubsup><mo>+</mo><mi>λ</mi><munderover><mo>∑</mo><mrow><mi>t</mi><mo>=</mo><mn>1</mn></mrow><mrow><mi>T</mi><mo>−</mo><mn>1</mn></mrow></munderover><msup><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>B</mi><mrow><mi>t</mi><mo>+</mo><mn>1</mn></mrow></msub><mo>−</mo><msub><mi>B</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mn>2</mn></msup></mrow><annotation encoding="application/x-tex">
+\min_{B_t} \; \sum_{t=1}^{T} B_t^2 + \lambda \sum_{t=1}^{T-1}\left(B_{t+1} - B_t\right)^{2}
 </annotation></semantics></math></p>
-<p>The two sums are the total energy exported above the export capacity
-and imported above the import capacity by the original (pre-battery)
-profile. The 1% headroom ensures the resulting problem is strictly
-feasible. If the original profile causes no violation at all,
-<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msubsup><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow><mrow><mi>c</mi><mi>u</mi><mi>r</mi><mi>t</mi><mi>a</mi><mi>i</mi><mi>l</mi></mrow></msubsup><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">B_{cap}^{curtail} = 0</annotation></semantics></math>
-and the battery is left idle for that window.</p>
+<p>The capacity is already enforced by the constraints, so the objective
+no longer has to mention the net power at all. Dropping the
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><annotation encoding="application/x-tex">\left(L_t - G_t\right)</annotation></semantics></math>
+term is the whole difference between the two objectives: with it, the
+optimizer flattens the profile and spends whatever battery it is given;
+without it, it spends as little as the capacity allows.</p>
+<p>Two consequences are worth spelling out, because they are what makes
+this objective answer a different question from <code>"grid"</code>:</p>
+<ul>
+<li><p><strong>The battery discharges onto the capacity, not below
+it.</strong> Since the quadratic penalises battery power rather than net
+power, every kW of discharge past the binding capacity costs the
+objective and buys nothing. The net profile therefore rests exactly on
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>
+(or
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>−</mi><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">-EC_t</annotation></semantics></math>)
+through the violation and is left untouched elsewhere, and the energy
+that has to be given back is recharged at the lowest power the window
+allows.</p></li>
+<li><p><strong>The nameplate no longer decides how hard the battery
+works</strong> — the capacity does. Two batteries that can both clear a
+window return the <em>same</em> profile, so the objective can be used to
+find the minimum battery a congestion limit requires. Earlier versions
+instead reserved a slice of the battery sized to the overshoot volume
+and ran the net power objective on that slice; the reserve was a proxy
+for “use as little as possible” that both under- and over-shot, since a
+reserve too small could not clear the window while a reserve large
+enough was still spent flattening.</p></li>
+</ul>
+<p>If the pre-battery profile violates neither capacity in a window,
+there is nothing to solve — the least battery that keeps it within its
+limits is no battery — and the window returns
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>B</mi><mi>t</mi></msub><mo>=</mo><mn>0</mn></mrow><annotation encoding="application/x-tex">B_t = 0</annotation></semantics></math>
+without calling the solver.</p>
 </div>
 </div>
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

@@ -5,13 +5,7 @@ Set `Responsive` column in `sessions`
 ## Usage
 
 ``` r
-set_responsive(
-  sessions_window,
-  dttm_seq,
-  responsive,
-  opt_objective,
-  time_resolution
-)
+set_responsive(sessions_window, dttm_seq, responsive, time_resolution)
 ```
 
 ## Arguments
@@ -27,11 +21,6 @@ set_responsive(
 - responsive:
 
   named list with responsive ratios
-
-- opt_objective:
-
-  character, optimization objective being `"none"`, `"grid"`, `"cost"`
-  or a value between 0 (cost) and 1 (grid).
 
 - time_resolution:
 

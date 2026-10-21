@@ -15,7 +15,8 @@ demand_solve_window(
   import_capacity,
   export_capacity,
   P,
-  q
+  q,
+  energy_ratio = c(1, 1)
 )
 ```
 
@@ -63,6 +64,13 @@ demand_solve_window(
 - q:
 
   numeric vector, optimization objective parameter
+
+- energy_ratio:
+
+  numeric vector `c(min, max)`, share of the flexible load's energy the
+  optimized load must carry. `c(1, 1)` (default) preserves the energy
+  exactly; a range lets the optimizer drop energy — down to `min` — when
+  the grid capacity cannot fit `max`.
 
 ## Value
 

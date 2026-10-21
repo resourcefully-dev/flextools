@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -24,6 +24,7 @@
     <li><a class="dropdown-item" href="../articles/minimize_net_power.html">Net power optimization</a></li>
     <li><a class="dropdown-item" href="../articles/minimize_cost.html">Energy cost optimization</a></li>
     <li><a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a></li>
+    <li><a class="dropdown-item" href="../articles/thermal_optimization.html">Thermal optimization</a></li>
     <li><a class="dropdown-item" href="../articles/parallel-processing.html">Parallel processing</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Demand-response</h6></li>
@@ -65,7 +66,8 @@
 <span>  <span class="va">import_capacity</span>,</span>
 <span>  <span class="va">export_capacity</span>,</span>
 <span>  <span class="va">w</span>,</span>
-<span>  <span class="va">lambda</span></span>
+<span>  <span class="va">lambda</span>,</span>
+<span>  energy_ratio <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">1</span><span class="op">)</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -127,6 +129,13 @@
 
 <dt id="arg-lambda">lambda<a class="anchor" aria-label="anchor" href="#arg-lambda"></a></dt>
 <dd><p>numeric, penalty on change for the flexible load.</p></dd>
+
+
+<dt id="arg-energy-ratio">energy_ratio<a class="anchor" aria-label="anchor" href="#arg-energy-ratio"></a></dt>
+<dd><p>numeric vector <code>c(min, max)</code>, share of the flexible
+load's energy the optimized load must carry. <code>c(1, 1)</code> (default) preserves
+the energy exactly; a range lets the optimizer drop energy — down to <code>min</code>
+— when the grid capacity cannot fit <code>max</code>.</p></dd>
 
 </dl></div>
     <div class="section level2">

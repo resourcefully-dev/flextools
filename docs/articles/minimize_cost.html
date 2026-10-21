@@ -25,7 +25,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -44,6 +44,7 @@
     <li><a class="dropdown-item" href="../articles/minimize_net_power.html">Net power optimization</a></li>
     <li><a class="dropdown-item" href="../articles/minimize_cost.html">Energy cost optimization</a></li>
     <li><a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a></li>
+    <li><a class="dropdown-item" href="../articles/thermal_optimization.html">Thermal optimization</a></li>
     <li><a class="dropdown-item" href="../articles/parallel-processing.html">Parallel processing</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Demand-response</h6></li>
@@ -395,7 +396,9 @@ following parameters used in the constraints below:</p>
 : Battery discharging efficiency (<code>discharge_eff</code>)</li>
 <li>
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>c</mi><mrow><mi>c</mi><mi>y</mi><mi>c</mi></mrow></msub><annotation encoding="application/x-tex">c_{cyc}</annotation></semantics></math>
-: Cycle degradation cost per kWh cycled (<code>cycle_cost</code>)</li>
+: Degradation cost of one full cycle, i.e. per
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub><annotation encoding="application/x-tex">B_{cap}</annotation></semantics></math>
+kWh discharged (<code>cycle_cost</code>)</li>
 </ul>
 <p>Unlike the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization">net
 power objective</a>, the cost objective uses <strong>separate charging
@@ -446,11 +449,39 @@ I_t - E_t = C_t - D_t + L_t - G_t \quad t \in T
 </annotation></semantics></math></p>
 <ul>
 <li>The imported and exported power must remain between 0 and the grid
-import and export capacity:</li>
+import and export capacity.
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">IC_t</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">EC_t</annotation></semantics></math>
+limit the <strong>net</strong> flow while
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>I</mi><mi>t</mi></msub><annotation encoding="application/x-tex">I_t</annotation></semantics></math>
+and
+<math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><msub><mi>E</mi><mi>t</mi></msub><annotation encoding="application/x-tex">E_t</annotation></semantics></math>
+are one sided, so only the non-negative part of the capacity can act as
+a box:</li>
 </ul>
-<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
-0 \le I_t \le IC_t \quad 0 \le E_t \le EC_t \quad t \in T
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+0 \le I_t \le \max\!\left(IC_t,\; 0\right) \quad 0 \le E_t \le \max\!\left(EC_t,\; 0\right) \quad t \in T
 </annotation></semantics></math></p>
+<ul>
+<li>The capacity itself is imposed on the net flow, with the same
+penalised slack as in the <a href="https://resourcefully-dev.github.io/flextools/articles/minimize_net_power.html#battery-optimization">net
+power article</a>. This is what expresses a <em>negative</em> capacity —
+an obligation to flow the other way,
+e.g. <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>=</mo><mi>−</mi><mn>100</mn></mrow><annotation encoding="application/x-tex">IC_t = -100</annotation></semantics></math>
+requiring at least 100 kW of export — which a one-sided box cannot
+represent:</li>
+</ul>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="2.0em"></mspace><msub><mi>E</mi><mi>t</mi></msub><mo>−</mo><msub><mi>I</mi><mi>t</mi></msub><mo>−</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mspace width="0.278em"></mspace><mo>≤</mo><mspace width="0.278em"></mspace><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mspace width="1.0em"></mspace><mi>t</mi><mo>∈</mo><mi>T</mi></mrow><annotation encoding="application/x-tex">
+I_t - E_t - s^I_t \;\le\; IC_t, \qquad E_t - I_t - s^E_t \;\le\; EC_t \quad t \in T
+</annotation></semantics></math></p>
+<p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>I</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msubsup><mi>s</mi><mi>t</mi><mi>E</mi></msubsup><mo>≤</mo><mrow><mi mathvariant="normal">max</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mn>0</mn><mo>,</mo><mspace width="0.278em"></mspace><mo stretchy="false" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo stretchy="false" form="postfix">)</mo><mo>−</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
+0 \le s^I_t \le \max\!\left(0,\; (L_t - G_t) - IC_t\right), \qquad
+0 \le s^E_t \le \max\!\left(0,\; (G_t - L_t) - EC_t\right)
+</annotation></semantics></math></p>
+<p>These rows and variables are added only when a capacity can be missed
+or is negative. With no capacity limits the problem is exactly the one
+described above.</p>
 <div class="section level3">
 <h3 id="solver-paths">Solver paths<a class="anchor" aria-label="anchor" href="#solver-paths"></a>
 </h3>
@@ -518,14 +549,14 @@ branch-and-bound problem is solved for every optimization window.</p>
 <p><strong>LP path (<code>cycle_cost &gt; 0</code>).</strong> A positive
 cycle cost adds the linear term
 <math display="inline" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mfrac><msub><mi>c</mi><mrow><mi>c</mi><mi>y</mi><mi>c</mi></mrow></msub><msub><mi>B</mi><mrow><mi>c</mi><mi>a</mi><mi>p</mi></mrow></msub></mfrac><msub><mi>D</mi><mi>t</mi></msub></mrow><annotation encoding="application/x-tex">\frac{c_{cyc}}{B_{cap}} D_t</annotation></semantics></math>
-to the objective, which converts the per-kWh degradation cost into a
-penalty on discharged power, so the optimizer trades energy cost savings
-against battery wear. This penalty alone makes simultaneous charging and
-discharging uneconomical, so the binary grid mode is dropped and the
-problem becomes a pure LP — substantially faster than the MILP. On this
-path the import and export bounds are tightened to their physically
-achievable values, which is what keeps the LP bounded when import prices
-are negative:</p>
+to the objective, which converts the per-cycle degradation cost into a
+per-kWh penalty on discharged power, so the optimizer trades energy cost
+savings against battery wear. This penalty alone makes simultaneous
+charging and discharging uneconomical, so the binary grid mode is
+dropped and the problem becomes a pure LP — substantially faster than
+the MILP. On this path the import and export bounds are tightened to
+their physically achievable values, which is what keeps the LP bounded
+when import prices are negative:</p>
 <p><math display="block" xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>0</mn><mo>≤</mo><msub><mi>I</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>I</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>L</mi><mi>t</mi></msub><mo>−</mo><msub><mi>G</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>c</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow><mo>,</mo><mspace width="2.0em"></mspace><mn>0</mn><mo>≤</mo><msub><mi>E</mi><mi>t</mi></msub><mo>≤</mo><mrow><mi mathvariant="normal">min</mi><mo>⁡</mo></mrow><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><mi>E</mi><msub><mi>C</mi><mi>t</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mi mathvariant="normal">max</mi><mspace width="-0.167em"></mspace><mrow><mo stretchy="true" form="prefix">(</mo><msub><mi>G</mi><mi>t</mi></msub><mo>−</mo><msub><mi>L</mi><mi>t</mi></msub><mo>+</mo><msub><mi>B</mi><mi>d</mi></msub><mo>,</mo><mspace width="0.278em"></mspace><mn>0</mn><mo stretchy="true" form="postfix">)</mo></mrow><mo stretchy="true" form="postfix">)</mo></mrow></mrow><annotation encoding="application/x-tex">
 0 \le I_t \le \min\!\left(IC_t,\; \max\!\left(L_t - G_t + B_c,\; 0\right)\right), \qquad
 0 \le E_t \le \min\!\left(EC_t,\; \max\!\left(G_t - L_t + B_d,\; 0\right)\right)

@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.3.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -24,6 +24,7 @@
     <li><a class="dropdown-item" href="../articles/minimize_net_power.html">Net power optimization</a></li>
     <li><a class="dropdown-item" href="../articles/minimize_cost.html">Energy cost optimization</a></li>
     <li><a class="dropdown-item" href="../articles/combined_optimization.html">Combined optimization</a></li>
+    <li><a class="dropdown-item" href="../articles/thermal_optimization.html">Thermal optimization</a></li>
     <li><a class="dropdown-item" href="../articles/parallel-processing.html">Parallel processing</a></li>
     <li><hr class="dropdown-divider"></li>
     <li><h6 class="dropdown-header" data-toc-skip>Demand-response</h6></li>
@@ -66,6 +67,13 @@
 
         </dt>
         <dd>Battery optimal charging/discharging profile</dd>
+
+        <dt>
+
+          <code><a href="add_tank_optimization.html">add_tank_optimization()</a></code>
+
+        </dt>
+        <dd>Heat pump with a thermal tank: optimal compressor profile</dd>
       </dl></div><div class="section level2">
       <h2 id="smart-charging">Smart charging<a class="anchor" aria-label="anchor" href="#smart-charging"></a></h2>
 
@@ -163,6 +171,20 @@
 
         </dt>
         <dd>Losses due to charging/discharging process</dd>
+
+        <dt>
+
+          <code><a href="get_tank_level.html">get_tank_level()</a></code>
+
+        </dt>
+        <dd>Tank level (thermal energy)</dd>
+
+        <dt>
+
+          <code><a href="get_tank_unmet_heat.html">get_tank_unmet_heat()</a></code>
+
+        </dt>
+        <dd>Unmet heat of a tank schedule</dd>
       </dl></div><div class="section level2">
       <h2 id="evaluation-of-results">Evaluation of results<a class="anchor" aria-label="anchor" href="#evaluation-of-results"></a></h2>
 

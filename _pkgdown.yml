@@ -32,6 +32,7 @@ reference:
     - get_storage_losses
     - get_conversion_losses
     - get_tank_level
+    - get_tank_unmet_heat
   - title: Evaluation of results
   - contents:
     - get_energy_kpis

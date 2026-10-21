@@ -248,6 +248,18 @@ tank_min_unmet <- function(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total) {
 }
 
 
+#' A window with no solution
+#'
+#' @param status character, why the window has no solution
+#'
+#' @return list with `power = NULL` and the `status`
+#' @keywords internal
+#'
+tank_failure <- function(status) {
+  list(power = NULL, backup = NULL, status = status)
+}
+
+
 #' Solve one tank window
 #'
 #' @param G numeric vector, production (kW)
@@ -272,8 +284,9 @@ tank_min_unmet <- function(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total) {
 #'   may miss its import / export capacity (kW), from
 #'   [optimization_slack_ceiling()]; the capacities are hard where they are 0
 #'
-#' @return list of the unrounded `power` and `backup` (kW), or `NULL` when the
-#'   window has no solution
+#' @return list of the unrounded `power` and `backup` (kW) and the `status`;
+#'   when the window has no solution, `power` is `NULL` and `status` says why
+#'   (see `tank_failure()`)
 #' @keywords internal
 #'
 tank_solve_window <- function(
@@ -323,7 +336,7 @@ tank_solve_window <- function(
     ub_P <- pmax(pmin(ifelse(cop > 0, Pc, 0), ub_load), 0)
     ub_B <- if (with_backup) pmax(pmin(Pb, ub_load), 0) else rep(0, n)
     if (any(lb_load > pmin(ub_load, ub_P + ub_B) + 1e-9)) {
-      return(NULL)
+      return(tank_failure("the heat pump's load cannot meet the grid capacities"))
     }
     lb_total <- lb_load
     ub_total <- pmax(pmin(ub_load, ub_P + ub_B), lb_load)
@@ -332,7 +345,7 @@ tank_solve_window <- function(
     ub_P <- pmax(pmin(ifelse(cop > 0, Pc, 0), ub_load), 0)
     ub_B <- pmax(pmin(Pb, ub_load), 0)
     if (any(lb_load > pmin(ub_load, ub_P + ub_B) + 1e-9)) {
-      return(NULL)
+      return(tank_failure("the heat pump's load cannot meet the grid capacities"))
     }
     ub_load <- pmax(pmin(ub_load, ub_P + ub_B), lb_load)
     lb_total <- lb_load
@@ -341,7 +354,7 @@ tank_solve_window <- function(
     lb_P <- lb_load
     ub_P <- pmin(ifelse(cop > 0, Pc, 0), ub_load)
     if (any(lb_P > ub_P + 1e-9)) {
-      return(NULL)
+      return(tank_failure("the heat pump's load cannot meet the grid capacities"))
     }
     ub_P <- pmax(ub_P, lb_P)
     lb_total <- lb_P
@@ -582,7 +595,7 @@ tank_solve_window <- function(
       !identical(result$status_message, "Optimal") ||
         is.null(result$primal_solution)
     ) {
-      return(NULL)
+      return(tank_failure(paste0("HiGHS: ", result$status_message)))
     }
     x <- as.numeric(result$primal_solution)
   } else {
@@ -622,7 +635,7 @@ tank_solve_window <- function(
     obj_scale <- max(max(abs(P_quad)), max(abs(q)), 1e-6)
     sol <- solve_osqp(P_quad / obj_scale, q / obj_scale, A, lower, upper)
     if (is.null(sol$x)) {
-      return(NULL)
+      return(tank_failure(paste0("OSQP: ", sol$result$status_message)))
     }
     x <- as.numeric(sol$x)
   }
@@ -647,9 +660,9 @@ tank_solve_window <- function(
       any(level > Smax + tol) ||
       (!soft && level[n] < S0 - tol)
   ) {
-    return(NULL)
+    return(tank_failure("the solution leaves the tank's band on the exact dynamics"))
   }
-  list(power = P, backup = B)
+  list(power = P, backup = B, status = "optimal")
 }
 
 
@@ -874,7 +887,8 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' where.
 #'
 #' The slots that run `flexible` (past `flex_window_hours`, or in a window the
-#' solver failed on, reported with a message) keep the tank below its top: the
+#' solver failed on, reported with a message, unless `on_failure = "error"`
+#' stops the run there instead) keep the tank below its top: the
 #' compressor stops as a thermostat would, its power there being `flexible`
 #' reduced to what keeps the level at `SOCmax`. Below the floor they cool the
 #' tank down to the inlet temperature at most, with unmet heat as above. So the
@@ -919,6 +933,10 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   consecutive slots.
 #' @param loss numeric, standing loss of the tank's level (% per hour, >= 0), as
 #'   in [get_storage_losses()].
+#' @param on_failure character, what a window the solver fails on does:
+#'   `"flexible"` (default) runs the `flexible` schedule there, as described in
+#'   *Soft grid capacities*, with a message; `"error"` stops with an error
+#'   naming the window's first `datetime` and the solver status.
 #' @param Pb numeric, rating of the resistive backup heater (kW electric, which
 #'   is also its kW thermal, >= 0). `NULL` (default) or 0 means no backup
 #'   heater.
@@ -980,7 +998,8 @@ add_tank_optimization <- function(
   flex_window_hours = 24,
   lambda = 0,
   loss = 0,
-  Pb = NULL
+  Pb = NULL,
+  on_failure = c("flexible", "error")
 ) {
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.", call. = FALSE)
@@ -1023,6 +1042,19 @@ add_tank_optimization <- function(
   tank_check_number(Pc, "Pc", 0, min_open = TRUE)
   if (is.null(Pb)) {
     Pb <- 0
+  }
+  if (identical(on_failure, c("flexible", "error"))) {
+    on_failure <- "flexible"
+  }
+  if (
+    !(is.character(on_failure) &&
+      length(on_failure) == 1 &&
+      on_failure %in% c("flexible", "error"))
+  ) {
+    stop(
+      "Error: `on_failure` must be \"flexible\" or \"error\".",
+      call. = FALSE
+    )
   }
   tank_check_number(Pb, "Pb", 0)
   tank_check_number(SOCmin, "SOCmin", 0, 100)
@@ -1144,7 +1176,7 @@ add_tank_optimization <- function(
     )
     sol <- do.call(tank_solve_window, window_args)
 
-    if (is.null(sol)) {
+    if (is.null(sol$power)) {
       # The window has no schedule that holds the band within the grid
       # capacities. Solve it again with the unmet heat, and with the
       # capacities soft as for the battery: penalised slack, up to how far
@@ -1170,8 +1202,18 @@ add_tank_optimization <- function(
       sol <- do.call(tank_solve_window, window_args)
     }
 
-    if (is.null(sol)) {
+    if (is.null(sol$power)) {
       # Only a solver failure gets here
+      if (on_failure == "error") {
+        stop(
+          sprintf(
+            "Error: the solver failed on the window starting at %s (%s).",
+            format(dttm_seq[start], "%Y-%m-%d %H:%M:%S %Z"),
+            sol$status
+          ),
+          call. = FALSE
+        )
+      }
       message_once(
         "\u26a0\ufe0f Optimization warning: the solver failed in some windows. Using the `flexible` schedule there."
       )
@@ -1219,18 +1261,17 @@ add_tank_optimization <- function(
     run_flexible(level, seq(pos, n_rows))
   }
 
-  # Unmet heat: what the tank gave from below its comfort floor, or could not
-  # give at all at the inlet temperature
-  U_out <- tank_unmet_heat(
+  # Unmet heat: the heat that would have kept the tank at its comfort floor
+  U_out <- get_tank_unmet_heat(
     P_out,
     Q,
     cop,
-    Tcap * SOCini / 100,
-    k,
-    dt,
-    backup = B_out,
-    Smin = Smin,
-    tol = 0.005 * max(cop, 1) * dt
+    init = Tcap * SOCini / 100,
+    Tcap = Tcap,
+    SOCmin = SOCmin,
+    loss = loss,
+    time_resolution = time_resolution,
+    backup = B_out
   )
   if (any(U_out > 0)) {
     message(
@@ -1313,4 +1354,93 @@ get_tank_level <- function(
     rep_len(backup, n)
   )
   round(level[seq_len(n)], 2)
+}
+
+
+#' Unmet heat of a tank schedule
+#'
+#' The heat that would have been required in each slot to keep the tank at
+#' least at its comfort floor, for any compressor schedule: the static
+#' schedule's counterpart of `attr(result, "unmet_heat_kw")` of
+#' [add_tank_optimization()], which uses this same function. Per slot of `dt`
+#' hours, with the level `S` following [get_tank_level()] (it stops at 0, the
+#' inlet temperature), `Smin = Tcap * SOCmin / 100`, `k = (1 - loss/100)^dt`
+#' and `S~[t] = k * S[t-1] + (cop[t] * power[t] + backup[t] -
+#' heat_demand[t]) * dt` the level the balance asks for:
+#'
+#' `unmet[t] * dt = max(0, min(Smin, k * S[t-1]) - S~[t])`
+#'
+#' that is the heat the tank gives from below its comfort floor, plus the
+#' demand it cannot serve at all at the inlet temperature. It is positive
+#' while the level falls below the floor, and 0 while the level stays at or
+#' above it or rises back towards it; standing losses below the floor are not
+#' counted, and neither is a slot whose gap is within half a rounding step of
+#' the power (`0.005 * max(cop, 1) * dt` kWh).
+#'
+#' @inheritParams get_tank_level
+#' @param Tcap numeric, tank capacity (kWh thermal, > 0), as in
+#'   [add_tank_optimization()]: the heat between the inlet water temperature
+#'   and the top of the tank
+#' @param SOCmin numeric, comfort floor (%, between 0 and 100)
+#'
+#' @return numeric vector of the unmet heat (kW thermal), one value per slot,
+#'   rounded to 2 decimals
+#' @export
+#'
+#' @examples
+#' # A 3 kWh tank with its floor at 1 kWh, emptied by 2 kW for 2 hours
+#' get_tank_unmet_heat(
+#'   power = c(0, 0, 0), heat_demand = c(2, 2, 0), cop = 3,
+#'   init = 3, Tcap = 3, SOCmin = 100 / 3
+#' )
+#'
+get_tank_unmet_heat <- function(
+  power,
+  heat_demand,
+  cop,
+  init,
+  Tcap,
+  SOCmin,
+  loss = 0,
+  time_resolution = 60,
+  backup = 0
+) {
+  n <- length(power)
+  for (arg in c("heat_demand", "cop", "backup")) {
+    value <- get(arg)
+    if (!is.numeric(value) || !(length(value) %in% c(1, n)) || anyNA(value)) {
+      stop(
+        sprintf(
+          "Error: `%s` must be numeric without NA, of length 1 or `length(power)`.",
+          arg
+        ),
+        call. = FALSE
+      )
+    }
+  }
+  if (!is.numeric(power) || anyNA(power)) {
+    stop("Error: `power` must be numeric without NA.", call. = FALSE)
+  }
+  tank_check_number(init, "init")
+  tank_check_number(Tcap, "Tcap", 0, min_open = TRUE)
+  tank_check_number(SOCmin, "SOCmin", 0, 100)
+  tank_check_number(loss, "loss", 0, 100)
+  if (loss >= 100) {
+    stop("Error: `loss` must be lower than 100 (%/hour).", call. = FALSE)
+  }
+  tank_check_number(time_resolution, "time_resolution", 0, min_open = TRUE)
+
+  dt <- time_resolution / 60
+  cop <- rep_len(cop, n)
+  tank_unmet_heat(
+    power,
+    rep_len(heat_demand, n),
+    cop,
+    init,
+    (1 - loss / 100)^dt,
+    dt,
+    backup = rep_len(backup, n),
+    Smin = Tcap * SOCmin / 100,
+    tol = 0.005 * max(cop, 1) * dt
+  )
 }

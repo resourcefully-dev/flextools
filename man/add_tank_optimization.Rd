@@ -17,7 +17,8 @@ add_tank_optimization(
   flex_window_hours = 24,
   lambda = 0,
   loss = 0,
-  Pb = NULL
+  Pb = NULL,
+  on_failure = c("flexible", "error")
 )
 }
 \arguments{
@@ -72,6 +73,11 @@ in \code{\link[=get_storage_losses]{get_storage_losses()}}.}
 \item{Pb}{numeric, rating of the resistive backup heater (kW electric, which
 is also its kW thermal, >= 0). \code{NULL} (default) or 0 means no backup
 heater.}
+
+\item{on_failure}{character, what a window the solver fails on does:
+\code{"flexible"} (default) runs the \code{flexible} schedule there, as described in
+\emph{Soft grid capacities}, with a message; \code{"error"} stops with an error
+naming the window's first \code{datetime} and the solver status.}
 }
 \value{
 numeric vector, the compressor's electric power (kW), one value per
@@ -191,7 +197,8 @@ A capacity left missed is reported with a message; compare the net flow
 where.
 
 The slots that run \code{flexible} (past \code{flex_window_hours}, or in a window the
-solver failed on, reported with a message) keep the tank below its top: the
+solver failed on, reported with a message, unless \code{on_failure = "error"}
+stops the run there instead) keep the tank below its top: the
 compressor stops as a thermostat would, its power there being \code{flexible}
 reduced to what keeps the level at \code{SOCmax}. Below the floor they cool the
 tank down to the inlet temperature at most, with unmet heat as above. So the

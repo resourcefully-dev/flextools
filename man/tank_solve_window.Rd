@@ -66,8 +66,9 @@ may miss its import / export capacity (kW), from
 \code{\link[=optimization_slack_ceiling]{optimization_slack_ceiling()}}; the capacities are hard where they are 0}
 }
 \value{
-list of the unrounded \code{power} and \code{backup} (kW), or \code{NULL} when the
-window has no solution
+list of the unrounded \code{power} and \code{backup} (kW) and the \code{status};
+when the window has no solution, \code{power} is \code{NULL} and \code{status} says why
+(see \code{tank_failure()})
 }
 \description{
 Solve one tank window

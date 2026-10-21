@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.13.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -52,7 +52,13 @@
 
     <div class="section level2">
     <h2 id="ref-usage">Usage<a class="anchor" aria-label="anchor" href="#ref-usage"></a></h2>
-    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">set_responsive</span><span class="op">(</span><span class="va">sessions_window</span>, <span class="va">dttm_seq</span>, <span class="va">responsive</span>, <span class="va">time_resolution</span><span class="op">)</span></span></code></pre></div>
+    <div class="sourceCode"><pre class="sourceCode r"><code><span><span class="fu">set_responsive</span><span class="op">(</span></span>
+<span>  <span class="va">sessions_window</span>,</span>
+<span>  <span class="va">dttm_seq</span>,</span>
+<span>  <span class="va">responsive</span>,</span>
+<span>  <span class="va">time_resolution</span>,</span>
+<span>  charging_power_min <span class="op">=</span> <span class="fl">0</span></span>
+<span><span class="op">)</span></span></code></pre></div>
     </div>
 
     <div class="section level2">
@@ -73,6 +79,13 @@
 
 <dt id="arg-time-resolution">time_resolution<a class="anchor" aria-label="anchor" href="#arg-time-resolution"></a></dt>
 <dd><p>numeric, time resolution in minutes</p></dd>
+
+
+<dt id="arg-charging-power-min">charging_power_min<a class="anchor" aria-label="anchor" href="#arg-charging-power-min"></a></dt>
+<dd><p>numeric, minimum charging (and discharging) power
+in kW. A session whose nominal <code>Power</code> is below it cannot be curtailed or
+discharged within that minimum, so it is never responsive (<code>Responsive = FALSE</code>): it charges as uncontrolled and the setpoint carries its load as
+fixed.</p></dd>
 
 </dl></div>
 

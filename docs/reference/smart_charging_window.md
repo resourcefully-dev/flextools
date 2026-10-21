@@ -48,15 +48,8 @@ smart_charging_window(
 
 - charging_power_min:
 
-  numeric. It can be configured in two ways: (1) minimum allowed ratio
-  (between 0 and 1) of nominal power (i.e. `Power` column in
-  `sessions`), or (2) specific value of minimum power (in kW) higher
-  than 1 kW.
-
-  For example, if `charging_power_min = 0.5` and `method = 'curtail'`,
-  sessions' charging power can only be curtailed until the 50% of the
-  nominal charging power. And if `charging_power_min = 2`, sessions'
-  charging power can be curtailed until 2 kW.
+  numeric, minimum charging power in kW. See
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md).
 
 - energy_min:
 

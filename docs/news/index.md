@@ -1,5 +1,73 @@
 # Changelog
 
+## flextools 1.13.0
+
+- **Breaking:** `charging_power_min` is now always a power in kW, in
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md),
+  [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  and
+  [`schedule_sessions()`](https://resourcefully-dev.github.io/flextools/reference/schedule_sessions.md).
+  Up to 1.12.0 a value below 1 was a share of the nominal power, so
+  `charging_power_min = 0.5` meant 50% and now means 0.5 kW: callers
+  passing a share must pass the kW value instead. The default of
+  [`schedule_sessions()`](https://resourcefully-dev.github.io/flextools/reference/schedule_sessions.md)
+  goes from 0.5 (50%) to 0. A value that is not a single number of at
+  least 0 is an error.
+- One minimum applies to charging and to discharging: with
+  `charging_power_min = 4`, `method = "curtail"` curtails down to 4 kW
+  and no further, and
+  [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  charges or discharges at 4 kW or more, or not at all. A session may
+  still charge less than the minimum in its last charging slot, where it
+  only needs that much to finish (the tail of its charge).
+  [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  used to push a discharge inside `(-min, 0)` to the SoC floor’s limit,
+  so a session the floor allowed only -2 kW discharged at -2 kW against
+  a 4 kW minimum; it now does not discharge in that slot.
+- A session whose nominal `Power` is below `charging_power_min`
+  (e.g. 3.7 kW against 4 kW) is **not flexible**, in both functions and
+  whatever the `method`: it is never responsive, charges as uncontrolled
+  (never curtailed, never discharged), and the setpoint carries its load
+  as fixed instead of planning flexibility it cannot give.
+- **Departure deadlines in the setpoint.**
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md)
+  and
+  [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  merge the sessions of a profile into one flexible load, and the
+  setpoint could postpone energy owed to a car that leaves early into
+  the slots of the cars that stay longer, forcing the scheduler to catch
+  up before each departure. The setpoint now keeps, at every slot, at
+  least the `energy_min` share of the energy of the sessions that have
+  already departed. A new internal helper,
+  [`get_flex_envelope()`](https://resourcefully-dev.github.io/flextools/reference/get_flex_envelope.md),
+  computes this and the existing nominal-power ceiling (`LFmax`) once
+  for both functions.
+- [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  plans charge and discharge only while vehicles are connected: its
+  setpoint is bounded by the nominal power of the connected responsive
+  sessions (and `load_capacity`) in both directions, where it used to
+  have no bound and could discharge with no vehicle plugged in. Its
+  cumulative load never drops below the energy owed to the departed
+  sessions minus what the connected ones can still discharge down to
+  their SoC floor. When a grid capacity asks for more than the connected
+  vehicles can give (an import cap of -20 kW with 15 kW plugged in, or a
+  cap before the first arrival), the setpoint approaches it as far as
+  their power allows, with a message, before falling back to relaxing
+  the capacity to the original profile.
+- [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  reads the arrival State-of-Charge of each session from a new optional
+  `StateOfCharge` column of `sessions` (a fraction,
+  `0 <= StateOfCharge < 1`, default 0.5 when the column is absent), and
+  gains `soc_min` (last, default 0.2, `0 <= soc_min < 1`), the SoC floor
+  of every session. Both used to be fixed at 0.5 and 0.2 inside the
+  scheduler. The battery capacity is `Energy / (1 - StateOfCharge)`: the
+  session’s energy takes it from its arrival SoC to full (twice the
+  energy at 0.5, as before). With `energy_max` below 1 a session leaves
+  below full, at `StateOfCharge + energy_max * (1 - StateOfCharge)`. A
+  session that arrives below its floor charges up to the floor first, as
+  fast as it needs to, and can neither be curtailed nor discharge before
+  it reaches it.
+
 ## flextools 1.12.0
 
 - New

@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.13.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -57,7 +57,7 @@
 <span>  <span class="va">setpoint</span>,</span>
 <span>  <span class="va">method</span>,</span>
 <span>  power_th <span class="op">=</span> <span class="fl">0</span>,</span>
-<span>  charging_power_min <span class="op">=</span> <span class="fl">0.5</span>,</span>
+<span>  charging_power_min <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  energy_min <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  energy_max <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  include_log <span class="op">=</span> <span class="cn">FALSE</span>,</span>
@@ -91,9 +91,12 @@ then sessions' demand can reach a value of <code>110</code> without needing to s
 
 
 <dt id="arg-charging-power-min">charging_power_min<a class="anchor" aria-label="anchor" href="#arg-charging-power-min"></a></dt>
-<dd><p>numeric, minimum allowed ratio (between 0 and 1) of nominal power.
-For example, if <code>charging_power_min = 0.5</code> and <code>method = 'curtail'</code>, sessions' charging power can only
-be curtailed until the 50% of the nominal charging power (i.e. <code>Power</code> variable in <code>sessions</code> tibble).</p></dd>
+<dd><p>numeric, minimum charging power in kW (default
+0). With <code>method = 'curtail'</code>, sessions' charging power can only be
+curtailed down to <code>charging_power_min</code> (e.g. 2 kW), except in a session's
+last charging slot, where it charges only what it still needs. A session
+whose nominal <code>Power</code> is below it is never curtailed. Up to version 1.12.0
+the default was 0.5 and a value below 1 was a share of the nominal power.</p></dd>
 
 
 <dt id="arg-energy-min">energy_min<a class="anchor" aria-label="anchor" href="#arg-energy-min"></a></dt>

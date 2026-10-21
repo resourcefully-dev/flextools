@@ -116,15 +116,18 @@ smart_charging(
 
 - charging_power_min:
 
-  numeric. It can be configured in two ways: (1) minimum allowed ratio
-  (between 0 and 0.999) of nominal power (i.e. `Power` column in
-  `sessions`), or (2) specific value of minimum power (in kW) from 1 kW
-  or higher.
+  numeric, minimum charging power in kW (default 0). With
+  `method = "curtail"`, a session is never curtailed below it: with
+  `charging_power_min = 4`, an 11 kW session can be curtailed down to 4
+  kW and no further. The one exception is a session's last charging
+  slot, where it may charge less than the minimum because it only needs
+  that much to finish (the tail of its charge). A session whose nominal
+  `Power` is below `charging_power_min` (e.g. 3.7 kW against 4 kW) is
+  not flexible, whatever the `method`: it is never responsive, charges
+  as uncontrolled and the setpoint carries its load as fixed.
 
-  For example, if `charging_power_min = 0.5` and `method = 'curtail'`,
-  sessions' charging power can only be curtailed until the 50% of the
-  nominal charging power. And if `charging_power_min = 2`, sessions'
-  charging power can be curtailed until 2 kW.
+  Up to version 1.12.0 a value below 1 was a share of the nominal power;
+  it is now always kW, so `charging_power_min = 0.5` means 0.5 kW.
 
 - energy_min:
 
@@ -208,6 +211,13 @@ objectives implemented by this function:
   algorithm, or a grid capacity variable such as `grid_capacity`,
   `import_capacity`or `export_capacity`. The user profiles that don't
   appear in `opt_data` will not be optimized.
+
+The optimized setpoint of a profile stays within the physical envelope
+of its responsive sessions: at most their nominal power while they are
+connected (and `load_capacity`), and, at every time slot, at least the
+`energy_min` share of the energy of the sessions that have already
+departed. Energy owed to a car leaving early is therefore never
+postponed into the slots of the cars that stay longer.
 
 ## Examples
 

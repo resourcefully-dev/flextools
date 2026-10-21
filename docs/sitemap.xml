@@ -21,7 +21,9 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/battery_solve_grid_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/battery_usage_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/capacity_v2g_window.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/check_charging_power_min.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/check_energy_ratios.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/check_soc_min.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/curtail_capacity_window_battery.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_check_energy_ratio.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_combined_window.html</loc></url>
@@ -38,6 +40,7 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/get_energy_cost.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/get_energy_kpis.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/get_energy_total_cost.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/get_flex_envelope.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/get_imbalance_income.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/get_imbalance_total_income.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/get_load_duration_curve.html</loc></url>
@@ -76,6 +79,7 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/round_to_interval.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/schedule_sessions.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/set_responsive.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/set_state_of_charge.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_charging.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_charging_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_v2g.html</loc></url>
@@ -96,6 +100,7 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/tank_round_power.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/tank_solve_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/tank_unmet_heat.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/v2g_battery_capacity.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/view_smart_charging_logs.html</loc></url>
 </urlset>
 

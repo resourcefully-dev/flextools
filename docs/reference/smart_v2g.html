@@ -15,7 +15,7 @@ untouched."><meta property="og:image" content="https://resourcefully-dev.github.
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.12.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.13.0</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -78,7 +78,8 @@ untouched.</p>
 <span>  discharge_eff <span class="op">=</span> <span class="fl">1</span>,</span>
 <span>  include_log <span class="op">=</span> <span class="cn">FALSE</span>,</span>
 <span>  show_progress <span class="op">=</span> <span class="cn">FALSE</span>,</span>
-<span>  lambda <span class="op">=</span> <span class="fl">0</span></span>
+<span>  lambda <span class="op">=</span> <span class="fl">0</span>,</span>
+<span>  soc_min <span class="op">=</span> <span class="fl">0.2</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -150,12 +151,19 @@ then sessions' demand can reach a value of <code>110</code> without needing to s
 
 
 <dt id="arg-charging-power-min">charging_power_min<a class="anchor" aria-label="anchor" href="#arg-charging-power-min"></a></dt>
-<dd><p>numeric. It can be configured in two ways:
-(1) minimum allowed ratio (between 0 and 0.999) of nominal power (i.e. <code>Power</code> column in <code>sessions</code>), or
-(2) specific value of minimum power (in kW) from 1 kW or higher.</p>
-<p>For example, if <code>charging_power_min = 0.5</code> and <code>method = 'curtail'</code>, sessions' charging power can only
-be curtailed until the 50% of the nominal charging power.
-And if <code>charging_power_min = 2</code>, sessions' charging power can be curtailed until 2 kW.</p></dd>
+<dd><p>numeric, minimum power in kW (default 0), for
+charging and for discharging alike: a responsive session charges at
+<code>charging_power_min</code> or more, discharges at <code>charging_power_min</code> or more
+(e.g. "discharge only from 4 kW upwards"), or does nothing. When the SoC
+floor or the energy deadline would only allow a smaller discharge (say
+-2 kW against a 4 kW minimum), the session does not discharge in that slot.
+The one exception is a session's last charging slot, where it may charge
+less than the minimum because it only needs that much to finish (the tail
+of its charge). A session whose nominal <code>Power</code> is below
+<code>charging_power_min</code> is not flexible: it is never responsive, charges as
+uncontrolled, never discharges, and the setpoint carries its load as
+fixed. Up to version 1.12.0 a value below 1 was a share of the nominal
+power; it is now always kW.</p></dd>
 
 
 <dt id="arg-energy-min">energy_min<a class="anchor" aria-label="anchor" href="#arg-energy-min"></a></dt>
@@ -193,12 +201,37 @@ discharged, 1/0.9 kWh must be recharged.</p></dd>
 <dt id="arg-lambda">lambda<a class="anchor" aria-label="anchor" href="#arg-lambda"></a></dt>
 <dd><p>numeric, penalty on change for the flexible load.</p></dd>
 
+
+<dt id="arg-soc-min">soc_min<a class="anchor" aria-label="anchor" href="#arg-soc-min"></a></dt>
+<dd><p>numeric, State-of-Charge floor of every V2G session, as a
+fraction of its battery capacity (default 0.2, <code>0 &lt;= soc_min &lt; 1</code>). A
+session never discharges below it. A session that arrives below it
+(<code>StateOfCharge &lt; soc_min</code>) charges up to the floor first, as fast as it
+needs to (at nominal power when necessary), and can neither be curtailed
+nor discharge before it reaches the floor.</p></dd>
+
 </dl></div>
     <div class="section level2">
     <h2 id="value">Value<a class="anchor" aria-label="anchor" href="#value"></a></h2>
     <p>list with setpoints, sessions and demand similar to
 <code><a href="smart_charging.html">smart_charging()</a></code>. Scheduling is still charging-only while
 the V2G-specific session logic is under development.</p>
+    </div>
+    <div class="section level2">
+    <h2 id="details">Details<a class="anchor" aria-label="anchor" href="#details"></a></h2>
+    <p>The <code>sessions</code> tibble can carry a <code>StateOfCharge</code> column, the State-of-Charge
+of each vehicle at arrival as a fraction (<code>0 &lt;= StateOfCharge &lt; 1</code>); when it
+is absent every session arrives at 0.5. Each session's <code>Energy</code> takes its
+battery from <code>StateOfCharge</code> to full, so its battery capacity is
+<code>Energy / (1 - StateOfCharge)</code> (twice the energy at 0.5). With <code>energy_max</code>
+below 1 the session charges only that share of its energy and leaves below
+full, at <code>StateOfCharge + energy_max * (1 - StateOfCharge)</code>.</p>
+<p>The setpoint plans charge and discharge only while the responsive sessions
+are connected, within their nominal power in both directions (and
+<code>load_capacity</code>), and keeps the energy owed to every session by its
+departure: the cumulative flexible load never drops below the <code>energy_min</code>
+share of the energy of the sessions that have left, minus what the connected
+sessions can still discharge down to <code>soc_min</code>.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

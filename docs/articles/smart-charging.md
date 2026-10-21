@@ -119,9 +119,10 @@ charging method used:
 The energy and power constraints of these conditions can also be defined
 in function
 [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md)
-with the parameters `energy_min` and `charging_power_min`, representing
-the minimum allowed ratios of the nominal values. More information about
-using these parameters can be found in article [Advanced smart
+with the parameters `energy_min` (the minimum allowed ratio of the
+required energy) and `charging_power_min` (the minimum charging power,
+in kW). More information about using these parameters can be found in
+article [Advanced smart
 charging](https://resourcefully-dev.github.io/flextools/articles/smart-charging-advanced.html).
 
 ## Smart charging examples
@@ -480,7 +481,7 @@ function:
 
 &nbsp;
 
-    ## [1] 146.6855
+    ## [1] 146.7156
 
 ### Energy cost with grid constraints
 
@@ -536,7 +537,7 @@ function:
 
 &nbsp;
 
-    ## [1] 159.1424
+    ## [1] 159.2945
 
 In this case, **the cost optimization is not possible if the grid is
 constrained**.

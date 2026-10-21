@@ -24,7 +24,8 @@ smart_v2g(
   discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
-  lambda = 0
+  lambda = 0,
+  soc_min = 0.2
 )
 ```
 
@@ -109,15 +110,19 @@ smart_v2g(
 
 - charging_power_min:
 
-  numeric. It can be configured in two ways: (1) minimum allowed ratio
-  (between 0 and 0.999) of nominal power (i.e. `Power` column in
-  `sessions`), or (2) specific value of minimum power (in kW) from 1 kW
-  or higher.
-
-  For example, if `charging_power_min = 0.5` and `method = 'curtail'`,
-  sessions' charging power can only be curtailed until the 50% of the
-  nominal charging power. And if `charging_power_min = 2`, sessions'
-  charging power can be curtailed until 2 kW.
+  numeric, minimum power in kW (default 0), for charging and for
+  discharging alike: a responsive session charges at
+  `charging_power_min` or more, discharges at `charging_power_min` or
+  more (e.g. "discharge only from 4 kW upwards"), or does nothing. When
+  the SoC floor or the energy deadline would only allow a smaller
+  discharge (say -2 kW against a 4 kW minimum), the session does not
+  discharge in that slot. The one exception is a session's last charging
+  slot, where it may charge less than the minimum because it only needs
+  that much to finish (the tail of its charge). A session whose nominal
+  `Power` is below `charging_power_min` is not flexible: it is never
+  responsive, charges as uncontrolled, never discharges, and the
+  setpoint carries its load as fixed. Up to version 1.12.0 a value below
+  1 was a share of the nominal power; it is now always kW.
 
 - energy_min:
 
@@ -157,9 +162,36 @@ smart_v2g(
 
   numeric, penalty on change for the flexible load.
 
+- soc_min:
+
+  numeric, State-of-Charge floor of every V2G session, as a fraction of
+  its battery capacity (default 0.2, `0 <= soc_min < 1`). A session
+  never discharges below it. A session that arrives below it
+  (`StateOfCharge < soc_min`) charges up to the floor first, as fast as
+  it needs to (at nominal power when necessary), and can neither be
+  curtailed nor discharge before it reaches the floor.
+
 ## Value
 
 list with setpoints, sessions and demand similar to
 [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md).
 Scheduling is still charging-only while the V2G-specific session logic
 is under development.
+
+## Details
+
+The `sessions` tibble can carry a `StateOfCharge` column, the
+State-of-Charge of each vehicle at arrival as a fraction
+(`0 <= StateOfCharge < 1`); when it is absent every session arrives at
+0.5. Each session's `Energy` takes its battery from `StateOfCharge` to
+full, so its battery capacity is `Energy / (1 - StateOfCharge)` (twice
+the energy at 0.5). With `energy_max` below 1 the session charges only
+that share of its energy and leaves below full, at
+`StateOfCharge + energy_max * (1 - StateOfCharge)`.
+
+The setpoint plans charge and discharge only while the responsive
+sessions are connected, within their nominal power in both directions
+(and `load_capacity`), and keeps the energy owed to every session by its
+departure: the cumulative flexible load never drops below the
+`energy_min` share of the energy of the sessions that have left, minus
+what the connected sessions can still discharge down to `soc_min`.

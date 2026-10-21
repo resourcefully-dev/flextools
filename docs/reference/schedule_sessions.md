@@ -10,7 +10,7 @@ schedule_sessions(
   setpoint,
   method,
   power_th = 0,
-  charging_power_min = 0.5,
+  charging_power_min = 0,
   energy_min = 1,
   energy_max = 1,
   include_log = FALSE,
@@ -47,10 +47,13 @@ schedule_sessions(
 
 - charging_power_min:
 
-  numeric, minimum allowed ratio (between 0 and 1) of nominal power. For
-  example, if `charging_power_min = 0.5` and `method = 'curtail'`,
-  sessions' charging power can only be curtailed until the 50% of the
-  nominal charging power (i.e. `Power` variable in `sessions` tibble).
+  numeric, minimum charging power in kW (default 0). With
+  `method = 'curtail'`, sessions' charging power can only be curtailed
+  down to `charging_power_min` (e.g. 2 kW), except in a session's last
+  charging slot, where it charges only what it still needs. A session
+  whose nominal `Power` is below it is never curtailed. Up to version
+  1.12.0 the default was 0.5 and a value below 1 was a share of the
+  nominal power.
 
 - energy_min:
 

@@ -185,25 +185,27 @@ setpoint**:
 
 It is known that some EV models have a minimum charging power, so below
 this power they can’t be charged at all. Therefore, a possible solution
-is to specify a minimum charging power with the parameter
+is to specify a minimum charging power, in kW, with the parameter
 `charging_power_min`. When `charging_power_min = 0` and
 `method = "curtail"`, the charging power can be reduced until 0 kW
-(interrupted), while a value of `charging_power_min = 0.5` would only
-allow curtailing the EV charging power until the 50% of its nominal
-charging power.
+(interrupted), while a value of `charging_power_min = 2` would only
+allow curtailing the EV charging power down to 2 kW. A session may still
+charge less than the minimum in its last charging slot, where it only
+needs that much to finish. A session whose nominal power is lower than
+`charging_power_min` is not flexible at all: it charges as uncontrolled.
 
-Let’s simulate that all EVs must charge at least at a 30% of their power
-requirements:
+Let’s simulate that all EVs must charge at least at 1.11 kW (30% of
+their nominal power of 3.7 kW):
 
 Check that the minimum power of the `Exploited` sessions (i.e. the ones
-that provided flexibility) corresponds to the 30% of 3.7 (1.11kW):
+that provided flexibility) corresponds to 1.11 kW:
 
     ## [1] 1.11
 
 We can also make a histogram to show the distribution of charging power
-values. It is visible that the limit of 30% of the nominal power (1.11
-kW) is actually limiting the flexibility, since a lot of sessions have
-been charged at this minimum charging rate:
+values. It is visible that the limit of 1.11 kW is actually limiting the
+flexibility, since a lot of sessions have been charged at this minimum
+charging rate:
 
 ![Histogram of charging power
 values](smart-charging-advanced_files/figure-html/unnamed-chunk-20-1.png)

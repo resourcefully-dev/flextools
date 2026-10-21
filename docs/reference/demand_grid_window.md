@@ -15,7 +15,8 @@ demand_grid_window(
   import_capacity,
   export_capacity,
   lambda = 0,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 )
 ```
 
@@ -66,6 +67,15 @@ demand_grid_window(
   optimized load must carry. `c(1, 1)` (default) preserves the energy
   exactly; a range lets the optimizer drop energy — down to `min` — when
   the grid capacity cannot fit `max`.
+
+- cumsum_min:
+
+  numeric vector or `NULL`, minimum cumulative optimized load at each
+  slot (in the units of `LF`): the energy owed to the sessions that have
+  departed by then (see
+  [`get_flex_envelope()`](https://resourcefully-dev.github.io/flextools/reference/get_flex_envelope.md)).
+  Only applies to `direction = "forward"`, and is capped at `cumsum(LF)`
+  so the original profile stays feasible.
 
 ## Value
 

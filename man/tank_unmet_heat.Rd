@@ -30,8 +30,9 @@ numeric vector, unmet heat per slot (kW thermal), rounded to 2
 decimals
 }
 \description{
-Per slot, the heat the tank gives from below its comfort floor, plus the
-heat demand it cannot serve at all once it is at the inlet temperature
+Per slot, the heat that would have been required to keep the tank at least
+at its comfort floor: the heat it gives from below the floor, plus the heat
+demand it cannot serve at all once it is at the inlet temperature
 (level 0). Standing losses below the floor are not counted, and neither is
 a slot whose gap is within half a rounding step of the power.
 }

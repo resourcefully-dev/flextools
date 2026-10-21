@@ -174,8 +174,9 @@ tank_heat_price <- function(L, G, cop, Pc, Pb, objective, lambda, price, scale) 
 
 #' Unmet heat of a schedule
 #'
-#' Per slot, the heat the tank gives from below its comfort floor, plus the
-#' heat demand it cannot serve at all once it is at the inlet temperature
+#' Per slot, the heat that would have been required to keep the tank at least
+#' at its comfort floor: the heat it gives from below the floor, plus the heat
+#' demand it cannot serve at all once it is at the inlet temperature
 #' (level 0). Standing losses below the floor are not counted, and neither is
 #' a slot whose gap is within half a rounding step of the power.
 #'
@@ -802,10 +803,13 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' `B` (the backup heater) is a variable only with `Pb > 0`. The comfort floor
 #' `SOCmin` is **soft**: when the compressor and the backup heater cannot hold
 #' it, the tank keeps giving heat below it, cooling down to the inlet
-#' temperature (level 0) at most, as a real tank would. The heat it gives from
-#' below the floor, plus the demand it cannot serve at all once it is at the
-#' inlet temperature, is the **unmet heat**. Every window therefore has a
-#' schedule.
+#' temperature (level 0) at most, as a real tank would. The **unmet heat** is
+#' the heat that would have been required to keep the tank at least at its
+#' comfort floor: the heat it gives from below the floor, plus the demand it
+#' cannot serve at all once it is at the inlet temperature. It is positive
+#' while the level falls below the floor and 0 while it recovers, so it is a
+#' missing energy, not a measure of how long or how far the tank stays below
+#' its floor. Every window therefore has a schedule.
 #'
 #' The run starts from `Tcap * SOCini/100`, and the level carries from one
 #' window to the next. The windows are those of the other optimization
@@ -928,10 +932,12 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   backup heater's power (kW electric = kW thermal); 0 outside optimised
 #'   windows and everywhere without a backup heater.
 #' - `unmet_heat_kw`: numeric vector, one value per row, rounded to 2 decimals:
-#'   the unmet heat (kW thermal, not electricity): the heat the tank gave from
-#'   below its comfort floor in that slot, plus the demand it could not serve
-#'   at the inlet temperature; 0 wherever the tank stayed at or above its floor.
-#'   It is a report, not part of the balance.
+#'   the unmet heat (kW thermal, not electricity): the heat that would have
+#'   been required in that slot to keep the tank at least at its comfort floor
+#'   (the heat it gave from below the floor, plus the demand it could not
+#'   serve at the inlet temperature). 0 wherever the level stays at or above
+#'   the floor, or rises back towards it. It is a report, not part of the
+#'   balance.
 #'
 #' The heat pump's electric load is the power plus `attr(, "backup_kw")`.
 #'

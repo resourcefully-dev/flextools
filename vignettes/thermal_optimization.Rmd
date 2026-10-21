@@ -143,13 +143,15 @@ Without a soft floor, a window where the compressor and the backup heater cannot
 * the depth below the floor, $D_t \ge T_{cap} \frac{SOC_{min}}{100} - S_t$, priced at $20h / \Delta t$ per kWh and slot;
 * the end condition $S_T \ge S_0$ missed by $R \ge 0$ at the same price, so that a tank that has been drained does not have to be refilled by the end of the window at any cost.
 
-**Every window has a solution** then. The **unmet heat** $U_t$ is the heat the tank gives from below its comfort floor, plus the demand it cannot serve at all once it is at the inlet temperature. With $\tilde S_t = S_{t-1} (1 - l/100)^{\Delta t} + (COP_t P_t + B_t - Q_t) \Delta t$ the level the balance asks for (and $S_t = \max(\tilde S_t, 0)$ the level the tank reaches):
+**Every window has a solution** then. The **unmet heat** $U_t$ is the **heat that would have been required to keep the tank at least at its comfort floor**: the extra heat that, added in slot $t$, would have stopped the temperature from falling below the comfort temperature (or further below it). It is a missing energy, not a measure of discomfort: it is positive while the temperature is falling below the floor, and 0 again as soon as it stops falling, even if the tank is still below the floor while it warms back up. Its total is the extra heat a larger heat pump or backup heater would have had to deliver. With $\tilde S_t = S_{t-1} (1 - l/100)^{\Delta t} + (COP_t P_t + B_t - Q_t) \Delta t$ the level the balance asks for (and $S_t = \max(\tilde S_t, 0)$ the level the tank reaches):
 
 $$
 U_t \, \Delta t = \max\left(0,\; \min\left(T_{cap} \frac{SOC_{min}}{100},\; S_{t-1} (1 - l/100)^{\Delta t}\right) - \tilde S_t\right)
 $$
 
-So in terms of temperature: the backup heater switches on when, with the compressor at full power, the temperature of the tank would drop below the comfort floor; and **heat is unmet whenever, even with the backup heater, the temperature drops below the comfort floor**. The temperature then keeps falling with the demand, to the inlet temperature at most. The unmet heat is a report: it is not part of the heat balance of the tank.
+The first term covers the heat the tank gives from below its floor, and the part of $\tilde S_t$ below 0 the demand it cannot serve at all once it is at the inlet temperature. Standing losses below the floor are not counted.
+
+So in terms of temperature: the backup heater runs when, with the compressor at full power, the temperature of the tank would drop below the comfort floor; and **heat is unmet when, even with the backup heater, the temperature drops below the comfort floor**, by as much heat as it would have taken to keep it there. The temperature keeps falling with the demand, to the inlet temperature at most. The unmet heat is a report: it is not part of the heat balance of the tank.
 
 The soft floor only enters the problem of a window when the window has no solution that holds the floor. So, without a backup heater and with a band that the compressor can hold, the problem is exactly the one without it.
 
@@ -178,7 +180,7 @@ It costs $10h$ per kW in the objective, between the backup heater and going belo
 | Attribute | Content |
 |---|---|
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
-| `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal): the heat the tank gave from below its comfort floor, plus the demand it could not serve at the inlet temperature |
+| `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal): the heat that would have been required in each slot to keep the tank at least at its comfort floor. Positive while the temperature falls below the floor, 0 while it warms back up |
 
 The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater, stopping at the inlet temperature.
 
@@ -319,7 +321,7 @@ daily_totals(results)
 plot_tank(results)
 ```
 
-On the first and the last day, the compressor heats the tank up to 55 °C during the cheapest hours before each peak, and the tank covers the peaks without dropping below 30 °C. On the cold morning the tank starts full, and the compressor runs at full power through the peak, but the temperature falls below the comfort floor at around 08:00 and down to the inlet temperature (20 °C) at around 09:00, where the tank gives no more heat. All the heat the tank gives below 30 °C, and the demand it cannot serve at all at 20 °C, is reported as **unmet heat**. Once the peak is over, the compressor brings the tank back above its floor.
+On the first and the last day, the compressor heats the tank up to 55 °C during the cheapest hours before each peak, and the tank covers the peaks without dropping below 30 °C. On the cold morning the tank starts full, and the compressor runs at full power through the peak, but the temperature falls below the comfort floor at around 08:00 and down to the inlet temperature (20 °C) at around 09:00, where the tank gives no more heat. The **unmet heat** is the heat that would have been needed to keep the tank at 30 °C: the heat the tank gives below 30 °C, and the demand it cannot serve at all at 20 °C. It follows how fast the temperature falls below the floor, not how far below it is: it ends when the temperature stops falling, at the end of the peak, while the compressor is still bringing the tank back above its floor.
 
 ## With a backup heater
 
@@ -342,6 +344,6 @@ daily_totals(results_backup)
 plot_tank(results_backup)
 ```
 
-The compressor runs as before, and the **backup heater switches on** when the compressor at full power can no longer keep the tank above the comfort floor during the cold morning. The optimization looks ahead: it starts the backup heater as soon as the peak starts, rather than when the tank reaches 30 °C, because the heat it adds early is kept in the tank for later. The tank now reaches its comfort floor later, at around 08:45, and **only then is heat unmet**: the tank cools to about 24 °C, and the heat it gives below 30 °C is what even the compressor and the backup heater together cannot deliver. Right after the peak, the backup heater keeps running with the compressor until the tank is back above its floor. On the first and the last day the compressor suffices, and the backup heater stays off even though it could run in cheaper hours.
+The compressor runs as before, and the **backup heater switches on** when the compressor at full power can no longer keep the tank above the comfort floor during the cold morning. The optimization looks ahead: it starts the backup heater as soon as the peak starts, rather than when the tank reaches 30 °C, because the heat it adds early is kept in the tank for later. The tank now reaches its comfort floor later, at around 08:45, and **only then is heat unmet**: the tank cools to about 24 °C, and the unmet heat is the heat that, on top of the compressor and the backup heater, would have kept it at 30 °C. It stops when the temperature reaches its lowest point. Right after the peak, the backup heater keeps running with the compressor until the tank is back above its floor. On the first and the last day the compressor suffices, and the backup heater stays off even though it could run in cheaper hours.
 
 With a larger backup heater (e.g. `Pb = 3`), the tank stays above its floor and the unmet heat disappears altogether.

@@ -8,9 +8,10 @@
   with `0 <= B <= Pb` (also where `cop = 0`). The level is measured above the
   **inlet water temperature** (`SOC = 0`, where the tank gives no more heat).
   When the compressor and the backup heater cannot hold `SOCmin`, the tank
-  cools below it, down to the inlet temperature at most, and the heat it gives
-  below the floor, plus the demand it cannot serve at the inlet temperature,
-  is the **unmet heat**. The backup heater's load enters the objective like
+  cools below it, down to the inlet temperature at most, and the **unmet
+  heat** is the heat that would have been required to keep it at least at its
+  floor (the heat it gives below the floor, plus the demand it cannot serve
+  at the inlet temperature). The backup heater's load enters the objective like
   the compressor's, plus `2 * h` per kW; going below the floor costs
   `20 * h / dt` per kWh and slot (the end-of-window rule becomes soft at the
   same price), `h` being the window's highest value of a kW of load in the

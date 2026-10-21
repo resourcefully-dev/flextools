@@ -450,6 +450,12 @@ test_that("results at the default energy ratios are unchanged by the energy rang
   # a strictly convex objective without a binding capacity must ignore), so
   # the range machinery must leave the setpoints byte-identical.
   #
+  # Re-captured on 1.13.0 for two scenarios only: `grid_postpone`, whose
+  # setpoint now delivers each session's energy before it departs (the
+  # departure deadlines of `get_flex_envelope()`), and `combined_curtail`,
+  # whose `charging_power_min = 0.5` now means 0.5 kW instead of 50% of the
+  # nominal power. Every other scenario is unchanged.
+  #
   # The scheduler is compared with a tolerance: it rounds to 2 decimals at
   # several points and a rounding tie flips on floating-point dust, so the same
   # setpoints can schedule 0.01-0.02 kW differently between environments (seen

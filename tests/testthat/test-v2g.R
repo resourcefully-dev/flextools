@@ -31,6 +31,19 @@ opt_data <- tibble(
 )
 # timefully::plot_ts(opt_data)
 
+# The most the connected sessions can discharge in each slot: their nominal
+# power over their connection. The -20 kW import cap starts at 07:00, when only
+# a few vehicles are plugged in, so the setpoint can only approach it there.
+connected_power <- sessions %>%
+    mutate(
+        ChargingStartDateTime = ConnectionStartDateTime,
+        ChargingEndDateTime = ConnectionEndDateTime,
+        ChargingHours = ConnectionHours,
+        Energy = Power * ConnectionHours
+    ) %>%
+    evsim::get_demand(dttm_seq = opt_data$datetime) %>%
+    pull(Worktime)
+
 test_that("optimization for v2g works and negative import capacity is achieved", {
     v2g_results <- smart_v2g(
         sessions = sessions,
@@ -44,12 +57,16 @@ test_that("optimization for v2g works and negative import capacity is achieved",
     # plot_smart_charging(v2g_results, sessions, legend_width = 150)
     # view_smart_charging_logs(v2g_results)
 
-    # check that setpoints are always lower than the import capacity
+    # check that setpoints are always lower than the import capacity, as far
+    # as the connected vehicles can reach it
     expect_true(
         all(
-            v2g_results$setpoints$Worktime <= opt_data$import_capacity + 1e-6
+            v2g_results$setpoints$Worktime <=
+                pmax(opt_data$import_capacity, -connected_power) + 1e-2
         )
     )
+    # and never discharge more than the connected vehicles can
+    expect_true(all(v2g_results$setpoints$Worktime >= -connected_power - 1e-2))
 
     # check that negative import capacity is achieved
     neg_idx <- which(opt_data$import_capacity < 0)
@@ -71,7 +88,11 @@ test_that("v2g grid optimization also works with explicit export capacity", {
     expect_true(
         all(
             v2g_results$setpoints$Worktime <=
-                opt_data_explicit_export$import_capacity + 1e-6
+                pmax(
+                    opt_data_explicit_export$import_capacity,
+                    -connected_power
+                ) +
+                    1e-2
         )
     )
 
@@ -448,10 +469,12 @@ test_that("energy_max = 1 keeps the v2g results unchanged", {
     )
     expect_equal(v2g_max_1, v2g_default)
 
-    # Totals as produced by flextools 1.9.0, before `energy_max` existed
-    expect_equal(sum(v2g_max_1$demand$Worktime), 1020.97, tolerance = 1e-6)
-    expect_equal(sum(abs(v2g_max_1$demand$Worktime)), 1633.93, tolerance = 1e-6)
-    expect_equal(sum(v2g_max_1$setpoints$Worktime), 1021.06, tolerance = 1e-6)
+    # Totals as produced by flextools 1.9.0, before `energy_max` existed, and
+    # re-captured on 1.13.0: the setpoint no longer discharges before the
+    # vehicles arrive, so the cap is only approached where it is unreachable.
+    expect_equal(sum(v2g_max_1$demand$Worktime), 1020.98, tolerance = 1e-6)
+    expect_equal(sum(abs(v2g_max_1$demand$Worktime)), 1633.94, tolerance = 1e-6)
+    expect_equal(sum(v2g_max_1$setpoints$Worktime), 1020.89, tolerance = 1e-6)
 
     v2g_capacity <- smart_v2g(
         sessions = sessions,

@@ -14,7 +14,8 @@ demand_grid_v2g_window(
   import_capacity,
   export_capacity,
   lambda = 0,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 )
 }
 \arguments{

@@ -75,7 +75,7 @@ To classify a connected EV as a **flexible session** or not, the `flextools` pac
 * **Interrupt**: the charge is not completed yet, and the energy required can be charged during the rest of the connection time at the nominal charging power. From all flexible sessions in a time slot, the ones that have been charging during less time will have priority over the sessions that have been already charging (rotation system).
 * **Curtai**l: the charge is not completed yet or will not be completed in the current time slot, and the energy required can be charged during the rest of the connection time at a lower power than the nominal charging power.
 
-The energy and power constraints of these conditions can also be defined in function `smart_charging()` with the parameters `energy_min` and `charging_power_min`, representing the minimum allowed ratios of the nominal values. More information about using these parameters can be found in article [Advanced smart charging](https://resourcefully-dev.github.io/flextools/articles/smart-charging-advanced.html).
+The energy and power constraints of these conditions can also be defined in function `smart_charging()` with the parameters `energy_min` (the minimum allowed ratio of the required energy) and `charging_power_min` (the minimum charging power, in kW). More information about using these parameters can be found in article [Advanced smart charging](https://resourcefully-dev.github.io/flextools/articles/smart-charging-advanced.html).
 
 
 

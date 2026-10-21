@@ -9,7 +9,7 @@ schedule_sessions(
   setpoint,
   method,
   power_th = 0,
-  charging_power_min = 0.5,
+  charging_power_min = 0,
   energy_min = 1,
   energy_max = 1,
   include_log = FALSE,
@@ -31,9 +31,12 @@ IMPORTANT: Make sure that the \code{sessions} \code{ConnectionStartDateTime} and
 For example, with \code{power_th = 0.1} and \code{setpoint = 100} for a certain time slot,
 then sessions' demand can reach a value of \code{110} without needing to schedule sessions.}
 
-\item{charging_power_min}{numeric, minimum allowed ratio (between 0 and 1) of nominal power.
-For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
-be curtailed until the 50\% of the nominal charging power (i.e. \code{Power} variable in \code{sessions} tibble).}
+\item{charging_power_min}{numeric, minimum charging power in kW (default
+0). With \code{method = 'curtail'}, sessions' charging power can only be
+curtailed down to \code{charging_power_min} (e.g. 2 kW), except in a session's
+last charging slot, where it charges only what it still needs. A session
+whose nominal \code{Power} is below it is never curtailed. Up to version 1.12.0
+the default was 0.5 and a value below 1 was a share of the nominal power.}
 
 \item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
 A session is never curtailed, postponed or interrupted below this share of

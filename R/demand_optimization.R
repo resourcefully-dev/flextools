@@ -13,7 +13,8 @@ get_bounds <- function(
   time_horizon,
   LFmax,
   import_capacity,
-  export_capacity
+  export_capacity,
+  cumsum_min = NULL
 ) {
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
@@ -51,6 +52,17 @@ get_bounds <- function(
 
     lb_cumsum <- horizonMat_cumsum %*% LF
     ub_cumsum <- cumsumMat %*% LF
+
+    # Departure deadlines (`cumsum_min`, see get_flex_envelope()): the energy
+    # owed to the sessions that have left by each slot must already be in
+    # `cumsum(O)`. Capped at `cumsum(LF)`, so the original profile stays a
+    # feasible point (the fallback in demand_solve_window() relies on it).
+    if (!is.null(cumsum_min)) {
+      lb_cumsum <- pmin(
+        pmax(lb_cumsum, rep_len(as.numeric(cumsum_min), time_slots)),
+        ub_cumsum
+      )
+    }
 
     ub_shift <- horizonMat_identity %*% LF
     ub_O <- pmin(pmax(ub_shift, lb_O), LFmax_vct)
@@ -388,7 +400,8 @@ capacity_slice_problem <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  energy_lb = NULL
+  energy_lb = NULL,
+  cumsum_min = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -418,6 +431,16 @@ capacity_slice_problem <- function(
     A_cumsum_ub <- cbind(-cumsumMat, cumsumMat)
     lhs_cumsum_ub <- rep(-Inf, time_slots)
     rhs_cumsum_ub <- rep(0, time_slots)
+    # Departure deadlines: cumsum(LF - slice + added) >= cumsum_min, capped at
+    # cumsum(LF) as in get_bounds().
+    if (!is.null(cumsum_min)) {
+      LF_cumsum <- cumsum(LF)
+      lhs_cumsum_ub <- round(
+        pmin(rep_len(as.numeric(cumsum_min), time_slots), LF_cumsum) -
+          LF_cumsum,
+        2
+      )
+    }
   } else {
     horizonMat_cumsum <- triangulate_matrix(
       matrix(1, time_slots, time_slots),
@@ -507,7 +530,8 @@ select_capacity_slice <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  energy_lb = NULL
+  energy_lb = NULL,
+  cumsum_min = NULL
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -527,7 +551,8 @@ select_capacity_slice <- function(
     LFmax = LFmax,
     import_capacity = import_capacity,
     export_capacity = export_capacity,
-    energy_lb = energy_lb
+    energy_lb = energy_lb,
+    cumsum_min = cumsum_min
   )
 
   result <- highs::highs_solve(
@@ -570,7 +595,8 @@ demand_capacity_window <- function(
   import_capacity,
   export_capacity,
   lambda = 0,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -612,7 +638,8 @@ demand_capacity_window <- function(
     LFmax = LFmax,
     import_capacity = import_capacity,
     export_capacity = export_capacity,
-    energy_lb = energy_lb
+    energy_lb = energy_lb,
+    cumsum_min = cumsum_min
   )
 
   if (is.null(slice_solution)) {
@@ -663,7 +690,8 @@ demand_capacity_window <- function(
         import_capacity = import_cap_relaxed,
         export_capacity = export_cap_relaxed,
         lambda = lambda,
-        energy_ratio = fallback_ratio
+        energy_ratio = fallback_ratio,
+        cumsum_min = cumsum_min
       )
     )
   }
@@ -701,7 +729,14 @@ demand_capacity_window <- function(
     import_capacity = import_capacity,
     export_capacity = export_capacity,
     lambda = lambda,
-    energy_ratio = slice_ratio
+    energy_ratio = slice_ratio,
+    # The fixed part already covers some of the departure deadlines; the slice
+    # has to cover the rest (the slice LP above found such a placement).
+    cumsum_min = if (is.null(cumsum_min)) {
+      NULL
+    } else {
+      rep_len(as.numeric(cumsum_min), time_slots) - cumsum(fixed_load)
+    }
   )
 
   round(fixed_load + as.numeric(optimized_slice), 2)
@@ -939,6 +974,11 @@ optimize_demand <- function(
 #'   load's energy the optimized load must carry. `c(1, 1)` (default) preserves
 #'   the energy exactly; a range lets the optimizer drop energy — down to `min`
 #'   — when the grid capacity cannot fit `max`.
+#' @param cumsum_min numeric vector or `NULL`, minimum cumulative optimized
+#'   load at each slot (in the units of `LF`): the energy owed to the sessions
+#'   that have departed by then (see `get_flex_envelope()`). Only applies to
+#'   `direction = "forward"`, and is capped at `cumsum(LF)` so the original
+#'   profile stays feasible.
 #'
 #' @return numeric vector
 #' @keywords internal
@@ -954,7 +994,8 @@ demand_solve_window <- function(
   export_capacity,
   P,
   q,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 ) {
   # The original implementation rounded the inputs to avoid tiny numerical
   # inconsistencies between bounds. That behavior is kept unchanged.
@@ -985,7 +1026,8 @@ demand_solve_window <- function(
     time_horizon,
     LFmax,
     import_capacity,
-    export_capacity
+    export_capacity,
+    cumsum_min
   )
 
   # Energy the optimized load must carry: by default exactly the profile's own
@@ -1087,7 +1129,8 @@ demand_solve_window <- function(
         time_horizon,
         LFmax,
         import_cap,
-        export_cap
+        export_cap,
+        cumsum_min
       )
 
       # Minimal-relaxation retry: guarantee the original profile O = LF is a
@@ -1119,7 +1162,9 @@ demand_solve_window <- function(
             rep(0, time_slots),
             rep(0, time_slots),
             lb_balance,
-            lb_cumsum,
+            # Never above the energy row: the deadlines and the energy are
+            # rounded separately and must not contradict each other.
+            pmin(lb_cumsum, energy_floor),
             energy_floor
           ),
           2
@@ -1184,7 +1229,8 @@ demand_solve_window <- function(
         time_horizon,
         LFmax,
         import_cap,
-        export_cap
+        export_cap,
+        cumsum_min
       )
 
       # Minimal-relaxation retry: guarantee O = LF is a feasible point even when
@@ -1195,7 +1241,10 @@ demand_solve_window <- function(
       }
 
       list(
-        lb = round(c(L_bounds$lb_O, lb_cumsum, energy_floor), 2),
+        lb = round(
+          c(L_bounds$lb_O, pmin(lb_cumsum, energy_floor), energy_floor),
+          2
+        ),
         ub = round(c(L_bounds$ub_O, ub_cumsum, energy_ceiling), 2)
       )
     }
@@ -1341,7 +1390,8 @@ demand_grid_window <- function(
   import_capacity,
   export_capacity,
   lambda = 0,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -1362,7 +1412,8 @@ demand_grid_window <- function(
     export_capacity,
     P,
     q,
-    energy_ratio
+    energy_ratio,
+    cumsum_min
   )
 }
 
@@ -1401,7 +1452,8 @@ demand_cost_window <- function(
   import_capacity,
   export_capacity,
   lambda = 0,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -1445,7 +1497,8 @@ demand_cost_window <- function(
     export_capacity,
     P,
     q,
-    energy_ratio
+    energy_ratio,
+    cumsum_min
   )
 }
 
@@ -1486,7 +1539,8 @@ demand_combined_window <- function(
   export_capacity,
   w,
   lambda,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -1529,6 +1583,7 @@ demand_combined_window <- function(
     export_capacity,
     P,
     q,
-    energy_ratio
+    energy_ratio,
+    cumsum_min
   )
 }

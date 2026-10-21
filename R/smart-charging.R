@@ -66,13 +66,18 @@
 #' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
 #' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
 #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
-#' @param charging_power_min numeric. It can be configured in two ways:
-#' (1) minimum allowed ratio (between 0 and 0.999) of nominal power (i.e. `Power` column in `sessions`), or
-#' (2) specific value of minimum power (in kW) from 1 kW or higher.
+#' @param charging_power_min numeric, minimum charging power in kW (default 0).
+#' With `method = "curtail"`, a session is never curtailed below it: with
+#' `charging_power_min = 4`, an 11 kW session can be curtailed down to 4 kW
+#' and no further. The one exception is a session's last charging slot, where
+#' it may charge less than the minimum because it only needs that much to
+#' finish (the tail of its charge). A session whose nominal `Power` is below
+#' `charging_power_min` (e.g. 3.7 kW against 4 kW) is not flexible, whatever
+#' the `method`: it is never responsive, charges as uncontrolled and the
+#' setpoint carries its load as fixed.
 #'
-#' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
-#' be curtailed until the 50% of the nominal charging power.
-#' And if `charging_power_min = 2`, sessions' charging power can be curtailed until 2 kW.
+#' Up to version 1.12.0 a value below 1 was a share of the nominal power; it is
+#' now always kW, so `charging_power_min = 0.5` means 0.5 kW.
 #'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' Every session charges at least this share of the energy it requires. The
@@ -141,6 +146,13 @@
 #' considered as a setpoint for the scheduling algorithm, or a grid capacity variable
 #' such as `grid_capacity`, `import_capacity`or `export_capacity`.
 #' The user profiles that don't appear in `opt_data` will not be optimized.
+#'
+#' The optimized setpoint of a profile stays within the physical envelope of
+#' its responsive sessions: at most their nominal power while they are
+#' connected (and `load_capacity`), and, at every time slot, at least the
+#' `energy_min` share of the energy of the sessions that have already
+#' departed. Energy owed to a car leaving early is therefore never postponed
+#' into the slots of the cars that stay longer.
 #'
 #' @examples
 #' # Example: we will use the example data set of charging sessions
@@ -256,6 +268,7 @@ smart_charging <- function(
   }
 
   check_energy_ratios(energy_min, energy_max)
+  check_charging_power_min(charging_power_min)
 
   if (is.null(responsive)) {
     responsive <- map(
@@ -348,7 +361,8 @@ smart_charging <- function(
         set_responsive(
           dttm_seq[flex_idx],
           responsive,
-          time_resolution
+          time_resolution,
+          charging_power_min
         )
       list(
         sessions_window = sessions_window,
@@ -621,12 +635,41 @@ check_energy_ratios <- function(energy_min, energy_max) {
   invisible(TRUE)
 }
 
+
+#' Validate the minimum charging power
+#'
+#' Shared by [smart_charging()], [smart_v2g()] and the schedulers.
+#' `charging_power_min` is a power in kW (up to 1.12.0 a value below 1 was a
+#' share of the nominal power).
+#'
+#' @param charging_power_min numeric, a single finite value of at least 0 (kW).
+#'
+#' @return `TRUE`, invisibly. Stops with a clear message otherwise.
+#' @keywords internal
+#'
+check_charging_power_min <- function(charging_power_min) {
+  if (
+    !is.numeric(charging_power_min) ||
+      length(charging_power_min) != 1 ||
+      !is.finite(charging_power_min) ||
+      charging_power_min < 0
+  ) {
+    stop("Error: `charging_power_min` must be a single number of at least 0 (kW)")
+  }
+  invisible(TRUE)
+}
+
 #' Set `Responsive` column in `sessions`
 #'
 #' @param sessions_window tibble, sessions corresponding to a single windows
 #' @param dttm_seq datetime vector
 #' @param responsive named list with responsive ratios
 #' @param time_resolution numeric, time resolution in minutes
+#' @param charging_power_min numeric, minimum charging (and discharging) power
+#'   in kW. A session whose nominal `Power` is below it cannot be curtailed or
+#'   discharged within that minimum, so it is never responsive (`Responsive =
+#'   FALSE`): it charges as uncontrolled and the setpoint carries its load as
+#'   fixed.
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
 #' @importFrom lubridate hour minute date minutes
@@ -640,7 +683,8 @@ set_responsive <- function(
   sessions_window,
   dttm_seq,
   responsive,
-  time_resolution
+  time_resolution,
+  charging_power_min = 0
 ) {
   if (nrow(sessions_window) == 0) {
     return(tibble())
@@ -688,8 +732,14 @@ set_responsive <- function(
     # mode at the source; what the band still did was leave the excluded
     # sessions charging unmanaged at full power, and understate the responsive
     # share the caller asked for.
+    #
+    # A session whose nominal power is below `charging_power_min` has no
+    # flexibility within that minimum: it is never responsive.
+    below_min_power <- sessions_group$Power < charging_power_min
+    sessions_group$Responsive[below_min_power] <- FALSE
     potentially_responsive_idx <- which(
-      sessions_group$ChargingEndDateTime <= max_end_connection_dttm
+      sessions_group$ChargingEndDateTime <= max_end_connection_dttm &
+        !below_min_power
     )
 
     # From the potentially responsive sessions, randomly select the configured
@@ -855,28 +905,18 @@ get_setpoints <- function(
       opt_idxs <- (dttm_seq >= window_prof_dttm[1]) &
         (dttm_seq <= window_prof_dttm[2])
 
-      # Maximum charging power of the flexible load at each time slot.
-      # The optimized setpoint can be reshaped in time but must never exceed
-      # the power that the connected EVs can physically draw, i.e. their
-      # nominal power while connected. This envelope is the sum of the nominal
-      # `Power` of the responsive sessions over their connection window,
-      # computed as the demand they would produce if charging at nominal power
-      # during the whole connection time. A user-supplied `load_capacity`
-      # column in `opt_data` can tighten this limit further.
-      if (nrow(sessions_window_prof_flex) > 0) {
-        LFmax_prof <- sessions_window_prof_flex %>%
-          mutate(
-            ChargingStartDateTime = .data$ConnectionStartDateTime,
-            ChargingEndDateTime = .data$ConnectionEndDateTime,
-            ChargingHours = .data$ConnectionHours,
-            Energy = .data$Power * .data$ConnectionHours
-          ) %>%
-          get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
-          pull(!!sym(profile))
-      } else {
-        LFmax_prof <- rep(Inf, length(dttm_seq))
-      }
-      LFmax_prof <- pmin(LFmax_prof, opt_data$load_capacity)
+      # Physical envelope of the responsive sessions: the power they can draw
+      # while connected (`LFmax`) and the energy owed to those that have
+      # departed by each slot (`owed`), shared with get_setpoints_v2g().
+      envelope <- get_flex_envelope(
+        sessions_window_prof_flex,
+        dttm_seq = dttm_seq,
+        profile = profile,
+        load_capacity = opt_data$load_capacity,
+        energy_min = energy_min
+      )
+      LFmax_prof <- envelope$LFmax
+      cumsum_min <- envelope$owed[opt_idxs]
 
       if (opt_objective != "none") {
         # Optimize the flexible profile's load according to `opt_objective`
@@ -891,7 +931,8 @@ get_setpoints <- function(
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
-            energy_ratio = energy_ratio
+            energy_ratio = energy_ratio,
+            cumsum_min = cumsum_min
           )
         } else if (opt_objective == "cost") {
           O <- demand_cost_window(
@@ -908,7 +949,8 @@ get_setpoints <- function(
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
-            energy_ratio = energy_ratio
+            energy_ratio = energy_ratio,
+            cumsum_min = cumsum_min
           )
         } else if (opt_objective == "capacity") {
           O <- demand_capacity_window(
@@ -921,7 +963,8 @@ get_setpoints <- function(
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
-            energy_ratio = energy_ratio
+            energy_ratio = energy_ratio,
+            cumsum_min = cumsum_min
           )
         } else if (is.numeric(opt_objective)) {
           O <- demand_combined_window(
@@ -939,7 +982,8 @@ get_setpoints <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             w = opt_objective,
             lambda = lambda,
-            energy_ratio = energy_ratio
+            energy_ratio = energy_ratio,
+            cumsum_min = cumsum_min
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -980,6 +1024,114 @@ get_setpoints <- function(
   }
 
   return(setpoints)
+}
+
+
+#' Physical flexibility envelope of a profile's responsive sessions
+#'
+#' Shared by `get_setpoints()` and `get_setpoints_v2g()`, so the one-way and
+#' the V2G setpoints plan within the same physical limits:
+#'
+#' - `LFmax`: the power the responsive sessions can draw at each slot, i.e.
+#'   their nominal `Power` over their connection (the demand they would produce
+#'   charging at nominal power for the whole connection), capped by
+#'   `load_capacity`. `Inf` when no session is given.
+#' - `owed`: the cumulative energy owed to the sessions that have departed by
+#'   the end of each slot, `energy_min * Energy` per session, in the units of
+#'   the setpoint (kW per slot, i.e. kWh divided by the slot length in hours).
+#'   A session is due in the slot containing its departure, or its
+#'   uncontrolled charging end when that is later (a session that cannot
+#'   charge its energy within its connection), so its uncontrolled profile
+#'   always meets the deadline and the original profile stays feasible.
+#' - `reserve` (only with `soc_min`, else zeros): the energy the connected V2G
+#'   sessions can still discharge at each slot, `(StateOfCharge - soc_min) *
+#'   BatteryCapacity` per session, from its arrival slot up to the slot before
+#'   the one it is due in, in the same units. It is negative for a session that
+#'   arrives below the SoC floor, which has to charge up to the floor first.
+#'   See [smart_v2g()] for `BatteryCapacity`.
+#'
+#' @param sessions tibble, the responsive sessions of one profile in a window
+#' @param dttm_seq datetime vector of the window
+#' @param profile character, the profile name
+#' @param load_capacity numeric (vector), maximum flexible load in kW
+#' @param energy_min numeric, share of each session's energy owed at departure
+#' @param soc_min numeric or `NULL`, SoC floor of the V2G sessions (fraction)
+#'
+#' @return list with the numeric vectors `LFmax`, `owed` and `reserve`, each
+#'   of `length(dttm_seq)`
+#' @keywords internal
+#'
+get_flex_envelope <- function(
+  sessions,
+  dttm_seq,
+  profile,
+  load_capacity = Inf,
+  energy_min = 1,
+  soc_min = NULL
+) {
+  n_slots <- length(dttm_seq)
+  owed <- rep(0, n_slots)
+  reserve <- rep(0, n_slots)
+
+  # Maximum charging power of the flexible load at each time slot.
+  # The optimized setpoint can be reshaped in time but must never exceed
+  # the power that the connected EVs can physically draw, i.e. their
+  # nominal power while connected. This envelope is the sum of the nominal
+  # `Power` of the responsive sessions over their connection window,
+  # computed as the demand they would produce if charging at nominal power
+  # during the whole connection time. A user-supplied `load_capacity`
+  # column in `opt_data` can tighten this limit further.
+  if (nrow(sessions) > 0) {
+    LFmax_prof <- sessions %>%
+      mutate(
+        ChargingStartDateTime = .data$ConnectionStartDateTime,
+        ChargingEndDateTime = .data$ConnectionEndDateTime,
+        ChargingHours = .data$ConnectionHours,
+        Energy = .data$Power * .data$ConnectionHours
+      ) %>%
+      get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
+      pull(!!sym(profile))
+  } else {
+    LFmax_prof <- rep(Inf, length(dttm_seq))
+  }
+  LFmax_prof <- pmin(LFmax_prof, load_capacity)
+
+  if (nrow(sessions) == 0) {
+    return(list(LFmax = LFmax_prof, owed = owed, reserve = reserve))
+  }
+
+  slot_hours <- get_time_resolution(dttm_seq, units = "mins") / 60
+  slot_starts <- as.numeric(dttm_seq)
+  # Number of slots starting before `x`: the slot containing `x` (or ending
+  # exactly at it) is the last one a session leaving at `x` can charge in.
+  slots_before <- function(x) {
+    findInterval(as.numeric(x), slot_starts, left.open = TRUE)
+  }
+
+  due <- pmax(sessions$ConnectionEndDateTime, sessions$ChargingEndDateTime)
+  due_idx <- slots_before(due)
+  owed_slot <- energy_min * sessions$Energy / slot_hours
+  for (i in which(due_idx >= 1 & due_idx <= n_slots)) {
+    owed[due_idx[i]] <- owed[due_idx[i]] + owed_slot[i]
+  }
+  owed <- cumsum(owed)
+
+  if (!is.null(soc_min)) {
+    soc <- sessions$StateOfCharge
+    reserve_slot <- (soc - soc_min) *
+      v2g_battery_capacity(sessions$Energy, soc) /
+      slot_hours
+    start_idx <- slots_before(sessions$ConnectionStartDateTime) + 1
+    end_idx <- pmin(slots_before(sessions$ConnectionEndDateTime), due_idx) - 1
+    for (i in seq_len(nrow(sessions))) {
+      if (start_idx[i] <= end_idx[i]) {
+        idx <- seq(start_idx[i], min(end_idx[i], n_slots))
+        reserve[idx] <- reserve[idx] + reserve_slot[i]
+      }
+    }
+  }
+
+  list(LFmax = LFmax_prof, owed = owed, reserve = reserve)
 }
 
 
@@ -1048,13 +1200,8 @@ get_setpoints_parallel <- function(
 #' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
 #' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
 #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
-#' @param charging_power_min numeric. It can be configured in two ways:
-#' (1) minimum allowed ratio (between 0 and 1) of nominal power (i.e. `Power` column in `sessions`), or
-#' (2) specific value of minimum power (in kW) higher than 1 kW.
-#'
-#' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
-#' be curtailed until the 50% of the nominal charging power.
-#' And if `charging_power_min = 2`, sessions' charging power can be curtailed until 2 kW.
+#' @param charging_power_min numeric, minimum charging power in kW. See
+#'   [smart_charging()].
 #'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' @param energy_max numeric, maximum allowed ratio (between 0 and 1) of required energy.
@@ -1291,9 +1438,12 @@ SCHEDULE_OUTPUT_DIGITS <- 4L
 #' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
 #' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
 #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
-#' @param charging_power_min numeric, minimum allowed ratio (between 0 and 1) of nominal power.
-#' For example, if `charging_power_min = 0.5` and `method = 'curtail'`, sessions' charging power can only
-#' be curtailed until the 50% of the nominal charging power (i.e. `Power` variable in `sessions` tibble).
+#' @param charging_power_min numeric, minimum charging power in kW (default
+#' 0). With `method = 'curtail'`, sessions' charging power can only be
+#' curtailed down to `charging_power_min` (e.g. 2 kW), except in a session's
+#' last charging slot, where it charges only what it still needs. A session
+#' whose nominal `Power` is below it is never curtailed. Up to version 1.12.0
+#' the default was 0.5 and a value below 1 was a share of the nominal power.
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' A session is never curtailed, postponed or interrupted below this share of
 #' the energy it requires, whatever the setpoint says.
@@ -1320,7 +1470,7 @@ schedule_sessions <- function(
   setpoint,
   method,
   power_th = 0,
-  charging_power_min = 0.5,
+  charging_power_min = 0,
   energy_min = 1,
   energy_max = 1,
   include_log = FALSE,
@@ -1363,6 +1513,7 @@ schedule_sessions <- function(
     stop("Error: `method` not valid (see Arguments description)")
   }
   check_energy_ratios(energy_min, energy_max)
+  check_charging_power_min(charging_power_min)
 
   resolution <- get_time_resolution(setpoint$datetime, units = "mins")
   dttm_tz <- tz(setpoint$datetime)
@@ -1518,18 +1669,8 @@ schedule_sessions <- function(
       #      - The minimum energy that must be charged in total (considering `energy_min`)
       #      - The energy that can be charged at nominal power the rest of connection hours
 
-      if (!is.numeric(charging_power_min)) {
-        stop("`charging_power_min` should be numeric")
-      }
-
-      if (charging_power_min < 1) {
-        charging_power_min_ratio <- charging_power_min
-        charging_power_min_kW <- Inf
-      } else {
-        charging_power_min_ratio <- 1
-        charging_power_min_kW <- charging_power_min
-      }
-
+      # `charging_power_min` is in kW. A session whose nominal power is below
+      # it cannot be curtailed at all (its minimum is its nominal power).
       sessions_timeslot <- sessions_timeslot %>%
         mutate(
           MinEnergyTimeslot = pmax(
@@ -1538,10 +1679,7 @@ schedule_sessions <- function(
           ),
           MinPowerTimeslot = pmax(
             .data$MinEnergyTimeslot / (resolution / 60),
-            pmin(
-              .data$PowerNominal * charging_power_min_ratio,
-              charging_power_min_kW
-            )
+            pmin(.data$PowerNominal, charging_power_min)
           ),
           Flexible = ifelse(
             (.data$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &

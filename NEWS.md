@@ -1,3 +1,15 @@
+# flextools 1.12.0
+
+* New `get_tank_unmet_heat()`: the unmet heat of any tank schedule (the heat
+  that would have been required in each slot to keep the tank at least at its
+  comfort floor), such as the static schedule's. `add_tank_optimization()`
+  computes its `unmet_heat_kw` attribute with it, so both share one
+  definition.
+* `add_tank_optimization()` gains `on_failure` (last, default `"flexible"`):
+  with `"error"`, a window the solver fails on stops with an error naming its
+  first `datetime` and the solver status, instead of running `flexible` with a
+  message.
+
 # flextools 1.11.0
 
 * `add_tank_optimization()` gains a resistive **backup heater** and a **soft

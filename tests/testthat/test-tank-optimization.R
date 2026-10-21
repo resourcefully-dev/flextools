@@ -602,3 +602,90 @@ test_that("the slots before the first window start form a leading window", {
     tolerance = 1e-9
   )
 })
+
+
+# Unmet heat of any schedule ---------------------------------------------------
+
+test_that("`get_tank_unmet_heat()` is the attribute of an optimised run", {
+  heat_demand <- rep(1, 72)
+  heat_demand[24 + 9:11] <- 5
+  d <- tank_data(days = 3, heat_demand = heat_demand)
+  for (Pb in list(NULL, 0.5)) {
+    for (loss in c(0, 1)) {
+      P <- suppressMessages(add_tank_optimization(
+        d, "cost", Tcap = 3, Pc = 1, SOCmin = 20, loss = loss, Pb = Pb
+      ))
+      unmet <- get_tank_unmet_heat(
+        as.numeric(P),
+        d$heat_demand,
+        d$cop,
+        init = 3,
+        Tcap = 3,
+        SOCmin = 20,
+        loss = loss,
+        backup = attr(P, "backup_kw")
+      )
+      expect_gt(sum(unmet), 0)
+      expect_identical(unmet, attr(P, "unmet_heat_kw"))
+    }
+  }
+})
+
+test_that("`get_tank_unmet_heat()` follows its definition and validates its inputs", {
+  # A 3 kWh tank with its floor at 1 kWh, emptied by 2 kW for 2 hours: the
+  # first hour ends at the floor, the second needs 2 kWh more to stay there
+  expect_equal(
+    get_tank_unmet_heat(
+      c(0, 0, 0), c(2, 2, 0), 3, init = 3, Tcap = 3, SOCmin = 100 / 3
+    ),
+    c(0, 2, 0)
+  )
+  # Below the floor, at 15 minutes: 1 kW out of an empty tank is 1 kW unmet,
+  # and the backup heater covers it
+  expect_equal(
+    get_tank_unmet_heat(
+      c(0, 0), 1, 3, init = 0, Tcap = 3, SOCmin = 50, time_resolution = 15
+    ),
+    c(1, 1)
+  )
+  expect_equal(
+    get_tank_unmet_heat(
+      c(0, 0), 1, 3, init = 0, Tcap = 3, SOCmin = 50, time_resolution = 15,
+      backup = 1
+    ),
+    c(0, 0)
+  )
+  expect_error(get_tank_unmet_heat(0, 1, 3, init = 0, Tcap = 0, SOCmin = 0), "Tcap")
+  expect_error(get_tank_unmet_heat(0, 1, 3, init = 0, Tcap = 3, SOCmin = 120), "SOCmin")
+  expect_error(
+    get_tank_unmet_heat(c(0, 0), 1, 3, init = 0, Tcap = 3, SOCmin = 0, backup = c(1, 1, 1)),
+    "backup"
+  )
+})
+
+
+# Solver failures --------------------------------------------------------------
+
+test_that("`on_failure` turns a solver failure into an error", {
+  d <- tank_data(days = 2)
+  local_mocked_bindings(
+    tank_solve_window = function(...) tank_failure("OSQP: mocked failure")
+  )
+
+  expect_error(
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 3, on_failure = "error"),
+    "2024-01-01 00:00:00 UTC \\(OSQP: mocked failure\\)"
+  )
+
+  # The default runs `flexible` there, with a message
+  expect_message(
+    P <- add_tank_optimization(d, "cost", Tcap = 3, Pc = 3),
+    "solver failed"
+  )
+  expect_equal(as.numeric(P), d$flexible)
+
+  expect_error(
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 3, on_failure = "stop"),
+    "on_failure"
+  )
+})

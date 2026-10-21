@@ -182,7 +182,9 @@ It costs $10h$ per kW in the objective, between the backup heater and going belo
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
 | `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal): the heat that would have been required in each slot to keep the tank at least at its comfort floor. Positive while the temperature falls below the floor, 0 while it warms back up |
 
-The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater, stopping at the inlet temperature.
+The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater, stopping at the inlet temperature. `get_tank_unmet_heat()` computes the unmet heat of any schedule, with the same definition: for example, of the static schedule `flexible`, to compare it with the optimized one.
+
+A window the solver fails on (a numerical failure, since every window has a solution) runs the static schedule, with a message. With `on_failure = "error"`, it stops with an error naming the window and the solver status instead.
 
 
 # Example

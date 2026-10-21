@@ -18,7 +18,8 @@ demand_cost_window(
   import_capacity,
   export_capacity,
   lambda = 0,
-  energy_ratio = c(1, 1)
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL
 )
 }
 \arguments{
@@ -52,6 +53,12 @@ demand_cost_window(
 load's energy the optimized load must carry. \code{c(1, 1)} (default) preserves
 the energy exactly; a range lets the optimizer drop energy — down to \code{min}
 — when the grid capacity cannot fit \code{max}.}
+
+\item{cumsum_min}{numeric vector or \code{NULL}, minimum cumulative optimized
+load at each slot (in the units of \code{LF}): the energy owed to the sessions
+that have departed by then (see \code{get_flex_envelope()}). Only applies to
+\code{direction = "forward"}, and is capped at \code{cumsum(LF)} so the original
+profile stays feasible.}
 }
 \value{
 numeric vector

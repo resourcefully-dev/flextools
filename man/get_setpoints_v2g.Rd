@@ -11,15 +11,22 @@ get_setpoints_v2g(
   opt_objective,
   lambda,
   energy_min = 1,
-  energy_max = 1
+  energy_max = 1,
+  soc_min = 0.2
 )
 }
 \arguments{
 \item{energy_min, energy_max}{numeric, minimum and maximum share (between 0
 and 1) of each profile's energy the setpoint must carry, net of discharge.
 See \code{\link[=smart_v2g]{smart_v2g()}}.}
+
+\item{soc_min}{numeric, SoC floor of the sessions. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 }
 \description{
-Set setpoints for smart V2G
+The setpoint plans charge and discharge within the physical envelope of the
+responsive sessions (see \code{get_flex_envelope()}): at most their nominal power
+while connected, in both directions, and a cumulative load that never drops
+below the energy owed to the departed sessions minus what the connected ones
+can still discharge down to \code{soc_min}.
 }
 \keyword{internal}

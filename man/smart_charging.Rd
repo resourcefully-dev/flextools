@@ -79,13 +79,18 @@ For example: \code{list(Monday = list(Worktime = 1, Shortstay = 0.1))}}
 For example, with \code{power_th = 0.1} and \code{setpoint = 100} for a certain time slot,
 then sessions' demand can reach a value of \code{110} without needing to schedule sessions.}
 
-\item{charging_power_min}{numeric. It can be configured in two ways:
-(1) minimum allowed ratio (between 0 and 0.999) of nominal power (i.e. \code{Power} column in \code{sessions}), or
-(2) specific value of minimum power (in kW) from 1 kW or higher.
+\item{charging_power_min}{numeric, minimum charging power in kW (default 0).
+With \code{method = "curtail"}, a session is never curtailed below it: with
+\code{charging_power_min = 4}, an 11 kW session can be curtailed down to 4 kW
+and no further. The one exception is a session's last charging slot, where
+it may charge less than the minimum because it only needs that much to
+finish (the tail of its charge). A session whose nominal \code{Power} is below
+\code{charging_power_min} (e.g. 3.7 kW against 4 kW) is not flexible, whatever
+the \code{method}: it is never responsive, charges as uncontrolled and the
+setpoint carries its load as fixed.
 
-For example, if \code{charging_power_min = 0.5} and \code{method = 'curtail'}, sessions' charging power can only
-be curtailed until the 50\% of the nominal charging power.
-And if \code{charging_power_min = 2}, sessions' charging power can be curtailed until 2 kW.}
+Up to version 1.12.0 a value below 1 was a share of the nominal power; it is
+now always kW, so \code{charging_power_min = 0.5} means 0.5 kW.}
 
 \item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
 Every session charges at least this share of the energy it requires. The
@@ -154,6 +159,13 @@ considered as a setpoint for the scheduling algorithm, or a grid capacity variab
 such as \code{grid_capacity}, \code{import_capacity}or \code{export_capacity}.
 The user profiles that don't appear in \code{opt_data} will not be optimized.
 }
+
+The optimized setpoint of a profile stays within the physical envelope of
+its responsive sessions: at most their nominal power while they are
+connected (and \code{load_capacity}), and, at every time slot, at least the
+\code{energy_min} share of the energy of the sessions that have already
+departed. Energy owed to a car leaving early is therefore never postponed
+into the slots of the cars that stay longer.
 }
 \examples{
 # Example: we will use the example data set of charging sessions

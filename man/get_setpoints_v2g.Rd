@@ -12,7 +12,8 @@ get_setpoints_v2g(
   lambda,
   energy_min = 1,
   energy_max = 1,
-  soc_min = 0.2
+  soc_min = 0.2,
+  discharge_eff = 1
 )
 }
 \arguments{
@@ -21,6 +22,9 @@ and 1) of each profile's energy the setpoint must carry, net of discharge.
 See \code{\link[=smart_v2g]{smart_v2g()}}.}
 
 \item{soc_min}{numeric, SoC floor of the sessions. See \code{\link[=smart_v2g]{smart_v2g()}}.}
+
+\item{discharge_eff}{numeric, discharge efficiency of the vehicles, counted
+by the cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 }
 \description{
 The setpoint plans charge and discharge within the physical envelope of the

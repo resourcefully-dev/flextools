@@ -572,6 +572,106 @@ test_that("cost v2g with a ramping penalty and an energy range keeps its constra
     }
 })
 
+test_that("cost v2g discharges into export only when the spread covers the discharge losses", {
+    # A flat export price of 0.15 against a night import price of 0.10: the
+    # round trip pays with no losses or with discharge_eff = 0.8 (0.12 > 0.10),
+    # but not with discharge_eff = 0.6 (0.09 < 0.10), where the setpoint no
+    # longer plans any export.
+    case <- v2g_price_case(price_exported = 0.15)
+    setpoint_export <- function(results) {
+        sum(pmax(-(case$opt_data$static + results$setpoints$Fleet), 0))
+    }
+    battery_gain <- function(results, eff) {
+        results$sessions %>%
+            group_by(Session) %>%
+            summarise(
+                Gain = sum(pmax(Energy, 0)) + sum(pmin(Energy, 0)) / eff
+            ) %>%
+            arrange(match(Session, case$sessions$Session)) %>%
+            pull(Gain)
+    }
+    exports <- c()
+    for (eff in c(1, 0.8, 0.6)) {
+        for (objective in list("cost", 0.5)) {
+            results <- run_v2g_price_case(case, objective, discharge_eff = eff)
+            if (identical(objective, "cost")) {
+                exports[as.character(eff)] <- setpoint_export(results)
+            }
+            # Every session charges its energy back, losses included.
+            expect_equal(
+                battery_gain(results, eff),
+                case$sessions$Energy,
+                tolerance = 0.05,
+                info = paste(objective, eff)
+            )
+            expect_v2g_breaches_not_worse(case, results$demand$Fleet)
+        }
+    }
+    expect_gt(exports[["1"]], 10)
+    expect_gt(exports[["0.8"]], 10)
+    expect_lt(exports[["0.8"]], exports[["1"]])
+    expect_equal(exports[["0.6"]], 0, tolerance = 0.05)
+})
+
+test_that("the v2g scheduler keeps the deadline and the SoC floor with discharge losses", {
+    # One 11 kW session that needs 22 kWh in 4 hours, and a setpoint that
+    # discharges as much as it can for 1.5 hours. Discharging d kWh to the grid
+    # costs d / discharge_eff kWh of battery and of energy to charge, so the
+    # scheduler must size the discharge it allows by discharge_eff, or the
+    # session leaves short (19.25 kWh at discharge_eff = 0.5).
+    dttm <- seq(
+        as.POSIXct("2025-03-03 00:00", tz = "UTC"),
+        by = "15 min",
+        length.out = 16
+    )
+    session <- tibble(
+        Session = "S1",
+        Timecycle = "Workday",
+        Profile = "Fleet",
+        ConnectionStartDateTime = dttm[1],
+        ConnectionHours = 4,
+        Power = 11,
+        Energy = 22,
+        StateOfCharge = 0.5
+    ) %>%
+        evsim::adapt_charging_features(time_resolution = 15) %>%
+        mutate(Responsive = TRUE)
+    setpoint <- tibble(
+        datetime = dttm,
+        setpoint = c(rep(-11, 6), rep(11, 10))
+    )
+    battery_capacity <- 22 / (1 - 0.5)
+
+    for (eff in c(1, 0.8, 0.5)) {
+        for (soc_min in c(0, 0.45)) {
+            results <- schedule_sessions_v2g(
+                session,
+                setpoint,
+                discharge_eff = eff,
+                soc_min = soc_min
+            )
+            energy <- results$sessions$Energy
+            charged <- pmax(energy, 0)
+            discharged <- pmin(energy, 0)
+            # The battery gains its energy, net of the discharge losses.
+            expect_equal(
+                sum(charged) + sum(discharged) / eff,
+                22,
+                tolerance = 0.02,
+                info = paste(eff, soc_min)
+            )
+            # It discharged, and never below its SoC floor.
+            expect_lt(sum(discharged), 0)
+            battery <- 0.5 * battery_capacity +
+                cumsum(charged + discharged / eff)
+            expect_true(
+                all(battery >= soc_min * battery_capacity - 0.02),
+                info = paste(eff, soc_min)
+            )
+        }
+    }
+})
+
 test_that("cost and combined v2g approach a negative import capacity", {
     opt_data_prices <- opt_data %>%
         mutate(price_imported = 1, price_exported = 0)

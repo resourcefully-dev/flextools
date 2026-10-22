@@ -104,9 +104,19 @@ discharge (energy discharged, grossed up by \code{discharge_eff}, has to be
 charged back on top), and the setpoint optimization targets this share for
 the responsive sessions. Must be higher than 0 and at least \code{energy_min}.}
 
-\item{discharge_eff}{numeric, discharge efficiency (0, 1], applied to energy
-losses when discharging. For example, 0.9 means that for every 1 kWh
-discharged, 1/0.9 kWh must be recharged.}
+\item{discharge_eff}{numeric, efficiency (0, 1] of a discharge, counted as
+the round trip grid -> battery -> grid. For every kWh a session discharges
+to the grid, its battery loses \code{1 / discharge_eff} kWh, which it charges
+back from the grid before it leaves (0.9: 1.11 kWh). The sessions'
+\code{Energy} and \code{Power} are grid-side, as metered at the charge point, so
+they already include the charging losses of a normal charge, and there is
+no \code{charge_eff}. The losses of charging back the discharged energy are not
+separate either: pass the round-trip efficiency (about 0.9 for 95\% each
+way) to count them, which also makes the SoC floor slightly conservative,
+because the battery bookkeeping counts grid-side kWh. The scheduler sizes
+each discharge so the session still meets its energy deadline and its SoC
+floor after the losses, and the \code{"cost"} and combined setpoints plan a
+discharge only when the price spread covers them.}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
@@ -168,7 +178,10 @@ import, as under \code{"grid"}.
 to cut import.
 }
 
-The setpoint does not see \code{discharge_eff}: a price spread smaller than the
-discharge losses can still be planned, and the scheduler charges the losses
-back on top.
+Under \code{"cost"} and combined objectives the setpoint counts the discharge
+losses (\code{discharge_eff}): every discharged kWh is charged back as
+\code{1 / discharge_eff} kWh, so a discharge is planned only when the price
+spread covers the losses. The \code{"grid"} and \code{"capacity"} setpoints, which
+discharge only to cut import, do not count them; the scheduler charges the
+losses back on top under every objective.
 }

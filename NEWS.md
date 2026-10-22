@@ -21,6 +21,26 @@
   13.97 to -0.90; with an export price below every import price the fleet
   still only cuts import. `"grid"`, `"capacity"` and combined objectives keep
   the discharge floor of 1.13.1.
+* Under `"cost"` and combined objectives the setpoint counts the discharge
+  losses: every kWh discharged is charged back as `1 / discharge_eff` kWh, as
+  the scheduler counts it, so the fleet discharges only when the price spread
+  covers the losses. With a flat export price of 0.15 against a night import
+  price of 0.10, the cost setpoint exports at `discharge_eff = 0.8`
+  (0.15 x 0.8 > 0.10) and not at 0.6. The setpoint plans without the losses
+  first, then re-solves with them in the slots that discharge, which keeps
+  the problem convex without letting the solver invent losses to charge more
+  energy. The `"grid"` and `"capacity"` setpoints are unchanged.
+* Fix: with `discharge_eff` below 1, the V2G scheduler let a session
+  discharge as much as its energy deadline and SoC floor allowed in grid-side
+  kWh, but every kWh discharged costs `1 / discharge_eff` kWh of battery and
+  of energy to charge back. A session that discharged up to that limit left
+  short of its energy (19.25 of 22 kWh at `discharge_eff = 0.5`) or went
+  below its SoC floor. The allowed discharge is now scaled by
+  `discharge_eff`.
+* `discharge_eff` is documented as the round-trip efficiency (grid -> battery
+  -> grid): the sessions' `Energy` is grid-side, as metered at the charge
+  point, so it already includes the charging losses, which is why there is no
+  `charge_eff`.
 * A numeric `opt_objective` (`w` between 0 and 1) now blends the two
   objectives in `smart_v2g()` as in `smart_charging()`: `w` weighs the squared
   net power (normalised by the squared mean import price) and `1 - w` the

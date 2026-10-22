@@ -21,9 +21,19 @@
 #' discharge (energy discharged, grossed up by `discharge_eff`, has to be
 #' charged back on top), and the setpoint optimization targets this share for
 #' the responsive sessions. Must be higher than 0 and at least `energy_min`.
-#' @param discharge_eff numeric, discharge efficiency (0, 1], applied to energy
-#'   losses when discharging. For example, 0.9 means that for every 1 kWh
-#'   discharged, 1/0.9 kWh must be recharged.
+#' @param discharge_eff numeric, efficiency (0, 1] of a discharge, counted as
+#'   the round trip grid -> battery -> grid. For every kWh a session discharges
+#'   to the grid, its battery loses `1 / discharge_eff` kWh, which it charges
+#'   back from the grid before it leaves (0.9: 1.11 kWh). The sessions'
+#'   `Energy` and `Power` are grid-side, as metered at the charge point, so
+#'   they already include the charging losses of a normal charge, and there is
+#'   no `charge_eff`. The losses of charging back the discharged energy are not
+#'   separate either: pass the round-trip efficiency (about 0.9 for 95% each
+#'   way) to count them, which also makes the SoC floor slightly conservative,
+#'   because the battery bookkeeping counts grid-side kWh. The scheduler sizes
+#'   each discharge so the session still meets its energy deadline and its SoC
+#'   floor after the losses, and the `"cost"` and combined setpoints plan a
+#'   discharge only when the price spread covers them.
 #' @param charging_power_min numeric, minimum power in kW (default 0), for
 #'   charging and for discharging alike: a responsive session charges at
 #'   `charging_power_min` or more, discharges at `charging_power_min` or more
@@ -78,9 +88,12 @@
 #' * `"capacity"` keeps the site within its grid capacities, discharging only
 #'   to cut import.
 #'
-#' The setpoint does not see `discharge_eff`: a price spread smaller than the
-#' discharge losses can still be planned, and the scheduler charges the losses
-#' back on top.
+#' Under `"cost"` and combined objectives the setpoint counts the discharge
+#' losses (`discharge_eff`): every discharged kWh is charged back as
+#' `1 / discharge_eff` kWh, so a discharge is planned only when the price
+#' spread covers the losses. The `"grid"` and `"capacity"` setpoints, which
+#' discharge only to cut import, do not count them; the scheduler charges the
+#' losses back on top under every objective.
 #'
 #' @return list with setpoints, sessions and demand similar to
 #'   `smart_charging()`. Scheduling is still charging-only while
@@ -256,7 +269,8 @@ smart_v2g <- function(
     lambda,
     energy_min,
     energy_max,
-    soc_min
+    soc_min,
+    discharge_eff
   )
 
   if (show_progress) {
@@ -357,6 +371,8 @@ smart_v2g <- function(
 #'   and 1) of each profile's energy the setpoint must carry, net of discharge.
 #'   See [smart_v2g()].
 #' @param soc_min numeric, SoC floor of the sessions. See [smart_v2g()].
+#' @param discharge_eff numeric, discharge efficiency of the vehicles, counted
+#'   by the cost and combined objectives. See [smart_v2g()].
 #'
 #' @keywords internal
 #'
@@ -368,7 +384,8 @@ get_setpoints_v2g <- function(
   lambda,
   energy_min = 1,
   energy_max = 1,
-  soc_min = 0.2
+  soc_min = 0.2,
+  discharge_eff = 1
 ) {
   # Both ratios are shares of the responsive sessions' own demand `LF`; the
   # non-responsive demand `L_fixed_prof` is added back untouched below.
@@ -501,7 +518,8 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
             energy_ratio = energy_ratio,
-            cumsum_min = cumsum_min
+            cumsum_min = cumsum_min,
+            discharge_eff = discharge_eff
           )
         } else if (opt_objective == "capacity") {
           O <- capacity_v2g_window(
@@ -535,7 +553,8 @@ get_setpoints_v2g <- function(
             lambda = lambda,
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
-            LFmin = discharge_floor
+            LFmin = discharge_floor,
+            discharge_eff = discharge_eff
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -572,7 +591,8 @@ get_setpoints_v2g_parallel <- function(
   lambda,
   energy_min = 1,
   energy_max = 1,
-  soc_min = 0.2
+  soc_min = 0.2,
+  discharge_eff = 1
 ) {
   reset_message_once()
 
@@ -586,7 +606,8 @@ get_setpoints_v2g_parallel <- function(
       lambda = lambda,
       energy_min = energy_min,
       energy_max = energy_max,
-      soc_min = soc_min
+      soc_min = soc_min,
+      discharge_eff = discharge_eff
     )
   )
 }
@@ -1013,6 +1034,10 @@ demand_grid_v2g_window <- function(
 #'   slots, `lambda * sum((O_t - O_{t-1})^2)`, as in `demand_cost_window()`.
 #' @param LFmin numeric vector or `NULL` (default), per-slot floor of the
 #'   optimized load. See `demand_grid_v2g_window()`.
+#' @param discharge_eff numeric, discharge efficiency (0, 1] of the vehicles.
+#'   Below 1, every kWh discharged must be charged back as `1 / discharge_eff`
+#'   kWh, as the scheduler counts it, so a discharge pays only when the price
+#'   spread covers the losses (see `solve_optimization_window_v2g()`).
 #'
 #' @return numeric vector, the optimized load
 #' @keywords internal
@@ -1033,7 +1058,8 @@ demand_cost_v2g_window <- function(
   lambda = 0,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  discharge_eff = 1
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1072,7 +1098,8 @@ demand_cost_v2g_window <- function(
     q,
     energy_ratio,
     cumsum_min,
-    LFmin
+    LFmin,
+    discharge_eff = discharge_eff
   )
 }
 
@@ -1113,7 +1140,8 @@ demand_combined_v2g_window <- function(
   lambda = 0,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  discharge_eff = 1
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1148,7 +1176,8 @@ demand_combined_v2g_window <- function(
     q,
     energy_ratio,
     cumsum_min,
-    LFmin
+    LFmin,
+    discharge_eff = discharge_eff
   )
 }
 
@@ -1187,7 +1216,9 @@ solve_optimization_window_v2g <- function(
   q,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  discharge_eff = 1,
+  discharge_slots = NULL
 ) {
   G <- round(G, 2)
   LF <- round(LF, 2)
@@ -1202,6 +1233,54 @@ solve_optimization_window_v2g <- function(
   # unknown is X = [O, I, E] (and the net discharge `D`, see
   # demand_cost_v2g_window()) instead of the optimized load alone.
   has_grid_flows <- length(q) > time_slots
+
+  # Discharge losses (cost and combined objectives): a kWh discharged to the
+  # grid drains `1 / discharge_eff` kWh from the battery, which the vehicle
+  # must charge back, as the scheduler counts it (schedule_sessions_v2g()).
+  # Counting them with a discharge variable `D >= -O` would let the solver
+  # waste energy (claim losses it does not have) whenever charging more pays,
+  # e.g. to absorb a PV export under the combined objective. Two passes keep
+  # the model convex and exact instead: the first plans without losses and
+  # fixes the slots that discharge; the second weighs the optimized load of
+  # those slots by `1 / discharge_eff` in the energy and departure rows, with
+  # discharge only (and charge only elsewhere), so it may trim a discharge the
+  # losses make not worth it. When the second pass is infeasible the first
+  # plan stands.
+  if (has_grid_flows && discharge_eff < 1 && is.null(discharge_slots)) {
+    solve_pass <- function(discharge_eff, discharge_slots) {
+      solve_optimization_window_v2g(
+        G,
+        LF,
+        LS,
+        direction,
+        time_horizon,
+        LFmax,
+        import_capacity,
+        export_capacity,
+        P,
+        q,
+        energy_ratio,
+        cumsum_min,
+        LFmin,
+        discharge_eff = discharge_eff,
+        discharge_slots = discharge_slots
+      )
+    }
+    O_lossless <- solve_pass(1, NULL)
+    discharging <- O_lossless < 0
+    if (!any(discharging)) {
+      return(O_lossless)
+    }
+    O_losses <- solve_pass(discharge_eff, discharging)
+    if (is.null(O_losses)) {
+      message_once(
+        "\u26A0\uFE0F V2G optimisation warning: the discharge losses do not fit in some windows. Planning them without the losses; the scheduler still charges them back."
+      )
+      return(O_lossless)
+    }
+    return(O_losses)
+  }
+
   if (has_grid_flows) {
     P <- optimization_normalize_quadratic(
       P,
@@ -1280,6 +1359,16 @@ solve_optimization_window_v2g <- function(
       bounds$lb_O <- pmin(bounds$lb_O, LF)
     }
 
+    if (!is.null(discharge_slots)) {
+      # Second pass of the discharge losses (see above): delivered energy is
+      # `O / discharge_eff` in the discharging slots and `O` elsewhere.
+      weight <- ifelse(discharge_slots, 1 / discharge_eff, 1)
+      bounds$Amat_cumsum <- sweep(bounds$Amat_cumsum, 2, weight, `*`)
+      bounds$Amat_energy <- bounds$Amat_energy * matrix(weight, nrow = 1)
+      bounds$ub_O[discharge_slots] <- pmin(bounds$ub_O[discharge_slots], 0)
+      bounds$lb_O[!discharge_slots] <- pmax(bounds$lb_O[!discharge_slots], 0)
+    }
+
     if (has_grid_flows) {
       return(solve_grid_flows_v2g(
         bounds,
@@ -1316,6 +1405,10 @@ solve_optimization_window_v2g <- function(
   O <- solve_with_caps(import_capacity, export_capacity)
   if (demand_highs_is_optimal(O$result)) {
     return(round(O$x[seq_len(time_slots)], 2))
+  }
+  if (!is.null(discharge_slots)) {
+    # Second pass of the discharge losses: no fallbacks, the first pass stands.
+    return(NULL)
   }
 
   # Fallback solves: the original grid limits make the problem infeasible.
@@ -1844,6 +1937,16 @@ schedule_sessions_v2g <- function(
           # If it is negative, it means that we are above min SOC
           # so now we can discharge
           .data$BatteryCapacity * soc_min - .data$EnergyInBattery
+        ),
+        # Both slacks are battery-side: a discharge of `d` kWh to the grid
+        # drains `d / discharge_eff` from the battery and adds as much to the
+        # energy to charge, so the session can discharge only
+        # `slack * discharge_eff` to the grid without missing its deadline or
+        # going below its SoC floor.
+        MinEnergyTimeslot = ifelse(
+          .data$MinEnergyTimeslot < 0,
+          .data$MinEnergyTimeslot * discharge_eff,
+          .data$MinEnergyTimeslot
         ),
         MinPowerTimeslot = pmax(
           # Can be negative (discharging)

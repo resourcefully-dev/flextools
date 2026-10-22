@@ -427,6 +427,13 @@ get_setpoints_v2g <- function(
         )
         LFmax_prof <- envelope$LFmax[opt_idxs]
         cumsum_min <- (envelope$owed - envelope$reserve)[opt_idxs]
+        # The minimum-squared-net-power objectives discharge only to cut
+        # import (see v2g_discharge_floor()).
+        discharge_floor <- v2g_discharge_floor(
+          G = opt_data$production[opt_idxs],
+          LS = LS[opt_idxs],
+          import_capacity = opt_data$import_capacity[opt_idxs]
+        )
 
         if (opt_objective == "grid") {
           O <- demand_grid_v2g_window(
@@ -440,7 +447,8 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
             energy_ratio = energy_ratio,
-            cumsum_min = cumsum_min
+            cumsum_min = cumsum_min,
+            LFmin = discharge_floor
           )
         } else if (opt_objective == "cost") {
           message(
@@ -457,7 +465,8 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
             energy_ratio = energy_ratio,
-            cumsum_min = cumsum_min
+            cumsum_min = cumsum_min,
+            LFmin = discharge_floor
           )
         } else if (opt_objective == "capacity") {
           O <- capacity_v2g_window(
@@ -488,7 +497,8 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
             energy_ratio = energy_ratio,
-            cumsum_min = cumsum_min
+            cumsum_min = cumsum_min,
+            LFmin = discharge_floor
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -733,14 +743,8 @@ smart_v2g_window_parallel <- function(
 #' `demand_grid_v2g_window()` so that discharge is considered when
 #' resolving capacity violations.
 #'
-#' Discharge only serves the capacity objective by cutting import (or by
-#' meeting a negative import capacity): in a slot where the site already
-#' exports, a discharge only adds export. The fleet therefore discharges at
-#' most down to a net power of `min(import_capacity, 0)`, and never in a slot
-#' where the site exports without it. Without this floor the grid LP that
-#' places the shifted energy minimises the squared net power, and trades a
-#' shallow export (discharging into it) for a deeper one (charging there
-#' instead), which raises the export and can push it over `export_capacity`.
+#' The fleet discharges only to cut import (see `v2g_discharge_floor()`),
+#' also in the grid LP that places the shifted energy.
 #'
 #' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
 #'   load's energy the optimized load must carry. See
@@ -780,11 +784,7 @@ capacity_v2g_window <- function(
   )
   tol <- optimization_solution_tolerance()
 
-  # Discharge floor of the optimized load: discharge only as far as it brings
-  # the net power down to `min(import_capacity, 0)`, so 0 in a slot where the
-  # site already exports (G > LS) under a non-negative import capacity. Always
-  # <= 0 <= LF, so the original profile stays a feasible point.
-  discharge_floor <- pmin(G - LS + pmin(import_capacity, 0), 0)
+  discharge_floor <- v2g_discharge_floor(G, LS, import_capacity)
 
   # As in demand_capacity_window(): an energy target below the requirement is a
   # uniform scaling of the whole profile before the slice is chosen, and the
@@ -908,8 +908,9 @@ capacity_v2g_window <- function(
 #'   (default) preserves the energy exactly; a range lets the optimizer drop
 #'   energy - down to `min` - when the grid capacity cannot fit `max`.
 #' @param LFmin numeric vector (or `NULL`, default), per-slot floor of the
-#'   optimized load on top of `-LFmax`. `capacity_v2g_window()` uses it to stop
-#'   the fleet discharging where that only adds export.
+#'   optimized load on top of `-LFmax`. `get_setpoints_v2g()` and
+#'   `capacity_v2g_window()` pass `v2g_discharge_floor()`, so the fleet never
+#'   discharges where that only adds export.
 #'
 #' @keywords internal
 #'
@@ -1156,6 +1157,33 @@ solve_optimization_window_v2g <- function(
     ". No optimisation provided."
   ))
   LF
+}
+
+
+#' Discharge floor of the V2G optimized load
+#'
+#' Discharge only serves to cut import, or to meet a negative import capacity:
+#' in a slot where the site already exports, a discharge only adds export. The
+#' floor lets the fleet discharge at most down to a net power of
+#' `min(import_capacity, 0)`, so not at all in a slot where the site exports
+#' without it (under a non-negative import capacity). Without it the
+#' minimum-squared-net-power LP trades a shallow export for a deeper one
+#' (discharging into the first to charge more in the second), which raises the
+#' export and can push it over `export_capacity`.
+#'
+#' The floor is always `<= 0 <= LF`, so the original profile stays a feasible
+#' point for the fallbacks of `solve_optimization_window_v2g()`.
+#'
+#' @param G,LS,import_capacity numeric vectors, production, static load and
+#'   import capacity of the slots.
+#'
+#' @return numeric vector, the per-slot floor (`<= 0`) of the optimized load.
+#' @keywords internal
+#'
+v2g_discharge_floor <- function(G, LS, import_capacity) {
+  G <- as.numeric(G)
+  import_capacity <- rep_len(as.numeric(import_capacity), length(G))
+  pmin(G - as.numeric(LS) + pmin(import_capacity, 0), 0)
 }
 
 

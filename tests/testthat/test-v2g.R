@@ -558,12 +558,12 @@ test_that("smart_v2g validates energy_min and energy_max", {
     expect_error(run_v2g(energy_max = 0.8), "cannot be higher than `energy_max`")
 })
 
-test_that("capacity v2g never discharges while the site exports", {
+test_that("v2g never discharges while the site exports, whatever the objective", {
     # PV above the 50 kW export capacity around noon, an import capacity that
     # never binds. Discharging at a slot that already exports only adds export,
-    # yet the grid LP placing the energy (minimum squared net power) used to
-    # discharge in the shallow export of the morning to charge in the deeper
-    # export at noon.
+    # yet the LP placing the energy (minimum squared net power, also behind the
+    # capacity, cost and combined objectives) used to discharge in the shallow
+    # export of the morning to charge in the deeper export at noon.
     dttm <- seq(
         as.POSIXct("2025-03-03 06:00", tz = "UTC"),
         as.POSIXct("2025-03-04 05:45", tz = "UTC"),
@@ -581,7 +581,9 @@ test_that("capacity v2g never discharges while the site exports", {
         static = 30,
         production = round(pv, 2),
         import_capacity = 200,
-        export_capacity = 50
+        export_capacity = 50,
+        price_imported = 1,
+        price_exported = 0
     )
     session <- function(id, start, hours, energy) {
         tibble(
@@ -605,39 +607,44 @@ test_that("capacity v2g never discharges while the site exports", {
         session(4, 15, 12, 40)
     )
 
-    results <- suppressMessages(suppressWarnings(smart_v2g(
-        sessions_pv,
-        opt_data_pv,
-        opt_objective = "capacity",
-        window_days = 1,
-        window_start_hour = 6,
-        soc_min = 0.2
-    )))
+    for (objective in list("capacity", "grid", "cost", 0.5)) {
+        results <- suppressMessages(suppressWarnings(smart_v2g(
+            sessions_pv,
+            opt_data_pv,
+            opt_objective = objective,
+            window_days = 1,
+            window_start_hour = 6,
+            soc_min = 0.2
+        )))
 
-    uncontrolled <- evsim::get_demand(
-        evsim::adapt_charging_features(sessions_pv, time_resolution = 15),
-        dttm_seq = dttm
-    )$Fleet
-    fleet <- results$demand$Fleet
-    net_without_fleet <- opt_data_pv$static - opt_data_pv$production
-    exporting <- net_without_fleet < 0
+        uncontrolled <- evsim::get_demand(
+            evsim::adapt_charging_features(sessions_pv, time_resolution = 15),
+            dttm_seq = dttm
+        )$Fleet
+        fleet <- results$demand$Fleet
+        net_without_fleet <- opt_data_pv$static - opt_data_pv$production
+        exporting <- net_without_fleet < 0
 
-    # Neither the setpoint nor the scheduled fleet discharges while exporting.
-    expect_true(all(results$setpoints$Fleet[exporting] >= -0.05))
-    expect_true(all(fleet[exporting] >= -0.05))
-    # The export breaches are never worse than with uncontrolled charging.
-    export_cap <- opt_data_pv$export_capacity
-    expect_lte(
-        sum(net_without_fleet + fleet < -export_cap - 0.05),
-        sum(net_without_fleet + uncontrolled < -export_cap - 0.05)
-    )
-    # Every session still gets its energy.
-    delivered <- results$sessions %>%
-        group_by(Session) %>%
-        summarise(Energy = sum(Energy))
-    expect_equal(
-        delivered$Energy[match(sessions_pv$Session, delivered$Session)],
-        sessions_pv$Energy,
-        tolerance = 0.05
-    )
+        # Neither the setpoint nor the fleet discharges while exporting.
+        expect_true(
+            all(results$setpoints$Fleet[exporting] >= -0.05),
+            info = format(objective)
+        )
+        expect_true(all(fleet[exporting] >= -0.05), info = format(objective))
+        # The export breaches are never worse than with uncontrolled charging.
+        export_cap <- opt_data_pv$export_capacity
+        expect_lte(
+            sum(net_without_fleet + fleet < -export_cap - 0.05),
+            sum(net_without_fleet + uncontrolled < -export_cap - 0.05)
+        )
+        # Every session still gets its energy.
+        delivered <- results$sessions %>%
+            group_by(Session) %>%
+            summarise(Energy = sum(Energy))
+        expect_equal(
+            delivered$Energy[match(sessions_pv$Session, delivered$Session)],
+            sessions_pv$Energy,
+            tolerance = 0.05
+        )
+    }
 })

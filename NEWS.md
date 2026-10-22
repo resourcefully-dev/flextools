@@ -1,3 +1,16 @@
+# flextools 1.13.1
+
+* `smart_v2g(opt_objective = "capacity")` no longer discharges a vehicle in a
+  slot where the site already exports. The setpoint places the shifted energy
+  by minimising the squared net power, which traded a shallow export for a
+  deeper one: it discharged into the morning's PV surplus to charge more at
+  noon, adding export and, next to an export limit, export above
+  `export_capacity`. Under the capacity objective the fleet now discharges
+  only to cut import, down to a net power of 0 (or to a negative
+  `import_capacity`, which asks the site to export), so its export breaches
+  are never worse than those of uncontrolled charging. The `"grid"`
+  objective is unchanged.
+
 # flextools 1.13.0
 
 * **Breaking:** `charging_power_min` is now always a power in kW, in

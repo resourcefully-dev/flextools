@@ -733,6 +733,15 @@ smart_v2g_window_parallel <- function(
 #' `demand_grid_v2g_window()` so that discharge is considered when
 #' resolving capacity violations.
 #'
+#' Discharge only serves the capacity objective by cutting import (or by
+#' meeting a negative import capacity): in a slot where the site already
+#' exports, a discharge only adds export. The fleet therefore discharges at
+#' most down to a net power of `min(import_capacity, 0)`, and never in a slot
+#' where the site exports without it. Without this floor the grid LP that
+#' places the shifted energy minimises the squared net power, and trades a
+#' shallow export (discharging into it) for a deeper one (charging there
+#' instead), which raises the export and can push it over `export_capacity`.
+#'
 #' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
 #'   load's energy the optimized load must carry. See
 #'   `demand_capacity_window()`.
@@ -770,6 +779,12 @@ capacity_v2g_window <- function(
     time_slots
   )
   tol <- optimization_solution_tolerance()
+
+  # Discharge floor of the optimized load: discharge only as far as it brings
+  # the net power down to `min(import_capacity, 0)`, so 0 in a slot where the
+  # site already exports (G > LS) under a non-negative import capacity. Always
+  # <= 0 <= LF, so the original profile stays a feasible point.
+  discharge_floor <- pmin(G - LS + pmin(import_capacity, 0), 0)
 
   # As in demand_capacity_window(): an energy target below the requirement is a
   # uniform scaling of the whole profile before the slice is chosen, and the
@@ -837,7 +852,8 @@ capacity_v2g_window <- function(
         export_capacity = export_cap_relaxed,
         lambda = lambda,
         energy_ratio = fallback_ratio,
-        cumsum_min = cumsum_min
+        cumsum_min = cumsum_min,
+        LFmin = discharge_floor
       )
     )
   }
@@ -877,7 +893,8 @@ capacity_v2g_window <- function(
       NULL
     } else {
       rep_len(as.numeric(cumsum_min), time_slots) - cumsum(fixed_load)
-    }
+    },
+    LFmin = discharge_floor - fixed_load
   )
 
   round(fixed_load + as.numeric(optimized_slice), 2)
@@ -890,6 +907,9 @@ capacity_v2g_window <- function(
 #'   load's energy the optimized load must carry (net of discharge). `c(1, 1)`
 #'   (default) preserves the energy exactly; a range lets the optimizer drop
 #'   energy - down to `min` - when the grid capacity cannot fit `max`.
+#' @param LFmin numeric vector (or `NULL`, default), per-slot floor of the
+#'   optimized load on top of `-LFmax`. `capacity_v2g_window()` uses it to stop
+#'   the fleet discharging where that only adds export.
 #'
 #' @keywords internal
 #'
@@ -904,7 +924,8 @@ demand_grid_v2g_window <- function(
   export_capacity,
   lambda = 0,
   energy_ratio = c(1, 1),
-  cumsum_min = NULL
+  cumsum_min = NULL,
+  LFmin = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -924,7 +945,8 @@ demand_grid_v2g_window <- function(
     P,
     q,
     energy_ratio,
-    cumsum_min
+    cumsum_min,
+    LFmin
   )
 }
 
@@ -941,7 +963,8 @@ solve_optimization_window_v2g <- function(
   P,
   q,
   energy_ratio = c(1, 1),
-  cumsum_min = NULL
+  cumsum_min = NULL,
+  LFmin = NULL
 ) {
   G <- round(G, 2)
   LF <- round(LF, 2)
@@ -981,7 +1004,8 @@ solve_optimization_window_v2g <- function(
       LFmax,
       import_capacity,
       export_capacity,
-      cumsum_min
+      cumsum_min,
+      LFmin
     )
     reward <- demand_energy_reward(
       P,
@@ -1009,7 +1033,8 @@ solve_optimization_window_v2g <- function(
       LFmax,
       import_cap,
       export_cap,
-      cumsum_min
+      cumsum_min,
+      LFmin
     )
 
     # Minimal-relaxation retry: guarantee the original profile O = LF is a
@@ -1144,7 +1169,8 @@ get_bounds_v2g <- function(
   LFmax,
   import_capacity,
   export_capacity,
-  cumsum_min = NULL
+  cumsum_min = NULL,
+  LFmin = NULL
 ) {
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
@@ -1154,6 +1180,11 @@ get_bounds_v2g <- function(
   # time_slots^2 and silently corrupt every downstream bound.
   LFmax_vct <- rep_len(LFmax, time_slots)
   LFmin_vct <- -LFmax_vct
+  # An extra per-slot floor on the optimized load (see capacity_v2g_window()),
+  # never above the nominal-power ceiling.
+  if (!is.null(LFmin)) {
+    LFmin_vct <- pmax(LFmin_vct, pmin(rep_len(LFmin, time_slots), LFmax_vct))
+  }
 
   lb_O <- round(pmax(G - LS - export_capacity, LFmin_vct), 2)
   ub_O <- round(pmin(G - LS + import_capacity, LFmax_vct), 2)

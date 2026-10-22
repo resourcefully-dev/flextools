@@ -28,4 +28,14 @@ Mirrors \code{demand_capacity_window()} but falls back to
 \code{demand_grid_v2g_window()} so that discharge is considered when
 resolving capacity violations.
 }
+\details{
+Discharge only serves the capacity objective by cutting import (or by
+meeting a negative import capacity): in a slot where the site already
+exports, a discharge only adds export. The fleet therefore discharges at
+most down to a net power of \code{min(import_capacity, 0)}, and never in a slot
+where the site exports without it. Without this floor the grid LP that
+places the shifted energy minimises the squared net power, and trades a
+shallow export (discharging into it) for a deeper one (charging there
+instead), which raises the export and can push it over \code{export_capacity}.
+}
 \keyword{internal}

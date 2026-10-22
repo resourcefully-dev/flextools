@@ -15,7 +15,8 @@ demand_grid_v2g_window(
   export_capacity,
   lambda = 0,
   energy_ratio = c(1, 1),
-  cumsum_min = NULL
+  cumsum_min = NULL,
+  LFmin = NULL
 )
 }
 \arguments{
@@ -23,6 +24,10 @@ demand_grid_v2g_window(
 load's energy the optimized load must carry (net of discharge). \code{c(1, 1)}
 (default) preserves the energy exactly; a range lets the optimizer drop
 energy - down to \code{min} - when the grid capacity cannot fit \code{max}.}
+
+\item{LFmin}{numeric vector (or \code{NULL}, default), per-slot floor of the
+optimized load on top of \code{-LFmax}. \code{capacity_v2g_window()} uses it to stop
+the fleet discharging where that only adds export.}
 }
 \description{
 Minimisation of net power with bidirectional flexibility (single window)

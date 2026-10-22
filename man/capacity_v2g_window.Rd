@@ -28,4 +28,8 @@ Mirrors \code{demand_capacity_window()} but falls back to
 \code{demand_grid_v2g_window()} so that discharge is considered when
 resolving capacity violations.
 }
+\details{
+The fleet discharges only to cut import (see \code{v2g_discharge_floor()}),
+also in the grid LP that places the shifted energy.
+}
 \keyword{internal}

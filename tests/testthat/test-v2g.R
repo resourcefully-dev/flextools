@@ -311,82 +311,388 @@ test_that("capacity_v2g_window relaxes minimally when a window is infeasible", {
     expect_false(isTRUE(all.equal(as.numeric(O), LF)))
 })
 
-test_that("cost objective currently reuses grid objective in v2g", {
-    opt_data_prices <- opt_data %>%
-        mutate(
-            price_imported = 1,
-            price_exported = 0
-        )
-
-    grid_results <- smart_v2g(
-        sessions = sessions,
-        opt_data_prices,
-        opt_objective = "grid",
-        window_days = 1,
-        window_start_hour = 0
+# A night-and-evening case for the price objectives: three vehicles plug in
+# from 17:00 with a high arrival SoC (so they can discharge more than the
+# site's evening load), the import price is cheap at night (0.10, 00:00-07:00)
+# and expensive in the evening (0.40, 17:00-21:00), 0.25 otherwise.
+v2g_price_case <- function(price_exported = NULL) {
+    dttm <- seq(
+        as.POSIXct("2025-03-03 12:00", tz = "UTC"),
+        as.POSIXct("2025-03-04 11:45", tz = "UTC"),
+        by = "15 min"
     )
+    h <- as.numeric(format(dttm, "%H")) + as.numeric(format(dttm, "%M")) / 60
+    evening <- h >= 17 & h < 21
+    night <- h < 7
+    price_imported <- ifelse(night, 0.10, ifelse(evening, 0.40, 0.25))
+    opt_data <- tibble(
+        datetime = dttm,
+        static = ifelse(evening, 4, 2),
+        production = 0,
+        import_capacity = 30,
+        export_capacity = 20,
+        price_imported = price_imported,
+        price_exported = if (is.null(price_exported)) {
+            price_imported
+        } else {
+            price_exported
+        }
+    )
+    session <- function(id, start, hours, energy, soc) {
+        tibble(
+            Session = paste0("S", id),
+            Timecycle = "Workday",
+            Profile = "Fleet",
+            ConnectionStartDateTime = as.POSIXct(
+                "2025-03-03 00:00",
+                tz = "UTC"
+            ) +
+                start * 3600,
+            ConnectionHours = hours,
+            Power = 11,
+            Energy = energy,
+            StateOfCharge = soc
+        )
+    }
+    sessions <- bind_rows(
+        session(1, 17, 14, 15, 0.7),
+        session(2, 17.5, 14, 15, 0.7),
+        session(3, 18, 13.5, 20, 0.6)
+    )
+    uncontrolled <- evsim::get_demand(
+        evsim::adapt_charging_features(sessions, time_resolution = 15),
+        dttm_seq = dttm
+    )$Fleet
+    list(
+        opt_data = opt_data,
+        sessions = sessions,
+        evening = evening,
+        night = night,
+        uncontrolled = uncontrolled
+    )
+}
 
+run_v2g_price_case <- function(case, objective, ...) {
+    suppressMessages(suppressWarnings(smart_v2g(
+        case$sessions,
+        case$opt_data,
+        opt_objective = objective,
+        window_days = 1,
+        window_start_hour = 12,
+        soc_min = 0.2,
+        ...
+    )))
+}
+
+# Energy cost of the site, sum(import * PI - export * PE), for a fleet load
+v2g_energy_cost <- function(case, fleet) {
+    net <- case$opt_data$static - case$opt_data$production + fleet
+    sum(
+        pmax(net, 0) * case$opt_data$price_imported -
+            pmax(-net, 0) * case$opt_data$price_exported
+    ) *
+        0.25
+}
+
+expect_v2g_sessions_energy <- function(case, results) {
+    delivered <- results$sessions %>%
+        group_by(Session) %>%
+        summarise(Energy = sum(Energy))
+    expect_equal(
+        delivered$Energy[match(case$sessions$Session, delivered$Session)],
+        case$sessions$Energy,
+        tolerance = 0.05
+    )
+}
+
+expect_v2g_breaches_not_worse <- function(case, fleet) {
+    net_without_fleet <- case$opt_data$static - case$opt_data$production
+    breaches <- function(load) {
+        net <- net_without_fleet + load
+        sum(
+            net > case$opt_data$import_capacity + 0.05 |
+                net < -case$opt_data$export_capacity - 0.05
+        )
+    }
+    expect_lte(breaches(fleet), breaches(case$uncontrolled))
+}
+
+test_that("cost v2g charges in the cheap slots, discharges in the expensive ones and costs less than grid", {
+    case <- v2g_price_case()
+    grid_results <- run_v2g_price_case(case, "grid")
     cost_results <- NULL
-    expect_message(
+    # No "not yet implemented" message any more.
+    expect_no_message(
         cost_results <- smart_v2g(
-            sessions = sessions,
-            opt_data_prices,
+            case$sessions,
+            case$opt_data,
             opt_objective = "cost",
             window_days = 1,
-            window_start_hour = 0
-        ),
-        "reusing grid objective"
+            window_start_hour = 12,
+            soc_min = 0.2
+        )
+    )
+    fleet <- cost_results$demand$Fleet
+
+    # Charges in the cheap night, discharges in the expensive evening.
+    expect_true(all(fleet[case$evening] <= 0.05))
+    expect_lt(sum(fleet[case$evening]), -10)
+    charged <- sum(pmax(fleet, 0))
+    expect_gt(sum(pmax(fleet[case$night], 0)), 0.95 * charged)
+
+    # Cheaper than the grid objective (and than uncontrolled charging).
+    cost_cost <- v2g_energy_cost(case, fleet)
+    cost_grid <- v2g_energy_cost(case, grid_results$demand$Fleet)
+    expect_lt(cost_cost, cost_grid)
+    expect_lt(cost_grid, v2g_energy_cost(case, case$uncontrolled))
+    # The setpoint is the cheapest of the two plans as well.
+    expect_lt(
+        v2g_energy_cost(case, cost_results$setpoints$Fleet),
+        v2g_energy_cost(case, grid_results$setpoints$Fleet)
     )
 
-    expect_equal(
-        cost_results$setpoints$Worktime,
-        grid_results$setpoints$Worktime,
-        tolerance = 1e-6
+    # Every session gets its energy, within the grid capacities.
+    expect_v2g_sessions_energy(case, cost_results)
+    expect_v2g_breaches_not_worse(case, fleet)
+    net <- case$opt_data$static + fleet
+    expect_true(all(net <= case$opt_data$import_capacity + 0.05))
+    expect_true(all(net >= -case$opt_data$export_capacity - 0.05))
+})
+
+test_that("cost v2g discharges into export only when the export price pays", {
+    # Export price equal to the import price (net metering): exporting at
+    # 0.40 in the evening and charging back at 0.10 at night pays, so the
+    # fleet discharges beyond the site's own load. The discharge floor of the
+    # grid objective would forbid it, and would cost more.
+    netting <- v2g_price_case()
+    results <- run_v2g_price_case(netting, "cost")
+    net <- netting$opt_data$static + results$demand$Fleet
+    expect_lt(min(net[netting$evening]), -1)
+    expect_true(all(net >= -netting$opt_data$export_capacity - 0.05))
+    grid_results <- run_v2g_price_case(netting, "grid")
+    expect_true(all(
+        (netting$opt_data$static + grid_results$demand$Fleet) >= -0.05
+    ))
+
+    # A flat export price of 0.07, below the cheapest import price: exporting
+    # never pays for the energy charged back, so the fleet discharges only to
+    # cut import and the site never exports.
+    flat <- v2g_price_case(price_exported = 0.07)
+    results <- run_v2g_price_case(flat, "cost")
+    net <- flat$opt_data$static + results$demand$Fleet
+    expect_true(all(net >= -0.05))
+    expect_lt(sum(results$demand$Fleet[flat$evening]), -10)
+    expect_v2g_sessions_energy(flat, results)
+
+    # An export price above the import price in every slot: the binary grid
+    # mode keeps the site from importing and exporting at once, and the
+    # export capacity still binds.
+    high <- v2g_price_case(price_exported = 1.5 * v2g_price_case()$opt_data$price_imported)
+    results <- run_v2g_price_case(high, "cost")
+    net <- high$opt_data$static + results$demand$Fleet
+    expect_true(all(net >= -high$opt_data$export_capacity - 0.05))
+    expect_true(all(net <= high$opt_data$import_capacity + 0.05))
+    expect_v2g_sessions_energy(high, results)
+})
+
+test_that("combined v2g blends grid and cost, with the pure objectives at its ends", {
+    # As in smart_charging(): a weight of 1 minimises the net power ("grid"),
+    # a weight of 0 the energy cost ("cost").
+    case <- v2g_price_case()
+    grid_results <- run_v2g_price_case(case, "grid")
+    cost_results <- run_v2g_price_case(case, "cost")
+    expect_equal(run_v2g_price_case(case, 1), grid_results)
+    expect_equal(run_v2g_price_case(case, 0), cost_results)
+
+    combined_results <- NULL
+    expect_no_message(
+        combined_results <- smart_v2g(
+            case$sessions,
+            case$opt_data,
+            opt_objective = 0.5,
+            window_days = 1,
+            window_start_hour = 12,
+            soc_min = 0.2
+        )
     )
+    expect_v2g_sessions_energy(case, combined_results)
+    expect_v2g_breaches_not_worse(case, combined_results$demand$Fleet)
+
+    # The blend lies between its ends: it costs no less than "cost" and no
+    # more than "grid", and its net power is no flatter than "grid"'s.
+    setpoint_cost <- function(results) {
+        v2g_energy_cost(case, results$setpoints$Fleet)
+    }
+    squared_net <- function(results) {
+        sum((case$opt_data$static + results$setpoints$Fleet)^2)
+    }
+    expect_lte(setpoint_cost(cost_results), setpoint_cost(combined_results) + 1e-3)
+    expect_lte(setpoint_cost(combined_results), setpoint_cost(grid_results) + 1e-3)
+    expect_lt(setpoint_cost(combined_results), setpoint_cost(grid_results))
+    expect_gte(squared_net(combined_results), squared_net(grid_results) - 1e-3)
+
+    # Its window at w = 1 is the grid window.
+    LF <- case$uncontrolled
+    LS <- case$opt_data$static
+    G <- case$opt_data$production
+    PI <- case$opt_data$price_imported
+    floor <- v2g_discharge_floor(G, LS, 30)
     expect_equal(
-        cost_results$demand$Worktime,
-        grid_results$demand$Worktime,
-        tolerance = 1e-6
+        demand_combined_v2g_window(
+            G, LF, LS, PI, PI, 0, 0, "forward", NULL, 33, 30, 20,
+            w = 1, LFmin = floor
+        ),
+        demand_grid_v2g_window(
+            G, LF, LS, "forward", NULL, 33, 30, 20,
+            LFmin = floor
+        ),
+        tolerance = 0.02
     )
 })
 
-test_that("combined objective currently reuses grid objective in v2g", {
-    opt_data_prices <- opt_data %>%
-        mutate(
-            price_imported = 1,
-            price_exported = 0
+test_that("cost v2g with a ramping penalty and an energy range keeps its constraints", {
+    case <- v2g_price_case()
+    for (args in list(list(lambda = 0.1), list(energy_min = 0.8))) {
+        results <- do.call(run_v2g_price_case, c(list(case, "cost"), args))
+        fleet <- results$demand$Fleet
+        net <- case$opt_data$static + fleet
+        expect_true(all(net <= case$opt_data$import_capacity + 0.05))
+        expect_true(all(net >= -case$opt_data$export_capacity - 0.05))
+        expect_lt(
+            v2g_energy_cost(case, fleet),
+            v2g_energy_cost(case, run_v2g_price_case(case, "grid")$demand$Fleet)
         )
+        delivered <- results$sessions %>%
+            group_by(Session) %>%
+            summarise(Energy = sum(Energy))
+        expect_true(all(
+            delivered$Energy[match(case$sessions$Session, delivered$Session)] >=
+                (args$energy_min %||% 1) * case$sessions$Energy - 0.05
+        ))
+    }
+})
 
-    grid_results <- smart_v2g(
-        sessions = sessions,
-        opt_data_prices,
-        opt_objective = "grid",
-        window_days = 1,
-        window_start_hour = 0
+test_that("cost v2g discharges into export only when the spread covers the discharge losses", {
+    # A flat export price of 0.15 against a night import price of 0.10: the
+    # round trip pays with no losses or with discharge_eff = 0.8 (0.12 > 0.10),
+    # but not with discharge_eff = 0.6 (0.09 < 0.10), where the setpoint no
+    # longer plans any export.
+    case <- v2g_price_case(price_exported = 0.15)
+    setpoint_export <- function(results) {
+        sum(pmax(-(case$opt_data$static + results$setpoints$Fleet), 0))
+    }
+    battery_gain <- function(results, eff) {
+        results$sessions %>%
+            group_by(Session) %>%
+            summarise(
+                Gain = sum(pmax(Energy, 0)) + sum(pmin(Energy, 0)) / eff
+            ) %>%
+            arrange(match(Session, case$sessions$Session)) %>%
+            pull(Gain)
+    }
+    exports <- c()
+    for (eff in c(1, 0.8, 0.6)) {
+        for (objective in list("cost", 0.5)) {
+            results <- run_v2g_price_case(case, objective, discharge_eff = eff)
+            if (identical(objective, "cost")) {
+                exports[as.character(eff)] <- setpoint_export(results)
+            }
+            # Every session charges its energy back, losses included.
+            expect_equal(
+                battery_gain(results, eff),
+                case$sessions$Energy,
+                tolerance = 0.05,
+                info = paste(objective, eff)
+            )
+            expect_v2g_breaches_not_worse(case, results$demand$Fleet)
+        }
+    }
+    expect_gt(exports[["1"]], 10)
+    expect_gt(exports[["0.8"]], 10)
+    expect_lt(exports[["0.8"]], exports[["1"]])
+    expect_equal(exports[["0.6"]], 0, tolerance = 0.05)
+})
+
+test_that("the v2g scheduler keeps the deadline and the SoC floor with discharge losses", {
+    # One 11 kW session that needs 22 kWh in 4 hours, and a setpoint that
+    # discharges as much as it can for 1.5 hours. Discharging d kWh to the grid
+    # costs d / discharge_eff kWh of battery and of energy to charge, so the
+    # scheduler must size the discharge it allows by discharge_eff, or the
+    # session leaves short (19.25 kWh at discharge_eff = 0.5).
+    dttm <- seq(
+        as.POSIXct("2025-03-03 00:00", tz = "UTC"),
+        by = "15 min",
+        length.out = 16
     )
+    session <- tibble(
+        Session = "S1",
+        Timecycle = "Workday",
+        Profile = "Fleet",
+        ConnectionStartDateTime = dttm[1],
+        ConnectionHours = 4,
+        Power = 11,
+        Energy = 22,
+        StateOfCharge = 0.5
+    ) %>%
+        evsim::adapt_charging_features(time_resolution = 15) %>%
+        mutate(Responsive = TRUE)
+    setpoint <- tibble(
+        datetime = dttm,
+        setpoint = c(rep(-11, 6), rep(11, 10))
+    )
+    battery_capacity <- 22 / (1 - 0.5)
 
-    combined_results <- NULL
-    expect_message(
-        combined_results <- smart_v2g(
+    for (eff in c(1, 0.8, 0.5)) {
+        for (soc_min in c(0, 0.45)) {
+            results <- schedule_sessions_v2g(
+                session,
+                setpoint,
+                discharge_eff = eff,
+                soc_min = soc_min
+            )
+            energy <- results$sessions$Energy
+            charged <- pmax(energy, 0)
+            discharged <- pmin(energy, 0)
+            # The battery gains its energy, net of the discharge losses.
+            expect_equal(
+                sum(charged) + sum(discharged) / eff,
+                22,
+                tolerance = 0.02,
+                info = paste(eff, soc_min)
+            )
+            # It discharged, and never below its SoC floor.
+            expect_lt(sum(discharged), 0)
+            battery <- 0.5 * battery_capacity +
+                cumsum(charged + discharged / eff)
+            expect_true(
+                all(battery >= soc_min * battery_capacity - 0.02),
+                info = paste(eff, soc_min)
+            )
+        }
+    }
+})
+
+test_that("cost and combined v2g approach a negative import capacity", {
+    opt_data_prices <- opt_data %>%
+        mutate(price_imported = 1, price_exported = 0)
+    for (objective in list("cost", 0.5)) {
+        v2g_results <- suppressMessages(smart_v2g(
             sessions = sessions,
             opt_data_prices,
-            opt_objective = 0.5,
+            opt_objective = objective,
             window_days = 1,
             window_start_hour = 0
-        ),
-        "reusing grid objective"
-    )
-
-    expect_equal(
-        combined_results$setpoints$Worktime,
-        grid_results$setpoints$Worktime,
-        tolerance = 1e-6
-    )
-    expect_equal(
-        combined_results$demand$Worktime,
-        grid_results$demand$Worktime,
-        tolerance = 1e-6
-    )
+        ))
+        expect_true(all(
+            v2g_results$setpoints$Worktime <=
+                pmax(opt_data$import_capacity, -connected_power) + 1e-2
+        ))
+        expect_true(all(
+            v2g_results$setpoints$Worktime >= -connected_power - 1e-2
+        ))
+        neg_idx <- which(opt_data$import_capacity < 0)
+        expect_true(any(v2g_results$demand$Worktime[neg_idx] < 0))
+    }
 })
 
 test_that("energy_max caps the energy charged in v2g, fleet and per session", {
@@ -562,8 +868,10 @@ test_that("v2g never discharges while the site exports, whatever the objective",
     # PV above the 50 kW export capacity around noon, an import capacity that
     # never binds. Discharging at a slot that already exports only adds export,
     # yet the LP placing the energy (minimum squared net power, also behind the
-    # capacity, cost and combined objectives) used to discharge in the shallow
-    # export of the morning to charge in the deeper export at noon.
+    # capacity and combined objectives) used to discharge in the shallow
+    # export of the morning to charge in the deeper export at noon. The cost
+    # objective has no discharge floor, but with an export price of 0 a
+    # discharge into export never pays.
     dttm <- seq(
         as.POSIXct("2025-03-03 06:00", tz = "UTC"),
         as.POSIXct("2025-03-04 05:45", tz = "UTC"),

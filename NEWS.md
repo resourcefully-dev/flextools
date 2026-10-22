@@ -1,3 +1,56 @@
+# flextools 1.14.0
+
+* `smart_v2g(opt_objective = "cost")` now minimises the energy cost of the
+  site, `sum(import * price_imported - export * price_exported)` (plus the
+  turn-up and turn-down prices, as in `smart_charging()`), with charge and
+  discharge. Until now it reused the `"grid"` objective with the message
+  "Cost-based optimisation is not yet implemented for V2G". The fleet charges
+  in the cheap slots and discharges in the expensive ones, within the same
+  constraints as `"grid"`: the power of the connected vehicles, their
+  departure deadlines and SoC floor, `energy_min`/`energy_max`, and the import
+  and export capacities, with the same fallbacks when they cannot all be met.
+  As in `smart_charging()`, the site never imports and exports in the same
+  slot.
+* Under `"cost"` the fleet may discharge into export, which 1.13.1 forbade
+  for every objective: it does when the export price pays for the energy
+  charged back later (an evening export price above the night's import
+  price), and never when the export earns nothing (a tiny tie-break price on
+  the discharge and the export makes it cut import first). With a fleet that
+  can discharge more than the site's evening load and an export price equal
+  to the import price, this lowers the energy cost of the test case from
+  13.97 to -0.90; with an export price below every import price the fleet
+  still only cuts import. `"grid"`, `"capacity"` and combined objectives keep
+  the discharge floor of 1.13.1.
+* Under `"cost"` and combined objectives the setpoint counts the discharge
+  losses: every kWh discharged is charged back as `1 / discharge_eff` kWh, as
+  the scheduler counts it, so the fleet discharges only when the price spread
+  covers the losses. With a flat export price of 0.15 against a night import
+  price of 0.10, the cost setpoint exports at `discharge_eff = 0.8`
+  (0.15 x 0.8 > 0.10) and not at 0.6. The setpoint plans without the losses
+  first, then re-solves with them in the slots that discharge, which keeps
+  the problem convex without letting the solver invent losses to charge more
+  energy. The `"grid"` and `"capacity"` setpoints are unchanged.
+* Fix: with `discharge_eff` below 1, the V2G scheduler let a session
+  discharge as much as its energy deadline and SoC floor allowed in grid-side
+  kWh, but every kWh discharged costs `1 / discharge_eff` kWh of battery and
+  of energy to charge back. A session that discharged up to that limit left
+  short of its energy (19.25 of 22 kWh at `discharge_eff = 0.5`) or went
+  below its SoC floor. The allowed discharge is now scaled by
+  `discharge_eff`.
+* `discharge_eff` is documented as the round-trip efficiency (grid -> battery
+  -> grid): the sessions' `Energy` is grid-side, as metered at the charge
+  point, so it already includes the charging losses, which is why there is no
+  `charge_eff`.
+* A numeric `opt_objective` (`w` between 0 and 1) now blends the two
+  objectives in `smart_v2g()` as in `smart_charging()`: `w` weighs the squared
+  net power (normalised by the squared mean import price) and `1 - w` the
+  cost. `w = 1` gives the `"grid"` results and `w = 0` the `"cost"` results.
+  It used to reuse the `"grid"` objective with the message "Combined
+  optimisation is not yet implemented for V2G".
+* Under `"cost"` and combined objectives, `lambda` penalises the change of
+  the setpoint between slots, as in `smart_charging()`; under `"grid"` it
+  still penalises the deviation from the original profile.
+
 # flextools 1.13.1
 
 * `smart_v2g()` no longer discharges a vehicle in a slot where the site

@@ -104,9 +104,19 @@ discharge (energy discharged, grossed up by \code{discharge_eff}, has to be
 charged back on top), and the setpoint optimization targets this share for
 the responsive sessions. Must be higher than 0 and at least \code{energy_min}.}
 
-\item{discharge_eff}{numeric, discharge efficiency (0, 1], applied to energy
-losses when discharging. For example, 0.9 means that for every 1 kWh
-discharged, 1/0.9 kWh must be recharged.}
+\item{discharge_eff}{numeric, efficiency (0, 1] of a discharge, counted as
+the round trip grid -> battery -> grid. For every kWh a session discharges
+to the grid, its battery loses \code{1 / discharge_eff} kWh, which it charges
+back from the grid before it leaves (0.9: 1.11 kWh). The sessions'
+\code{Energy} and \code{Power} are grid-side, as metered at the charge point, so
+they already include the charging losses of a normal charge, and there is
+no \code{charge_eff}. The losses of charging back the discharged energy are not
+separate either: pass the round-trip efficiency (about 0.9 for 95\% each
+way) to count them, which also makes the SoC floor slightly conservative,
+because the battery bookkeeping counts grid-side kWh. The scheduler sizes
+each discharge so the session still meets its energy deadline and its SoC
+floor after the losses, and the \code{"cost"} and combined setpoints plan a
+discharge only when the price spread covers them.}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
@@ -148,4 +158,30 @@ are connected, within their nominal power in both directions (and
 departure: the cumulative flexible load never drops below the \code{energy_min}
 share of the energy of the sessions that have left, minus what the connected
 sessions can still discharge down to \code{soc_min}.
+
+The \code{opt_objective} shapes that plan as in \code{smart_charging()}:
+\itemize{
+\item \code{"grid"} minimises the squared net power of the site. The fleet
+discharges only to cut import (or to meet a negative \code{import_capacity}),
+never into a slot where the site already exports.
+\item \code{"cost"} minimises the energy cost of the site, \code{sum(import * price_imported - export * price_exported)} (plus the turn-up and
+turn-down prices, as in \code{smart_charging()}). The fleet charges in the
+cheap slots and discharges in the expensive ones, also into export when
+the export price pays for the energy charged back later (an evening export
+price above the night's import price); it never discharges into export
+that earns nothing. The import and export capacities still bind.
+\item A number \code{w} between 0 and 1 blends the two: \code{w} weighs the squared net
+power and \code{1 - w} the cost, as in \code{smart_charging()}. \code{w = 1} is \code{"grid"}
+and \code{w = 0} is \code{"cost"}; in between the fleet discharges only to cut
+import, as under \code{"grid"}.
+\item \code{"capacity"} keeps the site within its grid capacities, discharging only
+to cut import.
+}
+
+Under \code{"cost"} and combined objectives the setpoint counts the discharge
+losses (\code{discharge_eff}): every discharged kWh is charged back as
+\code{1 / discharge_eff} kWh, so a discharge is planned only when the price
+spread covers the losses. The \code{"grid"} and \code{"capacity"} setpoints, which
+discharge only to cut import, do not count them; the scheduler charges the
+losses back on top under every objective.
 }

@@ -60,6 +60,28 @@
 #' share of the energy of the sessions that have left, minus what the connected
 #' sessions can still discharge down to `soc_min`.
 #'
+#' The `opt_objective` shapes that plan as in `smart_charging()`:
+#' * `"grid"` minimises the squared net power of the site. The fleet
+#'   discharges only to cut import (or to meet a negative `import_capacity`),
+#'   never into a slot where the site already exports.
+#' * `"cost"` minimises the energy cost of the site, `sum(import *
+#'   price_imported - export * price_exported)` (plus the turn-up and
+#'   turn-down prices, as in `smart_charging()`). The fleet charges in the
+#'   cheap slots and discharges in the expensive ones, also into export when
+#'   the export price pays for the energy charged back later (an evening export
+#'   price above the night's import price); it never discharges into export
+#'   that earns nothing. The import and export capacities still bind.
+#' * A number `w` between 0 and 1 blends the two: `w` weighs the squared net
+#'   power and `1 - w` the cost, as in `smart_charging()`. `w = 1` is `"grid"`
+#'   and `w = 0` is `"cost"`; in between the fleet discharges only to cut
+#'   import, as under `"grid"`.
+#' * `"capacity"` keeps the site within its grid capacities, discharging only
+#'   to cut import.
+#'
+#' The setpoint does not see `discharge_eff`: a price spread smaller than the
+#' discharge losses can still be planned, and the scheduler charges the losses
+#' back on top.
+#'
 #' @return list with setpoints, sessions and demand similar to
 #'   `smart_charging()`. Scheduling is still charging-only while
 #'   the V2G-specific session logic is under development.
@@ -355,6 +377,16 @@ get_setpoints_v2g <- function(
     return(sessions_window)
   }
 
+  # As in optimize_demand(): the end weights of a combined objective are the
+  # pure objectives (`w = 1` minimises the net power, `w = 0` the cost).
+  if (is.numeric(opt_objective)) {
+    if (opt_objective <= 0) {
+      opt_objective <- "cost"
+    } else if (opt_objective >= 1) {
+      opt_objective <- "grid"
+    }
+  }
+
   dttm_seq <- opt_data$datetime
 
   if ("static" %in% colnames(opt_data)) {
@@ -427,8 +459,8 @@ get_setpoints_v2g <- function(
         )
         LFmax_prof <- envelope$LFmax[opt_idxs]
         cumsum_min <- (envelope$owed - envelope$reserve)[opt_idxs]
-        # The minimum-squared-net-power objectives discharge only to cut
-        # import (see v2g_discharge_floor()).
+        # The objectives with a squared-net-power term (grid, combined and
+        # capacity) discharge only to cut import (see v2g_discharge_floor()).
         discharge_floor <- v2g_discharge_floor(
           G = opt_data$production[opt_idxs],
           LS = LS[opt_idxs],
@@ -451,13 +483,17 @@ get_setpoints_v2g <- function(
             LFmin = discharge_floor
           )
         } else if (opt_objective == "cost") {
-          message(
-            "Cost-based optimisation is not yet implemented for V2G; reusing grid objective."
-          )
-          O <- demand_grid_v2g_window(
+          # No discharge floor: the cost LP discharges into export only when
+          # the export price pays for the energy charged back later (see
+          # demand_cost_v2g_window()).
+          O <- demand_cost_v2g_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
+            PI = opt_data$price_imported[opt_idxs],
+            PE = opt_data$price_exported[opt_idxs],
+            PTD = opt_data$price_turn_down[opt_idxs],
+            PTU = opt_data$price_turn_up[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
             LFmax = LFmax_prof,
@@ -465,8 +501,7 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
             energy_ratio = energy_ratio,
-            cumsum_min = cumsum_min,
-            LFmin = discharge_floor
+            cumsum_min = cumsum_min
           )
         } else if (opt_objective == "capacity") {
           O <- capacity_v2g_window(
@@ -483,18 +518,20 @@ get_setpoints_v2g <- function(
             cumsum_min = cumsum_min
           )
         } else if (is.numeric(opt_objective)) {
-          message(
-            "Combined optimisation is not yet implemented for V2G; reusing grid objective."
-          )
-          O <- demand_grid_v2g_window(
+          O <- demand_combined_v2g_window(
             G = opt_data$production[opt_idxs],
             LF = LF[opt_idxs],
             LS = LS[opt_idxs],
+            PI = opt_data$price_imported[opt_idxs],
+            PE = opt_data$price_exported[opt_idxs],
+            PTD = opt_data$price_turn_down[opt_idxs],
+            PTU = opt_data$price_turn_up[opt_idxs],
             direction = "forward",
             time_horizon = NULL,
             LFmax = LFmax_prof,
             import_capacity = opt_data$import_capacity[opt_idxs],
             export_capacity = opt_data$export_capacity[opt_idxs],
+            w = opt_objective,
             lambda = lambda,
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
@@ -908,9 +945,10 @@ capacity_v2g_window <- function(
 #'   (default) preserves the energy exactly; a range lets the optimizer drop
 #'   energy - down to `min` - when the grid capacity cannot fit `max`.
 #' @param LFmin numeric vector (or `NULL`, default), per-slot floor of the
-#'   optimized load on top of `-LFmax`. `get_setpoints_v2g()` and
-#'   `capacity_v2g_window()` pass `v2g_discharge_floor()`, so the fleet never
-#'   discharges where that only adds export.
+#'   optimized load on top of `-LFmax`. `get_setpoints_v2g()` (for the grid
+#'   and combined objectives) and `capacity_v2g_window()` pass
+#'   `v2g_discharge_floor()`, so the fleet never discharges where that only
+#'   adds export.
 #'
 #' @keywords internal
 #'
@@ -952,6 +990,190 @@ demand_grid_v2g_window <- function(
 }
 
 
+#' Minimisation of the energy cost with bidirectional flexibility (single
+#' window)
+#'
+#' The V2G counterpart of `demand_cost_window()`: the optimized load `O` may be
+#' negative (discharge), within the same bounds as `demand_grid_v2g_window()`
+#' (`get_bounds_v2g()`), and the site's import `I` and export `E` are priced
+#' at `PI` and `PE`. A binary grid mode keeps the site from importing and
+#' exporting in the same slot (when `lambda = 0`; otherwise the problem is a
+#' QP with the export price clipped to the import price, as in
+#' `demand_cost_window()`).
+#'
+#' No discharge floor (`v2g_discharge_floor()`) applies by default: the fleet
+#' discharges into export when the export price pays for the energy charged
+#' back later, which is the economic case of V2G. A fourth block of variables,
+#' the fleet's net discharge `D >= max(-O, 0)`, carries a tiny cost so that a
+#' discharge that earns nothing (a tie, e.g. discharging into a flat export
+#' price to charge in another exporting slot) is never chosen.
+#'
+#' @inheritParams demand_cost_window
+#' @param lambda numeric, penalty on the change of the optimized load between
+#'   slots, `lambda * sum((O_t - O_{t-1})^2)`, as in `demand_cost_window()`.
+#' @param LFmin numeric vector or `NULL` (default), per-slot floor of the
+#'   optimized load. See `demand_grid_v2g_window()`.
+#'
+#' @return numeric vector, the optimized load
+#' @keywords internal
+#'
+demand_cost_v2g_window <- function(
+  G,
+  LF,
+  LS,
+  PI,
+  PE,
+  PTD,
+  PTU,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  lambda = 0,
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL,
+  LFmin = NULL
+) {
+  time_slots <- length(LF)
+  PI <- rep_len(as.numeric(PI), time_slots)
+  PE <- rep_len(as.numeric(PE), time_slots)
+  PTD <- rep_len(as.numeric(PTD), time_slots)
+  PTU <- rep_len(as.numeric(PTU), time_slots)
+
+  # Unknown variable: X = [O, I, E, D]
+  # As in demand_cost_window(), the quadratic term penalizes ramping, with a
+  # tiny diagonal term that makes it positive definite for OSQP.
+  P <- matrix(0, 4 * time_slots, 4 * time_slots)
+  P[seq_len(time_slots), seq_len(time_slots)] <- 2 *
+    lambda *
+    (get_lambda_matrix(time_slots) + 1e-6 * diag(time_slots))
+  # The tie-break price goes on the discharge and on the export: a discharge
+  # that earns nothing is not made, and one that earns as much by cutting
+  # import as by exporting cuts import.
+  tiebreak <- v2g_discharge_tiebreak(c(PI, PE, PTD, PTU))
+  q <- c(
+    PTD - PTU,
+    PI,
+    -PE + tiebreak,
+    rep(tiebreak, time_slots)
+  )
+
+  solve_optimization_window_v2g(
+    G,
+    LF,
+    LS,
+    direction,
+    time_horizon,
+    LFmax,
+    import_capacity,
+    export_capacity,
+    P,
+    q,
+    energy_ratio,
+    cumsum_min,
+    LFmin
+  )
+}
+
+
+#' Combined optimisation with bidirectional flexibility (single window)
+#'
+#' Blends `demand_grid_v2g_window()` and `demand_cost_v2g_window()` as
+#' `demand_combined_window()` blends the one-way objectives: `w` weighs the
+#' squared net power (normalised by the squared mean import price) and `1 - w`
+#' the energy cost. `w = 1` minimises the net power and `w = 0` the cost;
+#' `get_setpoints_v2g()` routes those end weights to the pure objectives. The
+#' problem is a QP (export price clipped to the import price), and
+#' `get_setpoints_v2g()` passes the discharge floor of the grid objective,
+#' because the squared net-power term trades a shallow export for a deeper one
+#' (see `v2g_discharge_floor()`).
+#'
+#' @inheritParams demand_cost_v2g_window
+#' @param w numeric, optimization objective weight (`w = 1` minimizes net
+#'   power while `w = 0` minimizes cost).
+#'
+#' @return numeric vector, the optimized load
+#' @keywords internal
+#'
+demand_combined_v2g_window <- function(
+  G,
+  LF,
+  LS,
+  PI,
+  PE,
+  PTD,
+  PTU,
+  direction,
+  time_horizon,
+  LFmax,
+  import_capacity,
+  export_capacity,
+  w,
+  lambda = 0,
+  energy_ratio = c(1, 1),
+  cumsum_min = NULL,
+  LFmin = NULL
+) {
+  time_slots <- length(LF)
+  PI <- rep_len(as.numeric(PI), time_slots)
+  PE <- rep_len(as.numeric(PE), time_slots)
+  PTD <- rep_len(as.numeric(PTD), time_slots)
+  PTU <- rep_len(as.numeric(PTU), time_slots)
+  scale <- mean(PI)^2
+
+  # Unknown variable: X = [O, I, E]
+  # Grid term normalized by the squared mean import price, ramping penalty as
+  # in demand_combined_window().
+  P <- matrix(0, 3 * time_slots, 3 * time_slots)
+  P[seq_len(time_slots), seq_len(time_slots)] <-
+    2 * w * scale * diag(time_slots) +
+    2 * lambda * get_lambda_matrix(time_slots)
+  q <- c(
+    (1 - w) * (PTD - PTU) - 2 * w * scale * (round(G, 2) - round(LS, 2)),
+    (1 - w) * PI,
+    -(1 - w) * PE
+  )
+
+  solve_optimization_window_v2g(
+    G,
+    LF,
+    LS,
+    direction,
+    time_horizon,
+    LFmax,
+    import_capacity,
+    export_capacity,
+    P,
+    q,
+    energy_ratio,
+    cumsum_min,
+    LFmin
+  )
+}
+
+
+#' Cost of a unit of V2G discharge that breaks ties
+#'
+#' A linear cost objective is indifferent between many profiles: with a flat
+#' export price, discharging in one exporting slot to charge in another earns
+#' exactly nothing. `demand_cost_v2g_window()` charges the fleet's net
+#' discharge this tiny price, 1e-4 of the largest absolute price (1e-4 when
+#' every price is 0), so such round trips are never chosen, while a discharge
+#' that earns more than that still is.
+#'
+#' @param prices numeric vector, the prices of the window.
+#'
+#' @return numeric scalar
+#' @keywords internal
+#'
+v2g_discharge_tiebreak <- function(prices) {
+  prices <- abs(prices[is.finite(prices)])
+  largest <- max(c(prices, 0))
+  1e-4 * if (largest > 0) largest else 1
+}
+
+
 solve_optimization_window_v2g <- function(
   G,
   LF,
@@ -974,6 +1196,17 @@ solve_optimization_window_v2g <- function(
   time_slots <- length(G)
   if (is.null(time_horizon)) {
     time_horizon <- time_slots
+  }
+
+  # `q` longer than the window: the cost and combined objectives, whose
+  # unknown is X = [O, I, E] (and the net discharge `D`, see
+  # demand_cost_v2g_window()) instead of the optimized load alone.
+  has_grid_flows <- length(q) > time_slots
+  if (has_grid_flows) {
+    P <- optimization_normalize_quadratic(
+      P,
+      problem_name = "V2G optimisation"
+    )
   }
 
   # Energy the optimized load must carry: by default exactly the profile's own
@@ -1014,7 +1247,7 @@ solve_optimization_window_v2g <- function(
       envelope = max(abs(base_bounds$ub_O[is.finite(base_bounds$ub_O)]), 0) +
         max(abs(LS - G))
     )
-    q <- q - reward
+    q[seq_len(time_slots)] <- q[seq_len(time_slots)] - reward
   }
 
   solve_with_caps <- function(
@@ -1047,6 +1280,18 @@ solve_optimization_window_v2g <- function(
       bounds$lb_O <- pmin(bounds$lb_O, LF)
     }
 
+    if (has_grid_flows) {
+      return(solve_grid_flows_v2g(
+        bounds,
+        G,
+        LS,
+        P,
+        q,
+        energy_floor,
+        energy_ceiling
+      ))
+    }
+
     constraint_mats <- list(
       bounds$Amat_O,
       bounds$Amat_cumsum,
@@ -1070,7 +1315,7 @@ solve_optimization_window_v2g <- function(
   # First solve: keep the original grid limits.
   O <- solve_with_caps(import_capacity, export_capacity)
   if (demand_highs_is_optimal(O$result)) {
-    return(round(O$x, 2))
+    return(round(O$x[seq_len(time_slots)], 2))
   }
 
   # Fallback solves: the original grid limits make the problem infeasible.
@@ -1116,7 +1361,7 @@ solve_optimization_window_v2g <- function(
         message_once(
           "\u26A0\uFE0F V2G optimisation warning: the connected vehicles cannot reach the grid capacity in some slots. Approaching it as far as their power allows."
         )
-        return(round(O$x, 2))
+        return(round(O$x[seq_len(time_slots)], 2))
       }
     }
   }
@@ -1135,7 +1380,7 @@ solve_optimization_window_v2g <- function(
     )
     O <- relax_to(LF_min, sum(LF_min))
     if (demand_highs_is_optimal(O$result)) {
-      return(round(O$x, 2))
+      return(round(O$x[seq_len(time_slots)], 2))
     }
   }
 
@@ -1145,7 +1390,7 @@ solve_optimization_window_v2g <- function(
   )
   O <- relax_to(LF, LF_energy)
   if (demand_highs_is_optimal(O$result)) {
-    return(round(O$x, 2))
+    return(round(O$x[seq_len(time_slots)], 2))
   }
 
   # Unreachable for well-formed inputs: the relaxation above is feasible by
@@ -1160,10 +1405,130 @@ solve_optimization_window_v2g <- function(
 }
 
 
+#' Solve a V2G window priced on its grid flows
+#'
+#' Builds the problem of `demand_cost_v2g_window()` and
+#' `demand_combined_v2g_window()` on the bounds of `get_bounds_v2g()`. The
+#' unknown is `X = [O, I, E]`, or `[O, I, E, D]` with the net discharge `D`:
+#' the optimized load keeps the box, departure and energy rows of the grid
+#' objective, and the site balance `O - I + E = G - LS` ties it to the import
+#' and the export. Their upper bounds follow from the box of `O` (which already
+#' carries the grid capacities, also negative ones), so the original-profile
+#' fallbacks of `solve_optimization_window_v2g()` stay feasible by
+#' construction: `I` and `E` are the profile's own net flows and
+#' `D = max(-O, 0)`. Solved as in `demand_solve_window()`: a MILP with a binary
+#' grid mode (no import and export in the same slot) when the objective is
+#' linear, otherwise a QP with the export price clipped to the import price.
+#'
+#' @param bounds list, output of `get_bounds_v2g()`.
+#' @param G,LS numeric vectors, production and static load.
+#' @param P numeric matrix or `NULL`, normalised quadratic term.
+#' @param q numeric vector, linear term.
+#' @param energy_floor,energy_ceiling numeric, energy range of the window.
+#'
+#' @return list with `result` (its `status_message`) and `x`
+#' @keywords internal
+#'
+solve_grid_flows_v2g <- function(
+  bounds,
+  G,
+  LS,
+  P,
+  q,
+  energy_floor,
+  energy_ceiling
+) {
+  time_slots <- length(G)
+  n_blocks <- length(q) %/% time_slots
+  has_discharge <- n_blocks == 4
+  identityMat <- diag(time_slots)
+  zeroMat <- identityMat * 0
+  row_block <- function(O, I = O * 0, E = O * 0, D = O * 0) {
+    if (has_discharge) cbind(O, I, E, D) else cbind(O, I, E)
+  }
+
+  # The tightest grid flows the optimized-load box admits (its bounds already
+  # carry the grid capacities).
+  import_mode_ub <- round(pmax(bounds$ub_O + LS - G, 0), 2)
+  export_mode_ub <- round(pmax(G - LS - bounds$lb_O, 0), 2)
+
+  A <- rbind(
+    row_block(identityMat),
+    row_block(zeroMat, I = identityMat),
+    row_block(zeroMat, E = identityMat),
+    # Site balance: O - I + E = G - LS
+    row_block(identityMat, I = -identityMat, E = identityMat),
+    row_block(bounds$Amat_cumsum),
+    row_block(bounds$Amat_energy)
+  )
+  lb <- c(
+    bounds$lb_O,
+    rep(0, time_slots),
+    rep(0, time_slots),
+    G - LS,
+    # The departure deadlines never ask for more than the energy row.
+    pmin(bounds$lb_cumsum, energy_floor),
+    energy_floor
+  )
+  ub <- c(
+    bounds$ub_O,
+    import_mode_ub,
+    export_mode_ub,
+    G - LS,
+    bounds$ub_cumsum,
+    energy_ceiling
+  )
+  if (has_discharge) {
+    # Net discharge: 0 <= D <= max(-lb_O, 0) and D + O >= 0.
+    A <- rbind(
+      A,
+      row_block(zeroMat, D = identityMat),
+      row_block(identityMat, D = identityMat)
+    )
+    lb <- c(lb, rep(0, time_slots), rep(0, time_slots))
+    ub <- c(ub, round(pmax(-bounds$lb_O, 0), 2), rep(Inf, time_slots))
+  }
+
+  lb <- round(as.numeric(lb), 2)
+  ub <- round(as.numeric(ub), 2)
+  if (any(lb > ub)) {
+    # An empty box (e.g. a negative import capacity the connected vehicles
+    # cannot reach): infeasible, as OSQP reports for the grid objective, so
+    # the caller moves on to its fallbacks without a HiGHS warning.
+    return(list(result = list(status_message = "Infeasible"), x = NULL))
+  }
+
+  solver_data <- list(
+    time_slots = time_slots,
+    n_variables = n_blocks * time_slots,
+    optimized_idx = seq_len(time_slots),
+    import_idx = time_slots + seq_len(time_slots),
+    export_idx = 2 * time_slots + seq_len(time_slots),
+    grid_mode_idx = n_blocks * time_slots + seq_len(time_slots),
+    A = A,
+    P = P,
+    q = q,
+    has_grid_flows = TRUE
+  )
+  solve_window_problem <- demand_select_window_solver(solver_data)
+  solve_window_problem(
+    solver_data,
+    list(
+      lb = lb,
+      ub = ub,
+      import_mode_ub = import_mode_ub,
+      export_mode_ub = export_mode_ub
+    )
+  )
+}
+
+
 #' Discharge floor of the V2G optimized load
 #'
-#' Discharge only serves to cut import, or to meet a negative import capacity:
-#' in a slot where the site already exports, a discharge only adds export. The
+#' Under the objectives with a squared net-power term (`"grid"`, combined and
+#' `"capacity"`), discharge only serves to cut import, or to meet a negative
+#' import capacity: in a slot where the site already exports, a discharge only
+#' adds export. The
 #' floor lets the fleet discharge at most down to a net power of
 #' `min(import_capacity, 0)`, so not at all in a slot where the site exports
 #' without it (under a non-negative import capacity). Without it the
@@ -1173,6 +1538,10 @@ solve_optimization_window_v2g <- function(
 #'
 #' The floor is always `<= 0 <= LF`, so the original profile stays a feasible
 #' point for the fallbacks of `solve_optimization_window_v2g()`.
+#'
+#' The `"cost"` objective has no floor: there, discharging into export earns
+#' the export price, and the fleet does it when that pays for the energy
+#' charged back later (see `demand_cost_v2g_window()`).
 #'
 #' @param G,LS,import_capacity numeric vectors, production, static load and
 #'   import capacity of the slots.

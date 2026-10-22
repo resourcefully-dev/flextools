@@ -148,4 +148,27 @@ are connected, within their nominal power in both directions (and
 departure: the cumulative flexible load never drops below the \code{energy_min}
 share of the energy of the sessions that have left, minus what the connected
 sessions can still discharge down to \code{soc_min}.
+
+The \code{opt_objective} shapes that plan as in \code{smart_charging()}:
+\itemize{
+\item \code{"grid"} minimises the squared net power of the site. The fleet
+discharges only to cut import (or to meet a negative \code{import_capacity}),
+never into a slot where the site already exports.
+\item \code{"cost"} minimises the energy cost of the site, \code{sum(import * price_imported - export * price_exported)} (plus the turn-up and
+turn-down prices, as in \code{smart_charging()}). The fleet charges in the
+cheap slots and discharges in the expensive ones, also into export when
+the export price pays for the energy charged back later (an evening export
+price above the night's import price); it never discharges into export
+that earns nothing. The import and export capacities still bind.
+\item A number \code{w} between 0 and 1 blends the two: \code{w} weighs the squared net
+power and \code{1 - w} the cost, as in \code{smart_charging()}. \code{w = 1} is \code{"grid"}
+and \code{w = 0} is \code{"cost"}; in between the fleet discharges only to cut
+import, as under \code{"grid"}.
+\item \code{"capacity"} keeps the site within its grid capacities, discharging only
+to cut import.
+}
+
+The setpoint does not see \code{discharge_eff}: a price spread smaller than the
+discharge losses can still be planned, and the scheduler charges the losses
+back on top.
 }

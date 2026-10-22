@@ -1,3 +1,36 @@
+# flextools 1.14.0
+
+* `smart_v2g(opt_objective = "cost")` now minimises the energy cost of the
+  site, `sum(import * price_imported - export * price_exported)` (plus the
+  turn-up and turn-down prices, as in `smart_charging()`), with charge and
+  discharge. Until now it reused the `"grid"` objective with the message
+  "Cost-based optimisation is not yet implemented for V2G". The fleet charges
+  in the cheap slots and discharges in the expensive ones, within the same
+  constraints as `"grid"`: the power of the connected vehicles, their
+  departure deadlines and SoC floor, `energy_min`/`energy_max`, and the import
+  and export capacities, with the same fallbacks when they cannot all be met.
+  As in `smart_charging()`, the site never imports and exports in the same
+  slot.
+* Under `"cost"` the fleet may discharge into export, which 1.13.1 forbade
+  for every objective: it does when the export price pays for the energy
+  charged back later (an evening export price above the night's import
+  price), and never when the export earns nothing (a tiny tie-break price on
+  the discharge and the export makes it cut import first). With a fleet that
+  can discharge more than the site's evening load and an export price equal
+  to the import price, this lowers the energy cost of the test case from
+  13.97 to -0.90; with an export price below every import price the fleet
+  still only cuts import. `"grid"`, `"capacity"` and combined objectives keep
+  the discharge floor of 1.13.1.
+* A numeric `opt_objective` (`w` between 0 and 1) now blends the two
+  objectives in `smart_v2g()` as in `smart_charging()`: `w` weighs the squared
+  net power (normalised by the squared mean import price) and `1 - w` the
+  cost. `w = 1` gives the `"grid"` results and `w = 0` the `"cost"` results.
+  It used to reuse the `"grid"` objective with the message "Combined
+  optimisation is not yet implemented for V2G".
+* Under `"cost"` and combined objectives, `lambda` penalises the change of
+  the setpoint between slots, as in `smart_charging()`; under `"grid"` it
+  still penalises the deviation from the original profile.
+
 # flextools 1.13.1
 
 * `smart_v2g()` no longer discharges a vehicle in a slot where the site

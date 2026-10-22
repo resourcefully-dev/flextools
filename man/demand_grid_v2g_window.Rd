@@ -26,9 +26,10 @@ load's energy the optimized load must carry (net of discharge). \code{c(1, 1)}
 energy - down to \code{min} - when the grid capacity cannot fit \code{max}.}
 
 \item{LFmin}{numeric vector (or \code{NULL}, default), per-slot floor of the
-optimized load on top of \code{-LFmax}. \code{get_setpoints_v2g()} and
-\code{capacity_v2g_window()} pass \code{v2g_discharge_floor()}, so the fleet never
-discharges where that only adds export.}
+optimized load on top of \code{-LFmax}. \code{get_setpoints_v2g()} (for the grid
+and combined objectives) and \code{capacity_v2g_window()} pass
+\code{v2g_discharge_floor()}, so the fleet never discharges where that only
+adds export.}
 }
 \description{
 Minimisation of net power with bidirectional flexibility (single window)

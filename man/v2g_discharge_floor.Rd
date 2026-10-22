@@ -14,8 +14,10 @@ import capacity of the slots.}
 numeric vector, the per-slot floor (\verb{<= 0}) of the optimized load.
 }
 \description{
-Discharge only serves to cut import, or to meet a negative import capacity:
-in a slot where the site already exports, a discharge only adds export. The
+Under the objectives with a squared net-power term (\code{"grid"}, combined and
+\code{"capacity"}), discharge only serves to cut import, or to meet a negative
+import capacity: in a slot where the site already exports, a discharge only
+adds export. The
 floor lets the fleet discharge at most down to a net power of
 \code{min(import_capacity, 0)}, so not at all in a slot where the site exports
 without it (under a non-negative import capacity). Without it the
@@ -26,5 +28,9 @@ export and can push it over \code{export_capacity}.
 \details{
 The floor is always \verb{<= 0 <= LF}, so the original profile stays a feasible
 point for the fallbacks of \code{solve_optimization_window_v2g()}.
+
+The \code{"cost"} objective has no floor: there, discharging into export earns
+the export price, and the fleet does it when that pays for the energy
+charged back later (see \code{demand_cost_v2g_window()}).
 }
 \keyword{internal}

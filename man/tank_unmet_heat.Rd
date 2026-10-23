@@ -31,9 +31,10 @@ decimals
 }
 \description{
 Per slot, the heat that would have been required to keep the tank at least
-at its comfort floor: the heat it gives from below the floor, plus the heat
-demand it cannot serve at all once it is at the inlet temperature
-(level 0). Standing losses below the floor are not counted, and neither is
-a slot whose gap is within half a rounding step of the power.
+at its comfort floor: the heat it gives from below the floor, to the demand
+or to its standing loss, plus the heat demand it cannot serve at all once it
+is at the inlet temperature (level 0). A gap within half a rounding step of
+the power is carried to the next slots, where the level climbing back
+cancels it, and counted once the gaps add up beyond that step.
 }
 \keyword{internal}

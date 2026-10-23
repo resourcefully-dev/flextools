@@ -93,6 +93,31 @@ test_that("one tank: heat and electricity add up and the level stays in the band
 
 })
 
+test_that("the optimised level never goes above the top of the band", {
+  # A small lossy tank with a high COP, held at its top with no demand: the
+  # loss asks for less than a rounding step of power per slot, and a 0.01 kW
+  # step is 0.0175 kWh of heat at COP 7, so a rounding to the nearest step
+  # overshoots the top. Without the loss, the demand does the same.
+  for (loss in c(0, 1)) {
+    d <- tank_data(
+      days = 2,
+      resolution = 15,
+      heat_demand = if (loss > 0) 0 else 0.13,
+      cop = 7,
+      cheap_hours = c(0:5, 12:15)
+    )
+    P <- add_tank_optimization(
+      d, "cost", Tcap = 2.33, Pc = 4, SOCmin = 50, SOCmax = 100, loss = loss
+    )
+    path <- tank_path(P, d, init = 2.33, loss = loss, resolution = 15)
+    expect_lte(max(path), 2.33 + 1e-9)
+    level <- get_tank_level(
+      P, d$heat_demand, d$cop, init = 2.33, loss = loss, time_resolution = 15
+    )
+    expect_lte(max(level), 2.33)
+  }
+})
+
 test_that("the compressor cap binds", {
   d <- tank_data()
   P1 <- add_tank_optimization(d, "cost", Tcap = 30, Pc = 1, SOCini = 0)

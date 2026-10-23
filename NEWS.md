@@ -13,6 +13,17 @@
   below its floor is still 0, and so is a level wiggling by a rounding step
   around it.
 
+* Fix: `add_tank_optimization()` could leave the level above `SOCmax`. The
+  compressor power is rounded to the nearest 0.01 kW, which moves the level
+  by up to half a step of heat, 0.005 x COP x the slot length: 0.0075 kWh at
+  COP 6 and 15 minutes, 0.3 % of a 2.33 kWh tank. Where the solver planned
+  the level at the top, that rounding went above it. A lossy tank, held at
+  its top by a few Wh per slot, sits there the longest. The solver now keeps
+  that half step free below the top (except where the level cannot get down
+  to it yet, which needs no rounding), and the rounding rounds down where the
+  nearest step would still go above the top, so the optimised level stays
+  within `[0, SOCmax]`.
+
 # flextools 1.14.0
 
 * `smart_v2g(opt_objective = "cost")` now minimises the energy cost of the

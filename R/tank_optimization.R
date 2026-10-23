@@ -175,10 +175,11 @@ tank_heat_price <- function(L, G, cop, Pc, Pb, objective, lambda, price, scale) 
 #' Unmet heat of a schedule
 #'
 #' Per slot, the heat that would have been required to keep the tank at least
-#' at its comfort floor: the heat it gives from below the floor, plus the heat
-#' demand it cannot serve at all once it is at the inlet temperature
-#' (level 0). Standing losses below the floor are not counted, and neither is
-#' a slot whose gap is within half a rounding step of the power.
+#' at its comfort floor: the heat it gives from below the floor, to the demand
+#' or to its standing loss, plus the heat demand it cannot serve at all once it
+#' is at the inlet temperature (level 0). A gap within half a rounding step of
+#' the power is carried to the next slots, where the level climbing back
+#' cancels it, and counted once the gaps add up beyond that step.
 #'
 #' @inheritParams tank_level_path
 #' @param Smin numeric, comfort floor (kWh)
@@ -201,14 +202,21 @@ tank_unmet_heat <- function(
 ) {
   n <- length(power)
   unmet <- numeric(n)
+  # Heat given from below the floor and not counted yet: a gap within a
+  # rounding step waits here, and the level climbing back takes it back, so a
+  # rounding wiggle counts nothing while a slow drain (a standing loss of a
+  # few Wh per slot) adds up
+  pending <- 0
   s <- init
   for (t in seq_len(n)) {
-    base <- k * s
-    s_raw <- base + (cop[t] * power[t] + backup[t] - heat_demand[t]) * dt
-    # Below the floor, and below the inlet temperature (not served at all)
-    gap <- max(min(Smin, base) - s_raw, 0)
-    if (gap > tol) {
-      unmet[t] <- gap / dt
+    s_raw <- k * s + (cop[t] * power[t] + backup[t] - heat_demand[t]) * dt
+    # Below the floor, and below the inlet temperature (not served at all).
+    # The standing loss below the floor is heat the tank gives too.
+    pending <- max(pending + min(Smin, s) - min(Smin, s_raw), 0)
+    if (pending > tol) {
+      # Down to 2 decimals, the rest carried, so the slots add up
+      unmet[t] <- floor(pending / dt * 100 + 1e-9) / 100
+      pending <- max(pending - unmet[t] * dt, 0)
     }
     s <- if (s_raw < -tol) 0 else s_raw
   }
@@ -1368,14 +1376,17 @@ get_tank_level <- function(
 #' and `S~[t] = k * S[t-1] + (cop[t] * power[t] + backup[t] -
 #' heat_demand[t]) * dt` the level the balance asks for:
 #'
-#' `unmet[t] * dt = max(0, min(Smin, k * S[t-1]) - S~[t])`
+#' `unmet[t] * dt = max(0, min(Smin, S[t-1]) - min(Smin, S~[t]))`
 #'
-#' that is the heat the tank gives from below its comfort floor, plus the
-#' demand it cannot serve at all at the inlet temperature. It is positive
-#' while the level falls below the floor, and 0 while the level stays at or
-#' above it or rises back towards it; standing losses below the floor are not
-#' counted, and neither is a slot whose gap is within half a rounding step of
-#' the power (`0.005 * max(cop, 1) * dt` kWh).
+#' that is the heat the tank gives from below its comfort floor, to the demand
+#' or to its standing loss, plus the demand it cannot serve at all at the inlet
+#' temperature. It is positive while the level falls below the floor, and 0
+#' while the level stays at or above it or rises back towards it. A gap within
+#' half a rounding step of the power (`0.005 * max(cop, 1) * dt` kWh) is
+#' carried over: the level climbing back cancels it, and it counts in the
+#' slot where the gaps carried add up beyond that step. So a standing loss of
+#' a few Wh per slot that drains the tank below its floor is unmet heat, while
+#' the level wiggling by a rounding step around the floor is not.
 #'
 #' @inheritParams get_tank_level
 #' @param Tcap numeric, tank capacity (kWh thermal, > 0), as in

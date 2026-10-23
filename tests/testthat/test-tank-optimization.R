@@ -631,6 +631,50 @@ test_that("`get_tank_unmet_heat()` is the attribute of an optimised run", {
   }
 })
 
+test_that("`get_tank_unmet_heat()` counts the standing loss below the floor", {
+  # A schedule that serves the demand exactly but ignores the loss: the level
+  # drains from the top, through the floor, to the inlet temperature. The
+  # heat the tank gives from below its floor is the floor itself, lost a few
+  # thousandths of a kWh per slot, each below a rounding step of the power.
+  n <- 96 * 14
+  P <- rep(0.5 / 3, n)
+  args <- list(
+    power = P, heat_demand = 0.5, cop = 3, init = 2.33, loss = 1,
+    time_resolution = 15
+  )
+  level <- do.call(get_tank_level, args)
+  expect_gt(sum(level < 2.33 * 0.5), 0)
+  unmet <- do.call(
+    get_tank_unmet_heat,
+    c(args, list(Tcap = 2.33, SOCmin = 50))
+  )
+  expect_gt(sum(unmet), 0)
+  floor_kwh <- 2.33 * 0.5
+  end_kwh <- tank_level_path(P, rep(0.5, n), rep(3, n), 2.33, 0.99^0.25, 0.25)[n + 1]
+  expect_equal(sum(unmet) * 0.25, floor_kwh - end_kwh, tolerance = 0.01)
+  # Only slots below the floor count, never above it
+  expect_true(all(level[which(unmet > 0)] < floor_kwh + 0.01))
+
+  # The loss alone, with no demand and the compressor off
+  unmet <- get_tank_unmet_heat(
+    rep(0, n), 0, 3, init = 2.33, Tcap = 2.33, SOCmin = 50, loss = 1,
+    time_resolution = 15
+  )
+  expect_equal(
+    sum(unmet) * 0.25,
+    floor_kwh - 2.33 * 0.99^(n / 4),
+    tolerance = 0.01
+  )
+  # A tank that never goes below its floor has no unmet heat
+  expect_equal(
+    get_tank_unmet_heat(
+      rep(0.5 / 3, 96), 0.5, 3, init = 2.33, Tcap = 2.33, SOCmin = 50,
+      loss = 1, time_resolution = 15
+    ),
+    rep(0, 96)
+  )
+})
+
 test_that("`get_tank_unmet_heat()` follows its definition and validates its inputs", {
   # A 3 kWh tank with its floor at 1 kWh, emptied by 2 kW for 2 hours: the
   # first hour ends at the floor, the second needs 2 kWh more to stay there

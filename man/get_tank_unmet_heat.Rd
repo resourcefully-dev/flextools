@@ -56,14 +56,17 @@ inlet temperature), \code{Smin = Tcap * SOCmin / 100}, \code{k = (1 - loss/100)^
 and \verb{S~[t] = k * S[t-1] + (cop[t] * power[t] + backup[t] - heat_demand[t]) * dt} the level the balance asks for:
 }
 \details{
-\verb{unmet[t] * dt = max(0, min(Smin, k * S[t-1]) - S~[t])}
+\verb{unmet[t] * dt = max(0, min(Smin, S[t-1]) - min(Smin, S~[t]))}
 
-that is the heat the tank gives from below its comfort floor, plus the
-demand it cannot serve at all at the inlet temperature. It is positive
-while the level falls below the floor, and 0 while the level stays at or
-above it or rises back towards it; standing losses below the floor are not
-counted, and neither is a slot whose gap is within half a rounding step of
-the power (\code{0.005 * max(cop, 1) * dt} kWh).
+that is the heat the tank gives from below its comfort floor, to the demand
+or to its standing loss, plus the demand it cannot serve at all at the inlet
+temperature. It is positive while the level falls below the floor, and 0
+while the level stays at or above it or rises back towards it. A gap within
+half a rounding step of the power (\code{0.005 * max(cop, 1) * dt} kWh) is
+carried over: the level climbing back cancels it, and it counts in the
+slot where the gaps carried add up beyond that step. So a standing loss of
+a few Wh per slot that drains the tank below its floor is unmet heat, while
+the level wiggling by a rounding step around the floor is not.
 }
 \examples{
 # A 3 kWh tank with its floor at 1 kWh, emptied by 2 kW for 2 hours

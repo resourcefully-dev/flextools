@@ -1,3 +1,29 @@
+# flextools 1.14.1
+
+* Fix: `get_tank_unmet_heat()` (and so `attr(, "unmet_heat_kw")` of
+  `add_tank_optimization()`) left out the standing loss below the comfort
+  floor, and dropped every slot whose gap was within half a rounding step of
+  the power. A schedule that serves the demand but ignores a 1 %/h loss
+  drains a 2.33 kWh tank from its top through its floor to empty, a few Wh
+  per slot at 15 minutes, and read 0 unmet heat all the way. The heat the
+  tank gives from below its floor now counts whether it goes to the demand
+  or to the loss, and a gap within a rounding step is carried over instead
+  of dropped: the level climbing back cancels it, and it counts once the
+  gaps add up beyond that step. The unmet heat of a tank that never goes
+  below its floor is still 0, and so is a level wiggling by a rounding step
+  around it.
+
+* Fix: `add_tank_optimization()` could leave the level above `SOCmax`. The
+  compressor power is rounded to the nearest 0.01 kW, which moves the level
+  by up to half a step of heat, 0.005 x COP x the slot length: 0.0075 kWh at
+  COP 6 and 15 minutes, 0.3 % of a 2.33 kWh tank. Where the solver planned
+  the level at the top, that rounding went above it. A lossy tank, held at
+  its top by a few Wh per slot, sits there the longest. The solver now keeps
+  that half step free below the top (except where the level cannot get down
+  to it yet, which needs no rounding), and the rounding rounds down where the
+  nearest step would still go above the top, so the optimised level stays
+  within `[0, SOCmax]`.
+
 # flextools 1.14.0
 
 * `smart_v2g(opt_objective = "cost")` now minimises the energy cost of the

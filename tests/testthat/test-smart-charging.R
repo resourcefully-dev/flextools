@@ -456,6 +456,13 @@ test_that("results at the default energy ratios are unchanged by the energy rang
   # whose `charging_power_min = 0.5` now means 0.5 kW instead of 50% of the
   # nominal power. Every other scenario is unchanged.
   #
+  # Re-captured on 1.15.0 for `capacity_curtail` only: the capacity objective
+  # no longer places the postponed energy with the grid objective (which
+  # spread it over the rest of the day) but charges it back as soon as the cap
+  # allows. It removes the same energy from the same slots and stays within
+  # the cap. `capacity_curtail_tight`, where no slot fits the cap, is
+  # unchanged.
+  #
   # The scheduler is compared with a tolerance: it rounds to 2 decimals at
   # several points and a rounding tie flips on floating-point dust, so the same
   # setpoints can schedule 0.01-0.02 kW differently between environments (seen
@@ -1058,4 +1065,54 @@ test_that("the energy ratios are validated", {
     ),
     "cannot be higher"
   )
+})
+
+
+# Capacity objective: change only what a breach needs ---------------------
+
+test_that("capacity leaves the evening alone and absorbs the midday export", {
+  opt_data_cap <- capacity_scenario_opt_data()
+  sessions_cap <- capacity_scenario_sessions()
+  uncontrolled <- capacity_scenario_uncontrolled(sessions_cap)
+
+  results <- suppressMessages(smart_charging(
+    sessions_cap, opt_data_cap,
+    opt_objective = "capacity", method = "curtail",
+    window_days = 1, window_start_hour = 6
+  ))
+  fleet <- results$demand$Fleet
+
+  # The evening import peaks within the import capacity: not shaved.
+  evening <- opt_data_cap$datetime >= as.POSIXct("2025-03-12 17:00", tz = "UTC") &
+    opt_data_cap$datetime < as.POSIXct("2025-03-13 06:00", tz = "UTC")
+  expect_equal(fleet[evening], uncontrolled[evening])
+  expect_equal(results$setpoints$Fleet[evening], uncontrolled[evening])
+
+  # The morning charge moves into the export breach, and no import breach
+  # appears.
+  excess_before <- capacity_scenario_excess(opt_data_cap, uncontrolled)
+  excess_after <- capacity_scenario_excess(opt_data_cap, fleet)
+  expect_lt(excess_after[["export"]], excess_before[["export"]] - 50)
+  expect_equal(excess_after[["import"]], 0)
+
+  delivered <- results$sessions %>%
+    group_by(Session) %>%
+    summarise(Energy = sum(Energy))
+  expect_equal(delivered$Energy, sessions_cap$Energy, tolerance = 0.01)
+})
+
+test_that("capacity returns a window within its caps unchanged", {
+  opt_data_cap <- capacity_scenario_opt_data(
+    import_capacity = 200, export_capacity = 200
+  )
+  sessions_cap <- capacity_scenario_sessions()
+  uncontrolled <- capacity_scenario_uncontrolled(sessions_cap)
+
+  expect_no_message(results <- smart_charging(
+    sessions_cap, opt_data_cap,
+    opt_objective = "capacity", method = "curtail",
+    window_days = 1, window_start_hour = 6
+  ))
+  expect_equal(results$setpoints$Fleet, uncontrolled)
+  expect_equal(results$demand$Fleet, uncontrolled)
 })

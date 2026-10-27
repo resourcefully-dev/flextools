@@ -276,7 +276,10 @@ test_that("grid objective relaxes minimally and clamps ub_O when LFmax < LF", {
 # Energy range ------------------------------------------------------------
 
 test_that("optimize_demand results are unchanged at the default energy ratio", {
-  # Baseline captured on 1.6.0 (commit 77312479) with exactly these calls.
+  # Baseline captured on 1.6.0 (commit 77312479) with exactly these calls;
+  # the capacity one re-captured on 1.15.0, where the capacity objective stopped
+  # placing the moved energy with the grid objective: the same excess is left
+  # above the cap (it does not fit), with 15 kWh moved instead of 206.
   golden <- readRDS(test_path("golden-energy-range-defaults.rds"))
 
   O_grid <- suppressMessages(suppressWarnings(optimize_demand(

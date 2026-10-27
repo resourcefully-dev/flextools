@@ -49,11 +49,12 @@ This is used when \code{opt_objective = "cost"}.
 Optimization objective can be \code{"grid"} (default), \code{"cost"} or \code{"capacity"}, or
 a number between \code{0} and \code{1} to perform combined optimization
 where \code{0 == "cost"} and \code{1 == "grid"}.
-The \code{"capacity"} objective minimizes the amount of flexible demand that
-needs to be moved to respect \code{import_capacity} and \code{export_capacity},
-then applies the grid-minimizing formulation only to that moved slice.
-If that constrained problem is infeasible, grid limits are removed for the
-affected optimization window.}
+The \code{"capacity"} objective changes the flexible demand only as far as
+\code{import_capacity} and \code{export_capacity} need: it moves as little energy as
+possible, as short a time as possible, and leaves a window within its
+capacities unchanged. When a breach cannot be removed, the excess is reduced
+as far as the flexibility allows, never beyond the original profile's.
+\code{lambda} does not apply to it.}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 

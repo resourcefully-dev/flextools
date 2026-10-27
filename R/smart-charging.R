@@ -92,7 +92,9 @@
 #' Lower it to save energy or cost. Must be higher than 0 and at least `energy_min`.
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
-#' @param lambda numeric, penalty on change for the flexible load.
+#' @param lambda numeric, penalty on change for the flexible load. Not used by
+#'   the `"capacity"` objective, which changes the load only where a breach
+#'   needs it.
 #'
 #' @importFrom dplyr tibble %>% filter mutate select everything row_number left_join bind_rows any_of pull distinct between sym all_of
 #' @importFrom lubridate hour minute date
@@ -125,10 +127,14 @@
 #' If `production` is not found in `opt_data`, only a peak shaving objective
 #' will be considered.
 #'
-#' - Minimize capacity violations (`opt_objective = "capacity"`): minimizes only
-#' the load slices that exceed the grid capacity limits (`import_capacity` or
-#' `export_capacity` in `opt_data`), leaving the rest of the load profile
-#' unchanged. Falls back to grid objective when the capacity slice is infeasible.
+#' - Minimize capacity violations (`opt_objective = "capacity"`): changes the
+#' load only as far as a breach of the grid capacity limits (`import_capacity`
+#' or `export_capacity` in `opt_data`) needs. A window within its limits is left
+#' unchanged; otherwise the breach is removed by moving as little energy as
+#' possible, as short a time as possible, and slots within the limits are not
+#' reshaped (no peak shaving). When the breach cannot be removed, the excess is
+#' reduced as far as the flexibility allows (largest excess first), and no slot
+#' ends up beyond its limit by more than in the original profile.
 #'
 #' - Minimize the energy cost (`opt_objective = "cost"`): minimizes the energy cost.
 #' In this case, the columns

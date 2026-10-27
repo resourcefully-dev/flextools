@@ -19,25 +19,20 @@ capacity_v2g_window(
 )
 }
 \arguments{
-\item{lambda}{numeric, ignored (see \code{demand_capacity_window()}).}
+\item{lambda}{numeric, penalty on change of the placed slice.}
 
 \item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
 load's energy the optimized load must carry. See
 \code{demand_capacity_window()}.}
 }
 \description{
-The V2G counterpart of \code{demand_capacity_window()}: the same minimum-change
-LP, with the optimized load allowed below 0 (discharge). A window within
-its caps is returned unchanged; a breach is removed, or reduced as far as
-the fleet allows, by moving as little energy as possible, as short a time
-as possible, and no slot ends up beyond its caps or beyond the original
-profile's breach.
-}
-\details{
-The fleet discharges within the connected power (\code{LFmax}) and only to cut
-import (see \code{v2g_discharge_floor()}). So it can cut an import breach, and
-it can fill an export breach with energy it discharged earlier, while the
-site imported, and charges back in the exporting slots; within the
-departure deadlines and SoC floor of \code{cumsum_min}.
+The V2G counterpart of \code{demand_capacity_window()}. The slice that has to
+move may include discharge: the fleet may discharge (within the connected
+power \code{LFmax} and only to cut import, see \code{v2g_discharge_floor()}) to make
+room for energy it charges back in an export breach, within the departure
+deadlines and SoC floor of \code{cumsum_min}. The slice is then placed with
+\code{demand_grid_v2g_window()} charge-only (\code{LFmin = 0}): the placement only
+puts back the energy the slice took, and never discharges the rest of the
+fleet to flatten slots within the caps.
 }
 \keyword{internal}

@@ -456,12 +456,12 @@ test_that("results at the default energy ratios are unchanged by the energy rang
   # whose `charging_power_min = 0.5` now means 0.5 kW instead of 50% of the
   # nominal power. Every other scenario is unchanged.
   #
-  # Re-captured on 1.15.0 for `capacity_curtail` only: the capacity objective
-  # no longer places the postponed energy with the grid objective (which
-  # spread it over the rest of the day) but charges it back as soon as the cap
-  # allows. It removes the same energy from the same slots and stays within
-  # the cap. `capacity_curtail_tight`, where no slot fits the cap, is
-  # unchanged.
+  # Re-captured on 1.15.0 for `capacity_curtail_tight` only: its windows
+  # cannot meet the cap, and the capacity objective no longer falls back to
+  # the grid objective on the whole window but moves only the slice that
+  # brings the excess down. Same excess above the cap (2249.6 kW summed over
+  # the slots), same peak (79.78 kW); a few slots are placed differently.
+  # `capacity_curtail`, whose windows fit the cap, is byte-identical.
   #
   # The scheduler is compared with a tolerance: it rounds to 2 decimals at
   # several points and a rounding tie flips on floating-point dust, so the same
@@ -1115,4 +1115,40 @@ test_that("capacity returns a window within its caps unchanged", {
   ))
   expect_equal(results$setpoints$Fleet, uncontrolled)
   expect_equal(results$demand$Fleet, uncontrolled)
+})
+
+test_that("capacity reduces an export breach it cannot remove, moving only the slice", {
+  # The midday export above the cap (about 113 kWh) is more than the 60 kWh
+  # the morning vehicles can postpone into it: the breach cannot be removed.
+  opt_data_cap <- capacity_scenario_opt_data()
+  sessions_cap <- capacity_scenario_sessions()
+  uncontrolled <- capacity_scenario_uncontrolled(sessions_cap)
+
+  expect_message(
+    results <- smart_charging(
+      sessions_cap, opt_data_cap,
+      opt_objective = "capacity", method = "curtail",
+      window_days = 1, window_start_hour = 6
+    ),
+    "never beyond the original profile"
+  )
+  fleet <- results$setpoints$Fleet
+
+  # All the morning charge moves into the breach: the export above the cap
+  # drops by exactly the 60 kWh the vehicles can absorb.
+  excess_before <- capacity_scenario_excess(opt_data_cap, uncontrolled)
+  excess_after <- capacity_scenario_excess(opt_data_cap, fleet)
+  expect_equal(
+    excess_after[["export"]], excess_before[["export"]] - 60,
+    tolerance = 0.05
+  )
+
+  # Nothing else changes: only the slots the slice leaves (the morning charge)
+  # and the export-breach slots it goes to.
+  net_without_fleet <- opt_data_cap$static - opt_data_cap$production
+  breach <- -net_without_fleet > opt_data_cap$export_capacity
+  changed <- abs(fleet - uncontrolled) > 0.005
+  expect_true(all(changed <= (uncontrolled > 0 | breach)))
+  expect_true(all(fleet[changed & !breach] < uncontrolled[changed & !breach]))
+  expect_true(all(fleet[changed & breach] > uncontrolled[changed & breach]))
 })

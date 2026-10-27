@@ -19,8 +19,8 @@ demand_capacity_window(
 )
 }
 \arguments{
-\item{lambda}{numeric, ignored: the capacity objective does not reshape the
-load beyond what the breach needs. Kept for a uniform signature.}
+\item{lambda}{numeric, penalty on change of the placed slice (see
+\code{demand_grid_window()}).}
 
 \item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
 load's energy the optimized load must carry. The maximum scales the whole
@@ -28,11 +28,14 @@ profile; energy is dropped down to the minimum only where the caps leave
 no room for it.}
 }
 \description{
-Changes the flexible load only as far as a breach of \code{import_capacity} or
-\code{export_capacity} needs: a window within its caps is returned unchanged,
-and a breach is removed (or, when it cannot be, reduced as far as the
-flexibility allows) by moving as little energy as possible, as short a
-time as possible. Slots within their caps stay within them, and no slot
-breaches more than in the original profile.
+A window within \code{import_capacity} and \code{export_capacity} is returned
+unchanged. Otherwise the slice of the flexible load that has to move is
+chosen with \code{select_capacity_slice()}: the least energy whose move removes
+the breach, or, where the flexibility cannot remove it, brings the excess
+over the caps down as far as it can (largest excess first). Only that slice
+is placed again with the grid objective (\code{demand_grid_window()}), on top of
+the rest of the load, which stays untouched. No slot ends up beyond its cap
+by more than the selected slice leaves, nor beyond the original profile's
+excess.
 }
 \keyword{internal}

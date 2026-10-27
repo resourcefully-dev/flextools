@@ -391,17 +391,20 @@ demand_select_window_solver <- function(solver_data) {
 
 # Capacity objective helpers ------------------------------------------------------
 
-# The capacity objective changes the flexible load only as far as a capacity
-# breach needs. The optimized load is written as `O = LF - slice + added`, and
-# one problem over [slice, added, import_excess, export_excess, shift,
-# discharge] is solved lexicographically (see select_capacity_slice()):
+# The capacity slice: the part of the flexible load that has to move for the
+# caps. The load is written as `O = LF - slice + added`, and one problem over
+# [slice, added, import_excess, export_excess, shift, discharge] is solved
+# lexicographically (see select_capacity_slice()):
 #   1. the breach left above the caps, `sum(import_excess^2 + export_excess^2)`,
-#   2. the energy moved (or dropped) to get there,
+#      so the largest excess comes down first,
+#   2. the slice: the energy moved (or dropped) to get there,
 #   3. (V2G) the energy discharged, `sum(max(-O, 0))`,
 #   4. how far in time it moves, `sum(|cumsum(added - slice)|)`.
-# The caps are soft only up to the original profile's own breach in each slot,
-# so a slot within its caps stays within them and no slot ends up worse than it
-# was. Where the caps hold, nothing is moved, also not to flatten the window.
+# 3 and 4 only break ties between slices of the same energy. The caps are soft
+# only up to the original profile's own breach in each slot, so a breach that
+# cannot be removed is still brought down as far as it can, and a slot within
+# its caps stays within them. capacity_window() then places the slice again
+# with the grid objective; `added` only proves that a placement exists.
 #
 # `LFmin` is the per-slot floor of the optimized load: 0 for demand, and below
 # 0 (discharge) for V2G, where capacity_v2g_window() passes the connected power
@@ -686,16 +689,21 @@ select_capacity_slice <- function(
   }
 
   x <- result$primal_solution
-  slice <- x[seq_len(time_slots)]
-  added <- x[time_slots + seq_len(time_slots)]
   # Opposite moves in the same slot cancel out in the load.
-  delta <- added - slice
+  delta <- x[time_slots + seq_len(time_slots)] - x[seq_len(time_slots)]
   delta[abs(delta) < tolerance] <- 0
-  breach <- sum(pmax(x[2 * time_slots + seq_len(2 * time_slots)], 0))
+  slice <- round(pmax(-delta, 0), 2)
+  added <- round(pmax(delta, 0), 2)
+  import_excess <- pmax(x[2 * time_slots + seq_len(time_slots)], 0)
+  export_excess <- pmax(x[3 * time_slots + seq_len(time_slots)], 0)
+  breach <- sum(import_excess) + sum(export_excess)
 
   list(
-    O = round(LF + delta, 2),
+    slice = slice,
+    added = added,
     energy = sum(LF) + sum(delta),
+    import_excess = import_excess,
+    export_excess = export_excess,
     breach = if (breach < 0.01) 0 else breach,
     result = result
   )
@@ -703,11 +711,14 @@ select_capacity_slice <- function(
 
 
 # The capacity objective for one window, shared by demand_capacity_window()
-# and capacity_v2g_window() (which passes a negative `LFmin`, see
-# capacity_slice_problem()). A window with no breach is returned as it is;
-# otherwise the breach is removed - or, where the flexibility cannot remove
-# it, reduced as far as it can - by moving as little energy, as short a time,
-# as possible.
+# and capacity_v2g_window(). A window with no breach is returned as it is.
+# Otherwise select_capacity_slice() picks the slice: the least energy whose
+# move removes the breach - or, where the flexibility cannot remove it, brings
+# the excess down as far as it can. Only that slice is placed again, by
+# `place_slice` (the grid objective), on top of the untouched rest of the
+# load. The placement keeps the caps, raised only in the slots, and only as
+# far, as the selected slice leaves an excess, so it is feasible by
+# construction (the slice LP's own placement is a feasible point).
 capacity_window <- function(
   G,
   LF,
@@ -717,6 +728,7 @@ capacity_window <- function(
   LFmax,
   import_capacity,
   export_capacity,
+  place_slice,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
   LFmin = 0
@@ -738,6 +750,7 @@ capacity_window <- function(
     time_horizon,
     time_slots
   )
+  tol <- optimization_solution_tolerance()
 
   # The capacity objective leaves the profile alone wherever the caps hold, so
   # an energy target below the requirement is applied as a uniform scaling of
@@ -751,13 +764,13 @@ capacity_window <- function(
     NULL
   }
 
-  # No breach: nothing to change.
+  # No breach: nothing to move.
   net <- LS + LF_target - G
   if (all(net <= import_capacity + 0.005 & -net <= export_capacity + 0.005)) {
     return(LF_target)
   }
 
-  solution <- select_capacity_slice(
+  slice_solution <- select_capacity_slice(
     G = G,
     LF = LF_target,
     LS = LS,
@@ -771,17 +784,17 @@ capacity_window <- function(
     LFmin = LFmin
   )
 
-  if (is.null(solution)) {
+  if (is.null(slice_solution)) {
     # Unreachable for well-formed inputs: the original profile is a feasible
-    # point of the LP (no move, the breach it already has).
+    # point of the slice LP (no move, the breach it already has).
     message_once(
       "\u26a0\ufe0f Optimization warning: capacity optimization failed in some windows. No optimization provided."
     )
     return(LF_target)
   }
 
-  if (solution$breach > 0) {
-    if (!is.null(energy_lb) && solution$energy <= energy_lb + 0.01) {
+  if (slice_solution$breach > 0) {
+    if (!is.null(energy_lb) && slice_solution$energy <= energy_lb + 0.01) {
       message_once(
         "\u26a0\ufe0f Optimization warning: even the minimum energy does not fit under the grid capacity in some windows. Reducing the excess as far as the minimum energy allows, never beyond the original profile."
       )
@@ -792,21 +805,72 @@ capacity_window <- function(
     }
   }
 
-  solution$O
+  moved_slice <- slice_solution$slice
+  if (all(moved_slice == 0)) {
+    return(LF_target)
+  }
+
+  # The slice LP decided how much of the removed energy is re-added (all of it
+  # unless the caps left no room). The grid LP that places it must carry
+  # exactly that energy, expressed as a ratio of the rounded slice so both
+  # sides round to the same 2-decimal figure.
+  moved_energy <- sum(moved_slice)
+  added_energy <- sum(slice_solution$added)
+  fixed_load <- round(LF_target - moved_slice, 2)
+  if (added_energy <= tol) {
+    # The caps left no room for any of the removed energy: with a minimum
+    # below 100% the LP dropped all of it, and there is nothing left to place.
+    return(fixed_load)
+  }
+  slice_ratio <- if (added_energy < moved_energy - tol) {
+    rep(added_energy / moved_energy, 2)
+  } else {
+    c(1, 1)
+  }
+
+  # The excess the selected slice leaves, rounded up to the 2-decimal grid of
+  # the bounds: the placement may keep it, and no more.
+  excess_margin <- function(excess) {
+    ifelse(excess > tol, ceiling(round(excess * 100, 6)) / 100 + 0.01, 0)
+  }
+
+  optimized_slice <- place_slice(
+    LF = moved_slice,
+    time_horizon = time_horizon,
+    LS = LS + fixed_load,
+    LFmax = round(pmax(LFmax - fixed_load, 0), 2),
+    import_capacity = import_capacity +
+      excess_margin(slice_solution$import_excess),
+    export_capacity = export_capacity +
+      excess_margin(slice_solution$export_excess),
+    energy_ratio = slice_ratio,
+    # The fixed part already covers some of the departure deadlines; the slice
+    # has to cover the rest (the slice LP above found such a placement).
+    cumsum_min = if (is.null(cumsum_min)) {
+      NULL
+    } else {
+      rep_len(as.numeric(cumsum_min), time_slots) - cumsum(fixed_load)
+    }
+  )
+
+  round(fixed_load + as.numeric(optimized_slice), 2)
 }
 
 
 #' Capacity optimisation of a flexible demand (single window)
 #'
-#' Changes the flexible load only as far as a breach of `import_capacity` or
-#' `export_capacity` needs: a window within its caps is returned unchanged,
-#' and a breach is removed (or, when it cannot be, reduced as far as the
-#' flexibility allows) by moving as little energy as possible, as short a
-#' time as possible. Slots within their caps stay within them, and no slot
-#' breaches more than in the original profile.
+#' A window within `import_capacity` and `export_capacity` is returned
+#' unchanged. Otherwise the slice of the flexible load that has to move is
+#' chosen with `select_capacity_slice()`: the least energy whose move removes
+#' the breach, or, where the flexibility cannot remove it, brings the excess
+#' over the caps down as far as it can (largest excess first). Only that slice
+#' is placed again with the grid objective (`demand_grid_window()`), on top of
+#' the rest of the load, which stays untouched. No slot ends up beyond its cap
+#' by more than the selected slice leaves, nor beyond the original profile's
+#' excess.
 #'
-#' @param lambda numeric, ignored: the capacity objective does not reshape the
-#'   load beyond what the breach needs. Kept for a uniform signature.
+#' @param lambda numeric, penalty on change of the placed slice (see
+#'   `demand_grid_window()`).
 #' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
 #'   load's energy the optimized load must carry. The maximum scales the whole
 #'   profile; energy is dropped down to the minimum only where the caps leave
@@ -836,6 +900,22 @@ demand_capacity_window <- function(
     LFmax = LFmax,
     import_capacity = import_capacity,
     export_capacity = export_capacity,
+    place_slice = function(LF, time_horizon, LS, LFmax, import_capacity,
+                           export_capacity, energy_ratio, cumsum_min) {
+      demand_grid_window(
+        G = G,
+        LF = LF,
+        LS = LS,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = LFmax,
+        import_capacity = import_capacity,
+        export_capacity = export_capacity,
+        lambda = lambda,
+        energy_ratio = energy_ratio,
+        cumsum_min = cumsum_min
+      )
+    },
     energy_ratio = energy_ratio,
     cumsum_min = cumsum_min
   )
@@ -889,12 +969,12 @@ demand_capacity_window <- function(
 #' Optimization objective can be `"grid"` (default), `"cost"` or `"capacity"`, or
 #' a number between `0` and `1` to perform combined optimization
 #' where `0 == "cost"` and `1 == "grid"`.
-#' The `"capacity"` objective changes the flexible demand only as far as
-#' `import_capacity` and `export_capacity` need: it moves as little energy as
-#' possible, as short a time as possible, and leaves a window within its
-#' capacities unchanged. When a breach cannot be removed, the excess is reduced
-#' as far as the flexibility allows, never beyond the original profile's.
-#' `lambda` does not apply to it.
+#' The `"capacity"` objective minimizes the amount of flexible demand that
+#' needs to be moved to respect `import_capacity` and `export_capacity`,
+#' then applies the grid-minimizing formulation only to that moved slice. A
+#' window within its capacities is left unchanged. When a breach cannot be
+#' removed, the slice brings the excess down as far as the flexibility allows,
+#' never beyond the original profile's.
 #' @param direction character, being `forward` or `backward`. The direction where energy can be shifted
 #' @param time_horizon integer, maximum number of time slots to shift energy from.
 #'  If `NULL`, the `time_horizon` will be the total optimization window length.

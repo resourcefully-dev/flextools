@@ -85,11 +85,12 @@
 #'   power and `1 - w` the cost, as in `smart_charging()`. `w = 1` is `"grid"`
 #'   and `w = 0` is `"cost"`; in between the fleet discharges only to cut
 #'   import, as under `"grid"`.
-#' * `"capacity"` changes the plan only as far as a breach of the grid
+#' * `"capacity"` moves only the slice of the plan that a breach of the grid
 #'   capacities needs (see `smart_charging()`), and leaves windows within them
-#'   unchanged. The fleet discharges only to cut import: to cut an import
+#'   unchanged. The slice may discharge, only to cut import: to cut an import
 #'   breach, or to make room, while the site imports, for the energy it then
-#'   charges back in an export breach.
+#'   charges back in an export breach. The rest of the fleet is not
+#'   discharged to flatten slots within the caps.
 #'
 #' Under `"cost"` and combined objectives the setpoint counts the discharge
 #' losses (`discharge_eff`): every discharged kWh is charged back as
@@ -800,20 +801,16 @@ smart_v2g_window_parallel <- function(
 
 #' Capacity optimisation with bidirectional flexibility (single window)
 #'
-#' The V2G counterpart of `demand_capacity_window()`: the same minimum-change
-#' LP, with the optimized load allowed below 0 (discharge). A window within
-#' its caps is returned unchanged; a breach is removed, or reduced as far as
-#' the fleet allows, by moving as little energy as possible, as short a time
-#' as possible, and no slot ends up beyond its caps or beyond the original
-#' profile's breach.
+#' The V2G counterpart of `demand_capacity_window()`. The slice that has to
+#' move may include discharge: the fleet may discharge (within the connected
+#' power `LFmax` and only to cut import, see `v2g_discharge_floor()`) to make
+#' room for energy it charges back in an export breach, within the departure
+#' deadlines and SoC floor of `cumsum_min`. The slice is then placed with
+#' `demand_grid_v2g_window()` charge-only (`LFmin = 0`): the placement only
+#' puts back the energy the slice took, and never discharges the rest of the
+#' fleet to flatten slots within the caps.
 #'
-#' The fleet discharges within the connected power (`LFmax`) and only to cut
-#' import (see `v2g_discharge_floor()`). So it can cut an import breach, and
-#' it can fill an export breach with energy it discharged earlier, while the
-#' site imported, and charges back in the exporting slots; within the
-#' departure deadlines and SoC floor of `cumsum_min`.
-#'
-#' @param lambda numeric, ignored (see `demand_capacity_window()`).
+#' @param lambda numeric, penalty on change of the placed slice.
 #' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
 #'   load's energy the optimized load must carry. See
 #'   `demand_capacity_window()`.
@@ -850,6 +847,26 @@ capacity_v2g_window <- function(
     LFmax = LFmax,
     import_capacity = import_capacity,
     export_capacity = export_capacity,
+    place_slice = function(LF, time_horizon, LS, LFmax, import_capacity,
+                           export_capacity, energy_ratio, cumsum_min) {
+      demand_grid_v2g_window(
+        G = G,
+        LF = LF,
+        LS = LS,
+        direction = direction,
+        time_horizon = time_horizon,
+        LFmax = LFmax,
+        import_capacity = import_capacity,
+        export_capacity = export_capacity,
+        lambda = lambda,
+        energy_ratio = energy_ratio,
+        cumsum_min = cumsum_min,
+        # Charge-only: the placement puts back the slice's energy and never
+        # discharges the rest of the fleet (which would reshape slots within
+        # the caps). Any discharge the breach needs is already in the slice.
+        LFmin = 0
+      )
+    },
     energy_ratio = energy_ratio,
     cumsum_min = cumsum_min,
     LFmin = pmin(pmax(-LFmax, discharge_floor), 0)

@@ -109,9 +109,7 @@ Lower it to save energy or cost. Must be higher than 0 and at least \code{energy
 
 \item{show_progress}{logical, whether to output the progress bar in the console}
 
-\item{lambda}{numeric, penalty on change for the flexible load. Not used by
-the \code{"capacity"} objective, which changes the load only where a breach
-needs it.}
+\item{lambda}{numeric, penalty on change for the flexible load.}
 }
 \value{
 a list with three elements:
@@ -142,14 +140,14 @@ There are four different optimization objectives implemented by this function:
 the flexible load and the amount of imported power from the grid.
 If \code{production} is not found in \code{opt_data}, only a peak shaving objective
 will be considered.
-\item Minimize capacity violations (\code{opt_objective = "capacity"}): changes the
-load only as far as a breach of the grid capacity limits (\code{import_capacity}
-or \code{export_capacity} in \code{opt_data}) needs. A window within its limits is left
-unchanged; otherwise the breach is removed by moving as little energy as
-possible, as short a time as possible, and slots within the limits are not
-reshaped (no peak shaving). When the breach cannot be removed, the excess is
-reduced as far as the flexibility allows (largest excess first), and no slot
-ends up beyond its limit by more than in the original profile.
+\item Minimize capacity violations (\code{opt_objective = "capacity"}): moves only
+the slice of the load that a breach of the grid capacity limits
+(\code{import_capacity} or \code{export_capacity} in \code{opt_data}) needs, and places it
+with the grid objective, leaving the rest of the load profile unchanged. A
+window within its limits is left unchanged. When the breach cannot be
+removed, the slice brings the excess down as far as the flexibility allows
+(largest excess first), and no slot ends up beyond its limit by more than in
+the original profile.
 \item Minimize the energy cost (\code{opt_objective = "cost"}): minimizes the energy cost.
 In this case, the columns
 \code{grid_capacity}, \code{price_imported}, \code{price_exported},

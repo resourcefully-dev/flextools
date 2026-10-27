@@ -1,36 +1,32 @@
 # flextools 1.15.0
 
-* `opt_objective = "capacity"` in `smart_charging()`, `smart_v2g()` and
-  `optimize_demand()` now changes the load only as far as a capacity breach
-  needs. Until now it chose the energy to move with a minimum-change LP and
-  then placed it with the `"grid"` objective, which flattens the net power of
-  the whole window; and when the breach could not be removed, it fell back to
-  `"grid"` on the whole window. So any window with a breach was peak-shaved:
-  a site that exports above `export_capacity` at noon got its evening import,
-  well within `import_capacity`, flattened as well. Now one problem decides
-  both, in order: the excess over the caps (squared, so the largest excess
-  comes down first), the energy moved, the energy discharged (V2G), and how
-  far in time the energy moves. A slot within its caps is never pushed beyond
-  them, no slot breaches more than in the original profile, and a window
-  without a breach comes back unchanged, as before. Postponed energy is now
-  charged back as soon as the caps allow, instead of spread over the rest of
-  the window. `lambda` does not apply to `"capacity"`.
+* `opt_objective = "capacity"` (`smart_charging()`, `smart_v2g()`,
+  `optimize_demand()`) no longer falls back to the `"grid"` objective on the
+  whole window when a breach cannot be removed. That fallback reshaped every
+  slot of the window, also those within the caps: a site that exports above
+  `export_capacity` at noon, more than the fleet can absorb, got its evening
+  import, well within `import_capacity`, flattened. The capacity slice is now
+  chosen with soft caps: it brings the excess over the caps down as far as
+  the flexibility allows (largest excess first, each slot at most at its
+  original excess), with the least energy moved. As before, only that slice
+  is placed with the `"grid"` objective, on top of the untouched rest of the
+  load, and a window without a breach comes back unchanged. Where the breach
+  could be removed, the result is unchanged.
 
-* `smart_v2g(opt_objective = "capacity")` now discharges and recharges within
-  the capacity problem itself: the fleet discharges while the site imports
-  and charges that energy back in an export breach, within the connected
-  power, the departure deadlines and `soc_min`. Until now the energy to move
-  was chosen with charge only, and discharge came in only through the
-  `"grid"` placement or fallback, which reshaped the whole window. The fleet
-  still discharges only to cut import (`v2g_discharge_floor()`), and among
-  equal moves it discharges as little as it can. On a test site that imports
-  in the morning and exports above a 50 kW cap at noon, with an evening
-  import well within its cap, both versions cut the export above the cap
-  from 227 kWh to 167 kWh (`smart_charging()`) and to 131 kWh
-  (`smart_v2g()`). But 1.14.1 also changed 72 kWh (`smart_charging()`) and
-  112 kWh (`smart_v2g()`, discharging 22 kW) of the evening charge, flattening
-  the evening peak from 82 kW to 60 kW, and 1.15.0 leaves the evening as it
-  was.
+* `smart_v2g(opt_objective = "capacity")`: the slice may now include
+  discharge. The fleet discharges while the site imports (within the
+  connected power, only to cut import, see `v2g_discharge_floor()`) and
+  charges that energy back in an export breach, within the departure deadlines
+  and `soc_min`; among slices of equal energy it discharges the least. The
+  slice is placed charge-only: until now the `"grid"` placement could
+  discharge the rest of the fleet to flatten import within the cap.
+
+* On a test site that imports in the morning and exports above a 50 kW cap
+  at noon (more than the fleet can absorb), with an evening import well
+  within its cap, the export above the cap drops from 227 kWh to 167 kWh
+  (`smart_charging()`) and to 131 kWh (`smart_v2g()`), as in 1.14.1, but the
+  evening is no longer touched: 1.14.1 changed 72 kWh and 112 kWh of it
+  (discharging 22 kW in V2G), flattening the evening peak from 82 kW to 60 kW.
 
 * The `"grid"`, `"cost"` and combined objectives are unchanged.
 

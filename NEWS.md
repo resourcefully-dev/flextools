@@ -1,3 +1,35 @@
+# flextools 1.15.0
+
+* `opt_objective = "capacity"` (`smart_charging()`, `smart_v2g()`,
+  `optimize_demand()`) no longer falls back to the `"grid"` objective on the
+  whole window when a breach cannot be removed. That fallback reshaped every
+  slot of the window, also those within the caps: a site that exports above
+  `export_capacity` at noon, more than the fleet can absorb, got its evening
+  import, well within `import_capacity`, flattened. The capacity slice is now
+  chosen with soft caps: it brings the excess over the caps down as far as
+  the flexibility allows (largest excess first, each slot at most at its
+  original excess), with the least energy moved. As before, only that slice
+  is placed with the `"grid"` objective, on top of the untouched rest of the
+  load, and a window without a breach comes back unchanged. Where the breach
+  could be removed, the result is unchanged.
+
+* `smart_v2g(opt_objective = "capacity")`: the slice may now include
+  discharge. The fleet discharges while the site imports (within the
+  connected power, only to cut import, see `v2g_discharge_floor()`) and
+  charges that energy back in an export breach, within the departure deadlines
+  and `soc_min`; among slices of equal energy it discharges the least. The
+  slice is placed charge-only: until now the `"grid"` placement could
+  discharge the rest of the fleet to flatten import within the cap.
+
+* On a test site that imports in the morning and exports above a 50 kW cap
+  at noon (more than the fleet can absorb), with an evening import well
+  within its cap, the export above the cap drops from 227 kWh to 167 kWh
+  (`smart_charging()`) and to 131 kWh (`smart_v2g()`), as in 1.14.1, but the
+  evening is no longer touched: 1.14.1 changed 72 kWh and 112 kWh of it
+  (discharging 22 kW in V2G), flattening the evening peak from 82 kW to 60 kW.
+
+* The `"grid"`, `"cost"` and combined objectives are unchanged.
+
 # flextools 1.14.1
 
 * Fix: `get_tank_unmet_heat()` (and so `attr(, "unmet_heat_kw")` of

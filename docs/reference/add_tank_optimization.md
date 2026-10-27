@@ -271,14 +271,16 @@ opt_data <- tibble(
 P <- add_tank_optimization(
   opt_data, opt_objective = "cost", Tcap = 3, Pc = 1, Pb = 2
 )
+#> ⚠️ Optimization warning: the tank goes below its comfort floor in some slots. That heat is unmet (attribute `unmet_heat_kw`).
 attr(P, "backup_kw")
 #>  [1] 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 2 2 2 0 0 0 0
 attr(P, "unmet_heat_kw")
-#>  [1] 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+#>  [1] 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00 0.00
+#> [16] 0.00 0.00 0.00 0.00 0.02 0.00 0.00 0.00 0.00
 get_tank_level(
   P, opt_data$heat_demand, opt_data$cop, init = 3,
   backup = attr(P, "backup_kw")
 )
-#>  [1]  3.00  2.00  1.00  3.00  2.99  3.01  3.00  2.00  1.00  0.00 -0.01  0.01
-#> [13]  0.00 -0.01  0.01  0.00  1.01  3.01  2.01  1.01  0.01  0.00 -0.01  1.00
+#>  [1]  3.00  2.00  1.00  0.00 -0.01  0.97  2.97  2.00  1.00  0.00 -0.01  0.01
+#> [13]  0.00 -0.01  0.01  0.00  0.98  2.98  1.98  0.98  0.00 -0.01  0.01  0.99
 ```

@@ -4,14 +4,14 @@
 COP. Instead each slot takes the 2-decimal power that brings the level
 closest to the level the unrounded solution reaches at the end of that slot,
 so the rounded level never strays further from it than half a rounding step
-of heat. The backup heater is rounded on its own and the compressor makes up
+of heat, and never goes above the top of the band. The backup heater is rounded on its own and the compressor makes up
 its rounding; where the COP is 0 the backup heater tracks the level in the
 compressor's place."><meta property="og:description" content="Rounding each slot on its own drifts the level: a third of a kW rounds to
 0.33 in every slot and the tank loses 0.01 kWh of heat per slot and kW of
 COP. Instead each slot takes the 2-decimal power that brings the level
 closest to the level the unrounded solution reaches at the end of that slot,
 so the rounded level never strays further from it than half a rounding step
-of heat. The backup heater is rounded on its own and the compressor makes up
+of heat, and never goes above the top of the band. The backup heater is rounded on its own and the compressor makes up
 its rounding; where the COP is 0 the backup heater tracks the level in the
 compressor's place."><meta property="og:image" content="https://resourcefully-dev.github.io/flextools/logo.png"></head><body>
     <a href="#main" class="visually-hidden-focusable">Skip to contents</a>
@@ -21,7 +21,7 @@ compressor's place."><meta property="og:image" content="https://resourcefully-de
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.13.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.14.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -66,7 +66,7 @@ compressor's place."><meta property="og:image" content="https://resourcefully-de
 COP. Instead each slot takes the 2-decimal power that brings the level
 closest to the level the unrounded solution reaches at the end of that slot,
 so the rounded level never strays further from it than half a rounding step
-of heat. The backup heater is rounded on its own and the compressor makes up
+of heat, and never goes above the top of the band. The backup heater is rounded on its own and the compressor makes up
 its rounding; where the COP is 0 the backup heater tracks the level in the
 compressor's place.</p>
     </div>
@@ -83,7 +83,8 @@ compressor's place.</p>
 <span>  <span class="va">Pc</span>,</span>
 <span>  backup <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  Pb <span class="op">=</span> <span class="fl">0</span>,</span>
-<span>  power <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  power <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  Smax <span class="op">=</span> <span class="cn">Inf</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -132,6 +133,11 @@ unrounded power (kWh)</p></dd>
 <dd><p>numeric vector, the unrounded power (kW). Where the tank ends a
 slot empty, the demand it leaves unserved is not for the rounding to make
 up: the power there stays within a rounding step of it.</p></dd>
+
+
+<dt id="arg-smax">Smax<a class="anchor" aria-label="anchor" href="#arg-smax"></a></dt>
+<dd><p>numeric, top of the band (kWh): where the nearest step would
+take the level above it, the power rounds down instead</p></dd>
 
 </dl></div>
     <div class="section level2">

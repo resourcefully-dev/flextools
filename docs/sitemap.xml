@@ -26,7 +26,9 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/check_soc_min.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/curtail_capacity_window_battery.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_check_energy_ratio.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_combined_v2g_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_combined_window.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_cost_v2g_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_cost_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_energy_reward.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/demand_grid_v2g_window.html</loc></url>
@@ -83,6 +85,7 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_charging.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_charging_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/smart_v2g.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/solve_grid_flows_v2g.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/solve_optimization_battery_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/solve_optimization_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/split_sessions_at_windows.html</loc></url>
@@ -101,6 +104,8 @@
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/tank_solve_window.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/tank_unmet_heat.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/v2g_battery_capacity.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/v2g_discharge_floor.html</loc></url>
+<url><loc>https://resourcefully-dev.github.io/flextools/reference/v2g_discharge_tiebreak.html</loc></url>
 <url><loc>https://resourcefully-dev.github.io/flextools/reference/view_smart_charging_logs.html</loc></url>
 </urlset>
 

@@ -145,9 +145,20 @@ smart_v2g(
 
 - discharge_eff:
 
-  numeric, discharge efficiency (0, 1\], applied to energy losses when
-  discharging. For example, 0.9 means that for every 1 kWh discharged,
-  1/0.9 kWh must be recharged.
+  numeric, efficiency (0, 1\] of a discharge, counted as the round trip
+  grid -\> battery -\> grid. For every kWh a session discharges to the
+  grid, its battery loses `1 / discharge_eff` kWh, which it charges back
+  from the grid before it leaves (0.9: 1.11 kWh). The sessions' `Energy`
+  and `Power` are grid-side, as metered at the charge point, so they
+  already include the charging losses of a normal charge, and there is
+  no `charge_eff`. The losses of charging back the discharged energy are
+  not separate either: pass the round-trip efficiency (about 0.9 for 95%
+  each way) to count them, which also makes the SoC floor slightly
+  conservative, because the battery bookkeeping counts grid-side kWh.
+  The scheduler sizes each discharge so the session still meets its
+  energy deadline and its SoC floor after the losses, and the `"cost"`
+  and combined setpoints plan a discharge only when the price spread
+  covers them.
 
 - include_log:
 
@@ -195,3 +206,36 @@ sessions are connected, within their nominal power in both directions
 departure: the cumulative flexible load never drops below the
 `energy_min` share of the energy of the sessions that have left, minus
 what the connected sessions can still discharge down to `soc_min`.
+
+The `opt_objective` shapes that plan as in
+[`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md):
+
+- `"grid"` minimises the squared net power of the site. The fleet
+  discharges only to cut import (or to meet a negative
+  `import_capacity`), never into a slot where the site already exports.
+
+- `"cost"` minimises the energy cost of the site,
+  `sum(import * price_imported - export * price_exported)` (plus the
+  turn-up and turn-down prices, as in
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md)).
+  The fleet charges in the cheap slots and discharges in the expensive
+  ones, also into export when the export price pays for the energy
+  charged back later (an evening export price above the night's import
+  price); it never discharges into export that earns nothing. The import
+  and export capacities still bind.
+
+- A number `w` between 0 and 1 blends the two: `w` weighs the squared
+  net power and `1 - w` the cost, as in
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md).
+  `w = 1` is `"grid"` and `w = 0` is `"cost"`; in between the fleet
+  discharges only to cut import, as under `"grid"`.
+
+- `"capacity"` keeps the site within its grid capacities, discharging
+  only to cut import.
+
+Under `"cost"` and combined objectives the setpoint counts the discharge
+losses (`discharge_eff`): every discharged kWh is charged back as
+`1 / discharge_eff` kWh, so a discharge is planned only when the price
+spread covers the losses. The `"grid"` and `"capacity"` setpoints, which
+discharge only to cut import, do not count them; the scheduler charges
+the losses back on top under every objective.

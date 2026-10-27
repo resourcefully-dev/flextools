@@ -7,7 +7,7 @@
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.13.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.14.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -63,7 +63,8 @@
 <span>  <span class="va">export_capacity</span>,</span>
 <span>  lambda <span class="op">=</span> <span class="fl">0</span>,</span>
 <span>  energy_ratio <span class="op">=</span> <span class="fu"><a href="https://rdrr.io/r/base/c.html" class="external-link">c</a></span><span class="op">(</span><span class="fl">1</span>, <span class="fl">1</span><span class="op">)</span>,</span>
-<span>  cumsum_min <span class="op">=</span> <span class="cn">NULL</span></span>
+<span>  cumsum_min <span class="op">=</span> <span class="cn">NULL</span>,</span>
+<span>  LFmin <span class="op">=</span> <span class="cn">NULL</span></span>
 <span><span class="op">)</span></span></code></pre></div>
     </div>
 
@@ -76,6 +77,14 @@
 load's energy the optimized load must carry (net of discharge). <code>c(1, 1)</code>
 (default) preserves the energy exactly; a range lets the optimizer drop
 energy - down to <code>min</code> - when the grid capacity cannot fit <code>max</code>.</p></dd>
+
+
+<dt id="arg-lfmin">LFmin<a class="anchor" aria-label="anchor" href="#arg-lfmin"></a></dt>
+<dd><p>numeric vector (or <code>NULL</code>, default), per-slot floor of the
+optimized load on top of <code>-LFmax</code>. <code><a href="get_setpoints_v2g.html">get_setpoints_v2g()</a></code> (for the grid
+and combined objectives) and <code><a href="capacity_v2g_window.html">capacity_v2g_window()</a></code> pass
+<code><a href="v2g_discharge_floor.html">v2g_discharge_floor()</a></code>, so the fleet never discharges where that only
+adds export.</p></dd>
 
 </dl></div>
 

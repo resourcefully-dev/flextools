@@ -28,3 +28,9 @@ capacity_v2g_window(
 
   numeric vector `c(min, max)`, share of the flexible load's energy the
   optimized load must carry. See `demand_capacity_window()`.
+
+## Details
+
+The fleet discharges only to cut import (see
+[`v2g_discharge_floor()`](https://resourcefully-dev.github.io/flextools/reference/v2g_discharge_floor.md)),
+also in the grid LP that places the shifted energy.

@@ -19,7 +19,8 @@ get_setpoints_v2g(
   lambda,
   energy_min = 1,
   energy_max = 1,
-  soc_min = 0.2
+  soc_min = 0.2,
+  discharge_eff = 1
 )
 ```
 
@@ -34,4 +35,10 @@ get_setpoints_v2g(
 - soc_min:
 
   numeric, SoC floor of the sessions. See
+  [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md).
+
+- discharge_eff:
+
+  numeric, discharge efficiency of the vehicles, counted by the cost and
+  combined objectives. See
   [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md).

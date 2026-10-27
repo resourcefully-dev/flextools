@@ -15,7 +15,7 @@ untouched."><meta property="og:image" content="https://resourcefully-dev.github.
 
     <a class="navbar-brand me-2" href="../index.html">flextools</a>
 
-    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.13.0</small>
+    <small class="nav-text text-muted me-auto" data-bs-toggle="tooltip" data-bs-placement="bottom" title="">1.14.1</small>
 
 
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbar" aria-controls="navbar" aria-expanded="false" aria-label="Toggle navigation">
@@ -185,9 +185,19 @@ the responsive sessions. Must be higher than 0 and at least <code>energy_min</co
 
 
 <dt id="arg-discharge-eff">discharge_eff<a class="anchor" aria-label="anchor" href="#arg-discharge-eff"></a></dt>
-<dd><p>numeric, discharge efficiency (0, 1], applied to energy
-losses when discharging. For example, 0.9 means that for every 1 kWh
-discharged, 1/0.9 kWh must be recharged.</p></dd>
+<dd><p>numeric, efficiency (0, 1] of a discharge, counted as
+the round trip grid -&gt; battery -&gt; grid. For every kWh a session discharges
+to the grid, its battery loses <code>1 / discharge_eff</code> kWh, which it charges
+back from the grid before it leaves (0.9: 1.11 kWh). The sessions'
+<code>Energy</code> and <code>Power</code> are grid-side, as metered at the charge point, so
+they already include the charging losses of a normal charge, and there is
+no <code>charge_eff</code>. The losses of charging back the discharged energy are not
+separate either: pass the round-trip efficiency (about 0.9 for 95% each
+way) to count them, which also makes the SoC floor slightly conservative,
+because the battery bookkeeping counts grid-side kWh. The scheduler sizes
+each discharge so the session still meets its energy deadline and its SoC
+floor after the losses, and the <code>"cost"</code> and combined setpoints plan a
+discharge only when the price spread covers them.</p></dd>
 
 
 <dt id="arg-include-log">include_log<a class="anchor" aria-label="anchor" href="#arg-include-log"></a></dt>
@@ -232,6 +242,27 @@ are connected, within their nominal power in both directions (and
 departure: the cumulative flexible load never drops below the <code>energy_min</code>
 share of the energy of the sessions that have left, minus what the connected
 sessions can still discharge down to <code>soc_min</code>.</p>
+<p>The <code>opt_objective</code> shapes that plan as in <code><a href="smart_charging.html">smart_charging()</a></code>:</p><ul><li><p><code>"grid"</code> minimises the squared net power of the site. The fleet
+discharges only to cut import (or to meet a negative <code>import_capacity</code>),
+never into a slot where the site already exports.</p></li>
+<li><p><code>"cost"</code> minimises the energy cost of the site, <code>sum(import * price_imported - export * price_exported)</code> (plus the turn-up and
+turn-down prices, as in <code><a href="smart_charging.html">smart_charging()</a></code>). The fleet charges in the
+cheap slots and discharges in the expensive ones, also into export when
+the export price pays for the energy charged back later (an evening export
+price above the night's import price); it never discharges into export
+that earns nothing. The import and export capacities still bind.</p></li>
+<li><p>A number <code>w</code> between 0 and 1 blends the two: <code>w</code> weighs the squared net
+power and <code>1 - w</code> the cost, as in <code><a href="smart_charging.html">smart_charging()</a></code>. <code>w = 1</code> is <code>"grid"</code>
+and <code>w = 0</code> is <code>"cost"</code>; in between the fleet discharges only to cut
+import, as under <code>"grid"</code>.</p></li>
+<li><p><code>"capacity"</code> keeps the site within its grid capacities, discharging only
+to cut import.</p></li>
+</ul><p>Under <code>"cost"</code> and combined objectives the setpoint counts the discharge
+losses (<code>discharge_eff</code>): every discharged kWh is charged back as
+<code>1 / discharge_eff</code> kWh, so a discharge is planned only when the price
+spread covers the losses. The <code>"grid"</code> and <code>"capacity"</code> setpoints, which
+discharge only to cut import, do not count them; the scheduler charges the
+losses back on top under every objective.</p>
     </div>
 
   </main><aside class="col-md-3"><nav id="toc" aria-label="Table of contents"><h2>On this page</h2>

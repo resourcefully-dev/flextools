@@ -1,5 +1,114 @@
 # Changelog
 
+## flextools 1.14.1
+
+- Fix:
+  [`get_tank_unmet_heat()`](https://resourcefully-dev.github.io/flextools/reference/get_tank_unmet_heat.md)
+  (and so `attr(, "unmet_heat_kw")` of
+  [`add_tank_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_tank_optimization.md))
+  left out the standing loss below the comfort floor, and dropped every
+  slot whose gap was within half a rounding step of the power. A
+  schedule that serves the demand but ignores a 1 %/h loss drains a 2.33
+  kWh tank from its top through its floor to empty, a few Wh per slot at
+  15 minutes, and read 0 unmet heat all the way. The heat the tank gives
+  from below its floor now counts whether it goes to the demand or to
+  the loss, and a gap within a rounding step is carried over instead of
+  dropped: the level climbing back cancels it, and it counts once the
+  gaps add up beyond that step. The unmet heat of a tank that never goes
+  below its floor is still 0, and so is a level wiggling by a rounding
+  step around it.
+
+- Fix:
+  [`add_tank_optimization()`](https://resourcefully-dev.github.io/flextools/reference/add_tank_optimization.md)
+  could leave the level above `SOCmax`. The compressor power is rounded
+  to the nearest 0.01 kW, which moves the level by up to half a step of
+  heat, 0.005 x COP x the slot length: 0.0075 kWh at COP 6 and 15
+  minutes, 0.3 % of a 2.33 kWh tank. Where the solver planned the level
+  at the top, that rounding went above it. A lossy tank, held at its top
+  by a few Wh per slot, sits there the longest. The solver now keeps
+  that half step free below the top (except where the level cannot get
+  down to it yet, which needs no rounding), and the rounding rounds down
+  where the nearest step would still go above the top, so the optimised
+  level stays within `[0, SOCmax]`.
+
+## flextools 1.14.0
+
+- `smart_v2g(opt_objective = "cost")` now minimises the energy cost of
+  the site, `sum(import * price_imported - export * price_exported)`
+  (plus the turn-up and turn-down prices, as in
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md)),
+  with charge and discharge. Until now it reused the `"grid"` objective
+  with the message “Cost-based optimisation is not yet implemented for
+  V2G”. The fleet charges in the cheap slots and discharges in the
+  expensive ones, within the same constraints as `"grid"`: the power of
+  the connected vehicles, their departure deadlines and SoC floor,
+  `energy_min`/`energy_max`, and the import and export capacities, with
+  the same fallbacks when they cannot all be met. As in
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md),
+  the site never imports and exports in the same slot.
+- Under `"cost"` the fleet may discharge into export, which 1.13.1
+  forbade for every objective: it does when the export price pays for
+  the energy charged back later (an evening export price above the
+  night’s import price), and never when the export earns nothing (a tiny
+  tie-break price on the discharge and the export makes it cut import
+  first). With a fleet that can discharge more than the site’s evening
+  load and an export price equal to the import price, this lowers the
+  energy cost of the test case from 13.97 to -0.90; with an export price
+  below every import price the fleet still only cuts import. `"grid"`,
+  `"capacity"` and combined objectives keep the discharge floor of
+  1.13.1.
+- Under `"cost"` and combined objectives the setpoint counts the
+  discharge losses: every kWh discharged is charged back as
+  `1 / discharge_eff` kWh, as the scheduler counts it, so the fleet
+  discharges only when the price spread covers the losses. With a flat
+  export price of 0.15 against a night import price of 0.10, the cost
+  setpoint exports at `discharge_eff = 0.8` (0.15 x 0.8 \> 0.10) and not
+  at 0.6. The setpoint plans without the losses first, then re-solves
+  with them in the slots that discharge, which keeps the problem convex
+  without letting the solver invent losses to charge more energy. The
+  `"grid"` and `"capacity"` setpoints are unchanged.
+- Fix: with `discharge_eff` below 1, the V2G scheduler let a session
+  discharge as much as its energy deadline and SoC floor allowed in
+  grid-side kWh, but every kWh discharged costs `1 / discharge_eff` kWh
+  of battery and of energy to charge back. A session that discharged up
+  to that limit left short of its energy (19.25 of 22 kWh at
+  `discharge_eff = 0.5`) or went below its SoC floor. The allowed
+  discharge is now scaled by `discharge_eff`.
+- `discharge_eff` is documented as the round-trip efficiency (grid -\>
+  battery -\> grid): the sessions’ `Energy` is grid-side, as metered at
+  the charge point, so it already includes the charging losses, which is
+  why there is no `charge_eff`.
+- A numeric `opt_objective` (`w` between 0 and 1) now blends the two
+  objectives in
+  [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  as in
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md):
+  `w` weighs the squared net power (normalised by the squared mean
+  import price) and `1 - w` the cost. `w = 1` gives the `"grid"` results
+  and `w = 0` the `"cost"` results. It used to reuse the `"grid"`
+  objective with the message “Combined optimisation is not yet
+  implemented for V2G”.
+- Under `"cost"` and combined objectives, `lambda` penalises the change
+  of the setpoint between slots, as in
+  [`smart_charging()`](https://resourcefully-dev.github.io/flextools/reference/smart_charging.md);
+  under `"grid"` it still penalises the deviation from the original
+  profile.
+
+## flextools 1.13.1
+
+- [`smart_v2g()`](https://resourcefully-dev.github.io/flextools/reference/smart_v2g.md)
+  no longer discharges a vehicle in a slot where the site already
+  exports, whatever the `opt_objective`. The setpoint places the energy
+  by minimising the squared net power (directly for `"grid"`, and for
+  `"cost"` and combined objectives, which reuse it; for the shifted
+  energy under `"capacity"`), which traded a shallow export for a deeper
+  one: it discharged into the morning’s PV surplus to charge more at
+  noon, adding export and, next to an export limit, export above
+  `export_capacity`. The fleet now discharges only to cut import, down
+  to a net power of 0 (or to a negative `import_capacity`, which asks
+  the site to export), so its export breaches are never worse than those
+  of uncontrolled charging.
+
 ## flextools 1.13.0
 
 - **Breaking:** `charging_power_min` is now always a power in kW, in

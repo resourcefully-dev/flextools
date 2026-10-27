@@ -526,7 +526,7 @@ daily_totals(results_backup)
     ##   date       demand_kWh compressor_kWh backup_kWh unmet_kWh min_temp_C
     ##   <date>          <dbl>          <dbl>      <dbl>     <dbl>      <dbl>
     ## 1 2023-01-09       61.3           19.2       0         0          30.0
-    ## 2 2023-01-10       91.4           31.4       6.76      1.95       24.4
+    ## 2 2023-01-10       91.4           31.4       6.76      1.94       24.4
     ## 3 2023-01-11       61.3           19.2       0         0          30.0
 
 The compressor runs as before, and the **backup heater switches on**

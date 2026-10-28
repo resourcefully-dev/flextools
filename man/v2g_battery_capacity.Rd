@@ -4,18 +4,21 @@
 \alias{v2g_battery_capacity}
 \title{Battery capacity of a V2G session}
 \usage{
-v2g_battery_capacity(energy, state_of_charge)
+v2g_battery_capacity(energy, state_of_charge, battery_capacity = NULL)
 }
 \arguments{
 \item{energy}{numeric, energy the session requires (kWh)}
 
 \item{state_of_charge}{numeric, arrival State-of-Charge (fraction, < 1)}
+
+\item{battery_capacity}{numeric or \code{NULL}, the sessions' \code{BatteryCapacity}
+column (kWh), \code{NULL} when the sessions have none}
 }
 \value{
 numeric, battery capacity (kWh)
 }
 \description{
-The session's energy takes the battery from its arrival State-of-Charge to
-full: \code{Energy / (1 - StateOfCharge)} (twice the energy at 50\%).
+The session's own \code{BatteryCapacity} when it has one. Otherwise its energy
+takes the battery from its arrival State-of-Charge to full: \code{Energy / (1 - StateOfCharge)} (twice the energy at 50\%).
 }
 \keyword{internal}

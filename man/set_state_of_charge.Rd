@@ -15,6 +15,8 @@ set_state_of_charge(sessions)
 \description{
 Adds \code{StateOfCharge = 0.5} when the column is absent, and checks that every
 value is a fraction with \verb{0 <= StateOfCharge < 1} (a full battery has no
-energy to charge, so it gives no battery size).
+energy to charge, so it gives no battery size). When \code{sessions} has a
+\code{BatteryCapacity} column, it also checks that every value is a positive
+finite number (kWh).
 }
 \keyword{internal}

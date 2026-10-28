@@ -20,7 +20,7 @@ smart_v2g(
   show_progress = FALSE,
   lambda = 0,
   soc_min = 0.2,
-  soc_max = NULL,
+  soc_max = 1,
   degradation_cost = 0
 )
 }
@@ -133,16 +133,22 @@ session never discharges below it. A session that arrives below it
 needs to (at nominal power when necessary), and can neither be curtailed
 nor discharge before it reaches the floor.}
 
-\item{soc_max}{numeric or \code{NULL} (default), State-of-Charge ceiling of every
-V2G session during its connection, as a fraction of its battery capacity
-(\verb{soc_min < soc_max <= 1}). A session may then charge ahead, above the
-level it leaves with, up to \code{soc_max}, as long as it gives that back and
-still leaves at its departure level, \code{StateOfCharge + Energy / BatteryCapacity}: it charges ahead in the cheap or exporting slots and
-discharges in the expensive or importing ones. Its headroom is
-\code{max((soc_max - StateOfCharge) * BatteryCapacity - Energy, 0)}, so it
-needs a \code{BatteryCapacity} column: a battery derived from the session's
-energy leaves full and has no headroom. \code{NULL} keeps every session at or
-below its departure level, as before 1.17.0.}
+\item{soc_max}{numeric, State-of-Charge ceiling of every V2G session, as a
+fraction of its battery capacity (default 1, \verb{soc_min < soc_max <= 1}).
+\code{soc_min} and \code{soc_max} are always the limits of the battery:
+\itemize{
+\item A session may charge ahead, above the level it leaves with, up to
+\code{soc_max}, as long as it gives that back and still leaves at its
+departure level, \code{StateOfCharge + Energy / BatteryCapacity}: it charges
+ahead in the cheap or exporting slots and discharges in the expensive
+or importing ones. Its headroom is \code{(soc_max - StateOfCharge) * BatteryCapacity - Energy}, so it needs a \code{BatteryCapacity} column: a
+battery derived from the session's energy leaves full and has no
+headroom. A \code{soc_max} at a session's departure level keeps it at or
+below that level, as before 1.17.0.
+\item A session whose departure level would be above \code{soc_max} charges only
+up to it (\code{Energy} capped at \code{(soc_max - StateOfCharge) * BatteryCapacity}, with a message), and a session arriving at or above
+\code{soc_max} is an error.
+}}
 
 \item{degradation_cost}{numeric, cost of the battery wear per kWh
 discharged to the grid (default 0, \verb{>= 0}), in the units of the prices of

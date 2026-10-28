@@ -90,7 +90,13 @@ test_that("a session with a BatteryCapacity below soc_min charges up to the floo
     datetime = capacity_dttm,
     setpoint = c(rep(-11, 8), rep(11, 24))
   )
-  results <- schedule_sessions_v2g(session, setpoint, soc_min = 0.2)
+  # soc_max at its departure level: no charging ahead, only the floor
+  results <- schedule_sessions_v2g(
+    session,
+    setpoint,
+    soc_min = 0.2,
+    soc_max = 0.1 + 20.02 / 70
+  )
   # One row per block of constant power, in time order
   sch <- results$sessions
   energy <- sch$Energy

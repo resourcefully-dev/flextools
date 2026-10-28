@@ -71,26 +71,57 @@ test_that("with soc_max the v2g fleet charges ahead in the export and discharges
     expect_equal(battery[length(battery)], 0.8 * 70, tolerance = 0.02)
   }
 
-  # Without soc_max it never holds more than it leaves with, so it cannot
-  # discharge in a peak that lasts until it leaves.
-  for (objective in c("capacity", "cost")) {
-    results <- run_ahead(objective)
+  # With soc_max at its departure level it never holds more than it leaves
+  # with, so it cannot discharge in a peak that lasts until it leaves. (The
+  # departure level of the adapted session: evsim rounds 9.8 kWh at 11 kW to
+  # 0.89 hours, 9.79 kWh.)
+  departure_soc <- 0.66 + 9.79 / 70
+  for (objective in c("capacity", "cost", "grid")) {
+    results <- run_ahead(objective, soc_max = departure_soc)
     battery <- ahead_battery(results)
     expect_true(all(battery <= 0.8 * 70 + 0.02), info = objective)
     expect_gte(sum(results$demand$Fleet[ahead_peak]), -0.01)
   }
 })
 
-test_that("soc_max at the departure level keeps the v2g results without soc_max", {
-  # The departure level of the adapted session: evsim rounds 9.8 kWh at 11 kW
-  # to 0.89 hours, 9.79 kWh.
-  departure_soc <- 0.66 + 9.79 / 70
-  for (objective in c("capacity", "cost", "grid")) {
-    without <- run_ahead(objective)
-    at_departure <- run_ahead(objective, soc_max = departure_soc)
-    expect_equal(at_departure$setpoints, without$setpoints, info = objective)
-    expect_equal(at_departure$demand, without$demand, info = objective)
-  }
+test_that("soc_max caps the departure level of the v2g sessions", {
+  # Arriving at 66% with 9.8 kWh to charge it would leave at 80%: with
+  # soc_max = 0.75 it charges only (0.75 - 0.66) * 70 = 6.3 kWh.
+  expect_message(
+    results <- smart_v2g(
+      ahead_session,
+      ahead_opt_data,
+      opt_objective = "grid",
+      window_days = 1,
+      window_start_hour = 0,
+      soc_min = 0.2,
+      soc_max = 0.75
+    ),
+    "leave above `soc_max`.*Sessions: S1"
+  )
+  battery <- ahead_battery(results)
+  expect_equal(sum(results$demand$Fleet) * 15 / 60, 6.3, tolerance = 0.02)
+  expect_true(all(battery <= 0.75 * 70 + 0.02))
+
+  # A session without BatteryCapacity leaves full: capped as well, on its
+  # derived battery, 9.8 / (1 - 0.66) = 28.8 kWh
+  results <- suppressMessages(smart_v2g(
+    select(ahead_session, -BatteryCapacity),
+    ahead_opt_data,
+    opt_objective = "grid",
+    window_days = 1,
+    window_start_hour = 0,
+    soc_min = 0.2,
+    soc_max = 0.9
+  ))
+  expect_equal(
+    sum(results$demand$Fleet) * 15 / 60,
+    (0.9 - 0.66) * 9.8 / (1 - 0.66),
+    tolerance = 0.02
+  )
+
+  # Arriving at or above soc_max leaves nothing to charge
+  expect_error(run_ahead("grid", soc_max = 0.66), "at or above `soc_max`.*S1")
 })
 
 test_that("a session without BatteryCapacity has no headroom", {
@@ -207,7 +238,7 @@ test_that("degradation_cost weighs on the cost side of a combined v2g objective"
 })
 
 test_that("smart_v2g validates soc_max and degradation_cost", {
-  for (soc_max in list(0.2, 0.1, 1.1, NA_real_, c(0.8, 0.9), "1")) {
+  for (soc_max in list(NULL, 0.2, 0.1, 1.1, NA_real_, c(0.8, 0.9), "1")) {
     expect_error(run_ahead("grid", soc_max = soc_max), "`soc_max`")
   }
   for (degradation_cost in list(-0.01, NA_real_, Inf, c(0, 1), "0.1")) {

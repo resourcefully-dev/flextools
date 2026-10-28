@@ -7,7 +7,7 @@
 check_soc_max(soc_max, soc_min)
 }
 \arguments{
-\item{soc_max}{numeric or \code{NULL}, a single value with \verb{soc_min < soc_max <= 1}, or \code{NULL} (no charging ahead).}
+\item{soc_max}{numeric, a single value with \verb{soc_min < soc_max <= 1}.}
 
 \item{soc_min}{numeric, the SoC floor.}
 }

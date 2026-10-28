@@ -14,7 +14,7 @@ get_setpoints_v2g(
   energy_max = 1,
   soc_min = 0.2,
   discharge_eff = 1,
-  soc_max = NULL,
+  soc_max = 1,
   degradation_cost = 0
 )
 }
@@ -28,8 +28,7 @@ See \code{\link[=smart_v2g]{smart_v2g()}}.}
 \item{discharge_eff}{numeric, discharge efficiency of the vehicles, counted
 by the cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 
-\item{soc_max}{numeric or \code{NULL}, SoC ceiling of the sessions during their
-connection. See \code{\link[=smart_v2g]{smart_v2g()}}.}
+\item{soc_max}{numeric, SoC ceiling of the sessions. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 
 \item{degradation_cost}{numeric, cost per kWh discharged, counted by the
 cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}

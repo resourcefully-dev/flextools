@@ -1053,6 +1053,12 @@ get_setpoints <- function(
 #'   the one it is due in, in the same units. It is negative for a session that
 #'   arrives below the SoC floor, which has to charge up to the floor first.
 #'   See [smart_v2g()] for `BatteryCapacity`.
+#' - `headroom` (only with `soc_max`, else zeros): how much more than its
+#'   energy each connected V2G session may hold above its arrival level,
+#'   `max((soc_max - StateOfCharge) * BatteryCapacity - Energy, 0)` per session
+#'   (the room between its departure level and `soc_max`), over the same slots
+#'   as `reserve`. A session whose battery is derived from its energy leaves
+#'   full, so its headroom is 0.
 #'
 #' @param sessions tibble, the responsive sessions of one profile in a window
 #' @param dttm_seq datetime vector of the window
@@ -1060,9 +1066,11 @@ get_setpoints <- function(
 #' @param load_capacity numeric (vector), maximum flexible load in kW
 #' @param energy_min numeric, share of each session's energy owed at departure
 #' @param soc_min numeric or `NULL`, SoC floor of the V2G sessions (fraction)
+#' @param soc_max numeric or `NULL`, SoC ceiling of the V2G sessions during
+#'   their connection (fraction)
 #'
-#' @return list with the numeric vectors `LFmax`, `owed` and `reserve`, each
-#'   of `length(dttm_seq)`
+#' @return list with the numeric vectors `LFmax`, `owed`, `reserve` and
+#'   `headroom`, each of `length(dttm_seq)`
 #' @keywords internal
 #'
 get_flex_envelope <- function(
@@ -1071,11 +1079,13 @@ get_flex_envelope <- function(
   profile,
   load_capacity = Inf,
   energy_min = 1,
-  soc_min = NULL
+  soc_min = NULL,
+  soc_max = NULL
 ) {
   n_slots <- length(dttm_seq)
   owed <- rep(0, n_slots)
   reserve <- rep(0, n_slots)
+  headroom <- rep(0, n_slots)
 
   # Maximum charging power of the flexible load at each time slot.
   # The optimized setpoint can be reshaped in time but must never exceed
@@ -1101,7 +1111,12 @@ get_flex_envelope <- function(
   LFmax_prof <- pmin(LFmax_prof, load_capacity)
 
   if (nrow(sessions) == 0) {
-    return(list(LFmax = LFmax_prof, owed = owed, reserve = reserve))
+    return(list(
+      LFmax = LFmax_prof,
+      owed = owed,
+      reserve = reserve,
+      headroom = headroom
+    ))
   }
 
   slot_hours <- get_time_resolution(dttm_seq, units = "mins") / 60
@@ -1120,26 +1135,38 @@ get_flex_envelope <- function(
   }
   owed <- cumsum(owed)
 
-  if (!is.null(soc_min)) {
+  if (!is.null(soc_min) || !is.null(soc_max)) {
     soc <- sessions$StateOfCharge
-    reserve_slot <- (soc - soc_min) *
-      v2g_battery_capacity(
-        sessions$Energy,
-        soc,
-        sessions[["BatteryCapacity"]]
-      ) /
-      slot_hours
+    capacity <- v2g_battery_capacity(
+      sessions$Energy,
+      soc,
+      sessions[["BatteryCapacity"]]
+    )
+    # Both apply from its arrival slot up to the slot before the one it is
+    # due in, so it is back at its departure level by then.
     start_idx <- slots_before(sessions$ConnectionStartDateTime) + 1
     end_idx <- pmin(slots_before(sessions$ConnectionEndDateTime), due_idx) - 1
-    for (i in seq_len(nrow(sessions))) {
-      if (start_idx[i] <= end_idx[i]) {
-        idx <- seq(start_idx[i], min(end_idx[i], n_slots))
-        reserve[idx] <- reserve[idx] + reserve_slot[i]
+    add_connected <- function(total, per_session) {
+      for (i in seq_len(nrow(sessions))) {
+        if (start_idx[i] <= end_idx[i]) {
+          idx <- seq(start_idx[i], min(end_idx[i], n_slots))
+          total[idx] <- total[idx] + per_session[i]
+        }
       }
+      total
+    }
+    if (!is.null(soc_min)) {
+      reserve <- add_connected(reserve, (soc - soc_min) * capacity / slot_hours)
+    }
+    if (!is.null(soc_max)) {
+      headroom <- add_connected(
+        headroom,
+        pmax((soc_max - soc) * capacity - sessions$Energy, 0) / slot_hours
+      )
     }
   }
 
-  list(LFmax = LFmax_prof, owed = owed, reserve = reserve)
+  list(LFmax = LFmax_prof, owed = owed, reserve = reserve, headroom = headroom)
 }
 
 

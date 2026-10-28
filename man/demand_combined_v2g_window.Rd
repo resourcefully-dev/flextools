@@ -22,7 +22,9 @@ demand_combined_v2g_window(
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
   LFmin = NULL,
-  discharge_eff = 1
+  discharge_eff = 1,
+  headroom = NULL,
+  degradation_cost = 0
 )
 }
 \arguments{
@@ -74,6 +76,12 @@ optimized load. See \code{demand_grid_v2g_window()}.}
 Below 1, every kWh discharged must be charged back as \code{1 / discharge_eff}
 kWh, as the scheduler counts it, so a discharge pays only when the price
 spread covers the losses (see \code{solve_optimization_window_v2g()}).}
+
+\item{headroom}{numeric vector or \code{NULL}, how far \code{cumsum(O)} may run above
+\code{cumsum(LF)}. See \code{get_bounds_v2g()}.}
+
+\item{degradation_cost}{numeric, cost per kWh discharged to the grid
+(default 0), on top of the tie-break price.}
 }
 \value{
 numeric vector, the optimized load
@@ -88,5 +96,9 @@ problem is a QP (export price clipped to the import price), and
 \code{get_setpoints_v2g()} passes the discharge floor of the grid objective,
 because the squared net-power term trades a shallow export for a deeper one
 (see \code{v2g_discharge_floor()}).
+}
+\details{
+With a \code{degradation_cost} above 0, a fourth block of variables, the net
+discharge \code{D} (as in \code{demand_cost_v2g_window()}), carries \code{(1 - w) * degradation_cost}, the cost side's share.
 }
 \keyword{internal}

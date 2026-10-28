@@ -16,7 +16,8 @@ demand_grid_v2g_window(
   lambda = 0,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  headroom = NULL
 )
 }
 \arguments{
@@ -30,6 +31,9 @@ optimized load on top of \code{-LFmax}. \code{get_setpoints_v2g()} (for the grid
 and combined objectives) and \code{capacity_v2g_window()} pass
 \code{v2g_discharge_floor()}, so the fleet never discharges where that only
 adds export.}
+
+\item{headroom}{numeric vector or \code{NULL}, how far \code{cumsum(O)} may run above
+\code{cumsum(LF)}. See \code{get_bounds_v2g()}.}
 }
 \description{
 Minimisation of net power with bidirectional flexibility (single window)

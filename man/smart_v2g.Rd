@@ -19,7 +19,9 @@ smart_v2g(
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0,
-  soc_min = 0.2
+  soc_min = 0.2,
+  soc_max = NULL,
+  degradation_cost = 0
 )
 }
 \arguments{
@@ -130,6 +132,25 @@ session never discharges below it. A session that arrives below it
 (\code{StateOfCharge < soc_min}) charges up to the floor first, as fast as it
 needs to (at nominal power when necessary), and can neither be curtailed
 nor discharge before it reaches the floor.}
+
+\item{soc_max}{numeric or \code{NULL} (default), State-of-Charge ceiling of every
+V2G session during its connection, as a fraction of its battery capacity
+(\verb{soc_min < soc_max <= 1}). A session may then charge ahead, above the
+level it leaves with, up to \code{soc_max}, as long as it gives that back and
+still leaves at its departure level, \code{StateOfCharge + Energy / BatteryCapacity}: it charges ahead in the cheap or exporting slots and
+discharges in the expensive or importing ones. Its headroom is
+\code{max((soc_max - StateOfCharge) * BatteryCapacity - Energy, 0)}, so it
+needs a \code{BatteryCapacity} column: a battery derived from the session's
+energy leaves full and has no headroom. \code{NULL} keeps every session at or
+below its departure level, as before 1.17.0.}
+
+\item{degradation_cost}{numeric, cost of the battery wear per kWh
+discharged to the grid (default 0, \verb{>= 0}), in the units of the prices of
+\code{opt_data}. The \code{"cost"} objective adds it to every kWh discharged, so the
+fleet discharges only when the price spread, net of the \code{discharge_eff}
+losses, pays more than it. A combined objective \code{w} counts \code{(1 - w) * degradation_cost}, the cost side's share. The \code{"grid"} and \code{"capacity"}
+objectives, which carry no prices and discharge only to cut import, do
+not count it.}
 }
 \value{
 list with setpoints, sessions and demand similar to

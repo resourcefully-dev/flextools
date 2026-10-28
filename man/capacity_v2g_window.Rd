@@ -15,7 +15,8 @@ capacity_v2g_window(
   export_capacity,
   lambda = 0,
   energy_ratio = c(1, 1),
-  cumsum_min = NULL
+  cumsum_min = NULL,
+  headroom = NULL
 )
 }
 \arguments{
@@ -24,6 +25,10 @@ capacity_v2g_window(
 \item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
 load's energy the optimized load must carry. See
 \code{demand_capacity_window()}.}
+
+\item{headroom}{numeric vector or \code{NULL}, how far \code{cumsum(O)} may run above
+\code{cumsum(LF)} (charging ahead, see \code{get_flex_envelope()}). \code{NULL} (or 0)
+keeps it at or below \code{cumsum(LF)}.}
 }
 \description{
 The V2G counterpart of \code{demand_capacity_window()}. The slice that has to

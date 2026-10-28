@@ -1,3 +1,27 @@
+# flextools 1.17.0
+
+* `smart_v2g()` gains `soc_max` (default `NULL`): a V2G session may charge
+  ahead, above the level it leaves with, up to `soc_max` of its
+  `BatteryCapacity`, and give it back before it leaves. Until now the fleet
+  could never hold more than its uncontrolled profile had charged, so a
+  vehicle could only discharge what it had time to charge back after. With a
+  70 kWh battery arriving at 66% and leaving at 80%, `soc_max = 1` lets it
+  absorb 14 kWh more of a midday PV export and discharge them in an import
+  peak that lasts until it leaves, under every objective. It still leaves at
+  `StateOfCharge + Energy / BatteryCapacity`: the scheduler discharges what is
+  left above that level before departure, whatever the setpoint. A battery
+  derived from the session's energy (no `BatteryCapacity` column) leaves full,
+  so it has no headroom. Without `soc_max` nothing changes.
+* `smart_v2g()` gains `degradation_cost` (default 0, per kWh discharged to the
+  grid). The `"cost"` objective adds it to every kWh discharged, so the fleet
+  no longer discharges for a price spread (net of `discharge_eff`) below it;
+  a combined objective `w` counts `(1 - w) * degradation_cost`. The `"grid"`
+  and `"capacity"` objectives, which discharge only to cut import and carry no
+  prices, do not count it.
+* Fix: the `"capacity"` objective could hang in HiGHS's QP solver on a
+  degenerate breach (seen with `soc_max`). The breach QP now has an iteration
+  limit and, when it hits it, solves again with a stronger regularisation.
+
 # flextools 1.16.0
 
 * `smart_v2g()` accepts a `BatteryCapacity` column (kWh) in `sessions`, the

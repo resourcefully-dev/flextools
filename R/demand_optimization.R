@@ -409,6 +409,9 @@ demand_select_window_solver <- function(solver_data) {
 # `LFmin` is the per-slot floor of the optimized load: 0 for demand, and below
 # 0 (discharge) for V2G, where capacity_v2g_window() passes the connected power
 # and `v2g_discharge_floor()`, so a discharge only ever cuts import.
+#
+# `headroom` (V2G with `soc_max`, see get_flex_envelope()) lets the cumulative
+# optimized load run above cumsum(LF) by that much: the fleet charges ahead.
 capacity_slice_problem <- function(
   G,
   LF,
@@ -420,7 +423,8 @@ capacity_slice_problem <- function(
   export_capacity,
   energy_lb = NULL,
   cumsum_min = NULL,
-  LFmin = 0
+  LFmin = 0,
+  headroom = NULL
 ) {
   time_slots <- length(LF)
   LFmin <- rep_len(as.numeric(LFmin), time_slots)
@@ -456,6 +460,11 @@ capacity_slice_problem <- function(
     A_cumsum_ub <- block(-cumsumMat, cumsumMat)
     lhs_cumsum_ub <- rep(-Inf, time_slots)
     rhs_cumsum_ub <- rep(0, time_slots)
+    # Charging ahead (V2G `soc_max`): cumsum(LF - slice + added) may run above
+    # cumsum(LF) by the headroom of the connected sessions.
+    if (!is.null(headroom)) {
+      rhs_cumsum_ub <- round(pmax(rep_len(as.numeric(headroom), time_slots), 0), 2)
+    }
     # Departure deadlines: cumsum(LF - slice + added) >= cumsum_min, capped at
     # cumsum(LF) as in get_bounds().
     if (!is.null(cumsum_min)) {
@@ -589,7 +598,8 @@ select_capacity_slice <- function(
   export_capacity,
   energy_lb = NULL,
   cumsum_min = NULL,
-  LFmin = 0
+  LFmin = 0,
+  headroom = NULL
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -611,10 +621,14 @@ select_capacity_slice <- function(
     export_capacity = export_capacity,
     energy_lb = energy_lb,
     cumsum_min = cumsum_min,
-    LFmin = LFmin
+    LFmin = LFmin,
+    headroom = headroom
   )
 
-  solve <- function(Q, L, upper, A, lhs, rhs) {
+  solve <- function(Q, L, upper, A, lhs, rhs,
+                    control = optimization_highs_options(
+                      include_mip_gap = FALSE
+                    )) {
     result <- highs::highs_solve(
       Q = Q,
       L = L,
@@ -623,7 +637,7 @@ select_capacity_slice <- function(
       A = A,
       lhs = lhs,
       rhs = rhs,
-      control = optimization_highs_options(include_mip_gap = FALSE)
+      control = control
     )
     if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
       return(NULL)
@@ -642,9 +656,26 @@ select_capacity_slice <- function(
     x = 2,
     dims = c(n_variables, n_variables)
   )
+  # HiGHS's QP solver can cycle on a degenerate breach (seen with V2G
+  # charging ahead, `headroom`), so the QP gets an iteration limit and, when it
+  # hits it, a second try with a stronger regularisation, which solves it.
   result <- solve(
-    Q, rep(0, n_variables), problem$upper, problem$A, problem$lhs, problem$rhs
+    Q, rep(0, n_variables), problem$upper, problem$A, problem$lhs, problem$rhs,
+    control = optimization_highs_options(
+      include_mip_gap = FALSE,
+      qp_iteration_limit = 20000L
+    )
   )
+  if (is.null(result)) {
+    result <- solve(
+      Q, rep(0, n_variables), problem$upper, problem$A, problem$lhs,
+      problem$rhs,
+      control = optimization_highs_options(
+        include_mip_gap = FALSE,
+        qp_regularization_value = 1e-5
+      )
+    )
+  }
   if (is.null(result)) {
     return(NULL)
   }
@@ -731,7 +762,8 @@ capacity_window <- function(
   place_slice,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = 0
+  LFmin = 0,
+  headroom = NULL
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -781,7 +813,8 @@ capacity_window <- function(
     export_capacity = export_capacity,
     energy_lb = energy_lb,
     cumsum_min = cumsum_min,
-    LFmin = LFmin
+    LFmin = LFmin,
+    headroom = headroom
   )
 
   if (is.null(slice_solution)) {
@@ -850,7 +883,10 @@ capacity_window <- function(
       NULL
     } else {
       rep_len(as.numeric(cumsum_min), time_slots) - cumsum(fixed_load)
-    }
+    },
+    # cumsum(fixed_load + placed) <= cumsum(LF) + headroom is the same
+    # headroom above cumsum(moved_slice).
+    headroom = headroom
   )
 
   round(fixed_load + as.numeric(optimized_slice), 2)
@@ -901,7 +937,8 @@ demand_capacity_window <- function(
     import_capacity = import_capacity,
     export_capacity = export_capacity,
     place_slice = function(LF, time_horizon, LS, LFmax, import_capacity,
-                           export_capacity, energy_ratio, cumsum_min) {
+                           export_capacity, energy_ratio, cumsum_min,
+                           headroom = NULL) {
       demand_grid_window(
         G = G,
         LF = LF,

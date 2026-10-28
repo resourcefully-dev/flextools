@@ -53,6 +53,25 @@
 #'   (`StateOfCharge < soc_min`) charges up to the floor first, as fast as it
 #'   needs to (at nominal power when necessary), and can neither be curtailed
 #'   nor discharge before it reaches the floor.
+#' @param soc_max numeric or `NULL` (default), State-of-Charge ceiling of every
+#'   V2G session during its connection, as a fraction of its battery capacity
+#'   (`soc_min < soc_max <= 1`). A session may then charge ahead, above the
+#'   level it leaves with, up to `soc_max`, as long as it gives that back and
+#'   still leaves at its departure level, `StateOfCharge + Energy /
+#'   BatteryCapacity`: it charges ahead in the cheap or exporting slots and
+#'   discharges in the expensive or importing ones. Its headroom is
+#'   `max((soc_max - StateOfCharge) * BatteryCapacity - Energy, 0)`, so it
+#'   needs a `BatteryCapacity` column: a battery derived from the session's
+#'   energy leaves full and has no headroom. `NULL` keeps every session at or
+#'   below its departure level, as before 1.17.0.
+#' @param degradation_cost numeric, cost of the battery wear per kWh
+#'   discharged to the grid (default 0, `>= 0`), in the units of the prices of
+#'   `opt_data`. The `"cost"` objective adds it to every kWh discharged, so the
+#'   fleet discharges only when the price spread, net of the `discharge_eff`
+#'   losses, pays more than it. A combined objective `w` counts `(1 - w) *
+#'   degradation_cost`, the cost side's share. The `"grid"` and `"capacity"`
+#'   objectives, which carry no prices and discharge only to cut import, do
+#'   not count it.
 #'
 #' @details
 #' The `sessions` tibble can carry a `StateOfCharge` column, the State-of-Charge
@@ -131,7 +150,9 @@ smart_v2g <- function(
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0,
-  soc_min = 0.2
+  soc_min = 0.2,
+  soc_max = NULL,
+  degradation_cost = 0
 ) {
   if (show_progress) {
     cli::cli_h1("Set up (V2G)")
@@ -163,6 +184,8 @@ smart_v2g <- function(
   check_energy_ratios(energy_min, energy_max)
   check_charging_power_min(charging_power_min)
   check_soc_min(soc_min)
+  check_soc_max(soc_max, soc_min)
+  check_degradation_cost(degradation_cost)
   sessions <- set_state_of_charge(sessions)
   check_v2g_battery_fit(sessions)
 
@@ -287,7 +310,9 @@ smart_v2g <- function(
     energy_min,
     energy_max,
     soc_min,
-    discharge_eff
+    discharge_eff,
+    soc_max,
+    degradation_cost
   )
 
   if (show_progress) {
@@ -303,7 +328,8 @@ smart_v2g <- function(
     energy_max,
     discharge_eff,
     include_log,
-    soc_min
+    soc_min,
+    soc_max
   )
 
   if (show_progress) {
@@ -390,6 +416,10 @@ smart_v2g <- function(
 #' @param soc_min numeric, SoC floor of the sessions. See [smart_v2g()].
 #' @param discharge_eff numeric, discharge efficiency of the vehicles, counted
 #'   by the cost and combined objectives. See [smart_v2g()].
+#' @param soc_max numeric or `NULL`, SoC ceiling of the sessions during their
+#'   connection. See [smart_v2g()].
+#' @param degradation_cost numeric, cost per kWh discharged, counted by the
+#'   cost and combined objectives. See [smart_v2g()].
 #'
 #' @keywords internal
 #'
@@ -402,7 +432,9 @@ get_setpoints_v2g <- function(
   energy_min = 1,
   energy_max = 1,
   soc_min = 0.2,
-  discharge_eff = 1
+  discharge_eff = 1,
+  soc_max = NULL,
+  degradation_cost = 0
 ) {
   # Both ratios are shares of the responsive sessions' own demand `LF`; the
   # non-responsive demand `L_fixed_prof` is added back untouched below.
@@ -489,10 +521,14 @@ get_setpoints_v2g <- function(
           profile = profile,
           load_capacity = opt_data$load_capacity,
           energy_min = energy_min,
-          soc_min = soc_min
+          soc_min = soc_min,
+          soc_max = soc_max
         )
         LFmax_prof <- envelope$LFmax[opt_idxs]
         cumsum_min <- (envelope$owed - envelope$reserve)[opt_idxs]
+        # Charging ahead (`soc_max`): `cumsum(O)` may run above the
+        # uncontrolled profile by the headroom of the connected sessions.
+        headroom <- if (is.null(soc_max)) NULL else envelope$headroom[opt_idxs]
         # The objectives with a squared-net-power term (grid, combined and
         # capacity) discharge only to cut import (see v2g_discharge_floor()).
         discharge_floor <- v2g_discharge_floor(
@@ -514,7 +550,8 @@ get_setpoints_v2g <- function(
             lambda = lambda,
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
-            LFmin = discharge_floor
+            LFmin = discharge_floor,
+            headroom = headroom
           )
         } else if (opt_objective == "cost") {
           # No discharge floor: the cost LP discharges into export only when
@@ -536,7 +573,9 @@ get_setpoints_v2g <- function(
             lambda = lambda,
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
-            discharge_eff = discharge_eff
+            discharge_eff = discharge_eff,
+            headroom = headroom,
+            degradation_cost = degradation_cost
           )
         } else if (opt_objective == "capacity") {
           O <- capacity_v2g_window(
@@ -550,7 +589,8 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
             energy_ratio = energy_ratio,
-            cumsum_min = cumsum_min
+            cumsum_min = cumsum_min,
+            headroom = headroom
           )
         } else if (is.numeric(opt_objective)) {
           O <- demand_combined_v2g_window(
@@ -571,7 +611,9 @@ get_setpoints_v2g <- function(
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
             LFmin = discharge_floor,
-            discharge_eff = discharge_eff
+            discharge_eff = discharge_eff,
+            headroom = headroom,
+            degradation_cost = degradation_cost
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -609,7 +651,9 @@ get_setpoints_v2g_parallel <- function(
   energy_min = 1,
   energy_max = 1,
   soc_min = 0.2,
-  discharge_eff = 1
+  discharge_eff = 1,
+  soc_max = NULL,
+  degradation_cost = 0
 ) {
   reset_message_once()
 
@@ -624,7 +668,9 @@ get_setpoints_v2g_parallel <- function(
       energy_min = energy_min,
       energy_max = energy_max,
       soc_min = soc_min,
-      discharge_eff = discharge_eff
+      discharge_eff = discharge_eff,
+      soc_max = soc_max,
+      degradation_cost = degradation_cost
     )
   )
 }
@@ -640,7 +686,8 @@ smart_v2g_window <- function(
   energy_max = 1,
   discharge_eff = 1,
   include_log = FALSE,
-  soc_min = 0.2
+  soc_min = 0.2,
+  soc_max = NULL
 ) {
   if (nrow(setpoints) == 0) {
     return(list(
@@ -706,7 +753,8 @@ smart_v2g_window <- function(
       include_log = include_log,
       show_progress = FALSE,
       power_th = power_th,
-      soc_min = soc_min
+      soc_min = soc_min,
+      soc_max = soc_max
     )
     sessions_window_flex_final <- results$sessions
     results_log <- results$log
@@ -754,7 +802,8 @@ smart_v2g_window_parallel <- function(
   energy_max,
   discharge_eff,
   include_log,
-  soc_min = 0.2
+  soc_min = 0.2,
+  soc_max = NULL
 ) {
   if (
     !requireNamespace("mirai", quietly = TRUE) ||
@@ -774,7 +823,8 @@ smart_v2g_window_parallel <- function(
           energy_max = energy_max,
           discharge_eff = discharge_eff,
           include_log = include_log,
-          soc_min = soc_min
+          soc_min = soc_min,
+          soc_max = soc_max
         )
       }
     )
@@ -794,7 +844,8 @@ smart_v2g_window_parallel <- function(
             energy_max = energy_max,
             discharge_eff = discharge_eff,
             include_log = include_log,
-            soc_min = soc_min
+            soc_min = soc_min,
+            soc_max = soc_max
           )
         },
         smart_v2g_window = smart_v2g_window,
@@ -804,7 +855,8 @@ smart_v2g_window_parallel <- function(
         energy_max = energy_max,
         discharge_eff = discharge_eff,
         include_log = include_log,
-        soc_min = soc_min
+        soc_min = soc_min,
+        soc_max = soc_max
       )
     )
   }
@@ -827,6 +879,9 @@ smart_v2g_window_parallel <- function(
 #' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
 #'   load's energy the optimized load must carry. See
 #'   `demand_capacity_window()`.
+#' @param headroom numeric vector or `NULL`, how far `cumsum(O)` may run above
+#'   `cumsum(LF)` (charging ahead, see `get_flex_envelope()`). `NULL` (or 0)
+#'   keeps it at or below `cumsum(LF)`.
 #'
 #' @keywords internal
 #'
@@ -841,7 +896,8 @@ capacity_v2g_window <- function(
   export_capacity,
   lambda = 0,
   energy_ratio = c(1, 1),
-  cumsum_min = NULL
+  cumsum_min = NULL,
+  headroom = NULL
 ) {
   time_slots <- length(LF)
   LFmax <- as.numeric(rep_len(LFmax, time_slots))
@@ -861,7 +917,8 @@ capacity_v2g_window <- function(
     import_capacity = import_capacity,
     export_capacity = export_capacity,
     place_slice = function(LF, time_horizon, LS, LFmax, import_capacity,
-                           export_capacity, energy_ratio, cumsum_min) {
+                           export_capacity, energy_ratio, cumsum_min,
+                           headroom = NULL) {
       demand_grid_v2g_window(
         G = G,
         LF = LF,
@@ -877,12 +934,14 @@ capacity_v2g_window <- function(
         # Charge-only: the placement puts back the slice's energy and never
         # discharges the rest of the fleet (which would reshape slots within
         # the caps). Any discharge the breach needs is already in the slice.
-        LFmin = 0
+        LFmin = 0,
+        headroom = headroom
       )
     },
     energy_ratio = energy_ratio,
     cumsum_min = cumsum_min,
-    LFmin = pmin(pmax(-LFmax, discharge_floor), 0)
+    LFmin = pmin(pmax(-LFmax, discharge_floor), 0),
+    headroom = headroom
   )
 }
 
@@ -898,6 +957,8 @@ capacity_v2g_window <- function(
 #'   and combined objectives) and `capacity_v2g_window()` pass
 #'   `v2g_discharge_floor()`, so the fleet never discharges where that only
 #'   adds export.
+#' @param headroom numeric vector or `NULL`, how far `cumsum(O)` may run above
+#'   `cumsum(LF)`. See `get_bounds_v2g()`.
 #'
 #' @keywords internal
 #'
@@ -913,7 +974,8 @@ demand_grid_v2g_window <- function(
   lambda = 0,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  headroom = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -934,7 +996,8 @@ demand_grid_v2g_window <- function(
     q,
     energy_ratio,
     cumsum_min,
-    LFmin
+    LFmin,
+    headroom = headroom
   )
 }
 
@@ -955,7 +1018,9 @@ demand_grid_v2g_window <- function(
 #' back later, which is the economic case of V2G. A fourth block of variables,
 #' the fleet's net discharge `D >= max(-O, 0)`, carries a tiny cost so that a
 #' discharge that earns nothing (a tie, e.g. discharging into a flat export
-#' price to charge in another exporting slot) is never chosen.
+#' price to charge in another exporting slot) is never chosen. It also carries
+#' the `degradation_cost` of the batteries, so the fleet discharges only when
+#' the price spread pays for it.
 #'
 #' @inheritParams demand_cost_window
 #' @param lambda numeric, penalty on the change of the optimized load between
@@ -966,6 +1031,10 @@ demand_grid_v2g_window <- function(
 #'   Below 1, every kWh discharged must be charged back as `1 / discharge_eff`
 #'   kWh, as the scheduler counts it, so a discharge pays only when the price
 #'   spread covers the losses (see `solve_optimization_window_v2g()`).
+#' @param headroom numeric vector or `NULL`, how far `cumsum(O)` may run above
+#'   `cumsum(LF)`. See `get_bounds_v2g()`.
+#' @param degradation_cost numeric, cost per kWh discharged to the grid
+#'   (default 0), on top of the tie-break price.
 #'
 #' @return numeric vector, the optimized load
 #' @keywords internal
@@ -987,7 +1056,9 @@ demand_cost_v2g_window <- function(
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
   LFmin = NULL,
-  discharge_eff = 1
+  discharge_eff = 1,
+  headroom = NULL,
+  degradation_cost = 0
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1010,7 +1081,7 @@ demand_cost_v2g_window <- function(
     PTD - PTU,
     PI,
     -PE + tiebreak,
-    rep(tiebreak, time_slots)
+    rep(tiebreak + degradation_cost, time_slots)
   )
 
   solve_optimization_window_v2g(
@@ -1027,7 +1098,8 @@ demand_cost_v2g_window <- function(
     energy_ratio,
     cumsum_min,
     LFmin,
-    discharge_eff = discharge_eff
+    discharge_eff = discharge_eff,
+    headroom = headroom
   )
 }
 
@@ -1043,6 +1115,10 @@ demand_cost_v2g_window <- function(
 #' `get_setpoints_v2g()` passes the discharge floor of the grid objective,
 #' because the squared net-power term trades a shallow export for a deeper one
 #' (see `v2g_discharge_floor()`).
+#'
+#' With a `degradation_cost` above 0, a fourth block of variables, the net
+#' discharge `D` (as in `demand_cost_v2g_window()`), carries `(1 - w) *
+#' degradation_cost`, the cost side's share.
 #'
 #' @inheritParams demand_cost_v2g_window
 #' @param w numeric, optimization objective weight (`w = 1` minimizes net
@@ -1069,7 +1145,9 @@ demand_combined_v2g_window <- function(
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
   LFmin = NULL,
-  discharge_eff = 1
+  discharge_eff = 1,
+  headroom = NULL,
+  degradation_cost = 0
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1090,6 +1168,15 @@ demand_combined_v2g_window <- function(
     (1 - w) * PI,
     -(1 - w) * PE
   )
+  if (degradation_cost > 0) {
+    # X = [O, I, E, D], with the net discharge `D` priced at the cost side's
+    # share of the degradation.
+    P <- rbind(
+      cbind(P, matrix(0, 3 * time_slots, time_slots)),
+      matrix(0, time_slots, 4 * time_slots)
+    )
+    q <- c(q, rep((1 - w) * degradation_cost, time_slots))
+  }
 
   solve_optimization_window_v2g(
     G,
@@ -1105,7 +1192,8 @@ demand_combined_v2g_window <- function(
     energy_ratio,
     cumsum_min,
     LFmin,
-    discharge_eff = discharge_eff
+    discharge_eff = discharge_eff,
+    headroom = headroom
   )
 }
 
@@ -1146,7 +1234,8 @@ solve_optimization_window_v2g <- function(
   cumsum_min = NULL,
   LFmin = NULL,
   discharge_eff = 1,
-  discharge_slots = NULL
+  discharge_slots = NULL,
+  headroom = NULL
 ) {
   G <- round(G, 2)
   LF <- round(LF, 2)
@@ -1191,7 +1280,8 @@ solve_optimization_window_v2g <- function(
         cumsum_min,
         LFmin,
         discharge_eff = discharge_eff,
-        discharge_slots = discharge_slots
+        discharge_slots = discharge_slots,
+        headroom = headroom
       )
     }
     O_lossless <- solve_pass(1, NULL)
@@ -1246,7 +1336,8 @@ solve_optimization_window_v2g <- function(
       import_capacity,
       export_capacity,
       cumsum_min,
-      LFmin
+      LFmin,
+      headroom
     )
     reward <- demand_energy_reward(
       P,
@@ -1275,7 +1366,8 @@ solve_optimization_window_v2g <- function(
       import_cap,
       export_cap,
       cumsum_min,
-      LFmin
+      LFmin,
+      headroom
     )
 
     # Minimal-relaxation retry: guarantee the original profile O = LF is a
@@ -1588,7 +1680,8 @@ get_bounds_v2g <- function(
   import_capacity,
   export_capacity,
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  headroom = NULL
 ) {
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
@@ -1637,6 +1730,16 @@ get_bounds_v2g <- function(
     }
 
     ub_shift <- horizonMat_identity %*% LF
+    # Charging ahead (`soc_max`, see get_flex_envelope()): the connected
+    # sessions may hold more than the uncontrolled profile has charged, up to
+    # their headroom, as long as they give it back before they leave (the
+    # energy row keeps the total). Both bounds stay above `cumsum(LF)`, so the
+    # original profile remains feasible.
+    if (!is.null(headroom)) {
+      headroom <- pmax(rep_len(as.numeric(headroom), time_slots), 0)
+      ub_cumsum <- ub_cumsum + headroom
+      ub_shift <- ub_shift + headroom
+    }
     ub_O <- pmin(pmax(ub_shift, lb_O), ub_O)
   } else {
     horizonMat_cumsum <- triangulate_matrix(
@@ -1685,7 +1788,8 @@ schedule_sessions_v2g <- function(
   discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
-  soc_min = 0.2
+  soc_min = 0.2,
+  soc_max = NULL
 ) {
   if (show_progress) {
     cli::cli_h1("Scheduling V2G sessions")
@@ -1714,6 +1818,7 @@ schedule_sessions_v2g <- function(
 
   check_charging_power_min(charging_power_min)
   check_soc_min(soc_min)
+  check_soc_max(soc_max, soc_min)
   if (
     !is.numeric(discharge_eff) ||
       length(discharge_eff) != 1 ||
@@ -1846,6 +1951,42 @@ schedule_sessions_v2g <- function(
         PossibleEnergyRest = .data$PowerNominal *
           pmax(.data$ConnectionHoursLeft - resolution / 60, 0)
       )
+
+    # Charging ahead (`soc_max`) ---------------------------------------------
+    # A session may hold up to `soc_max` of its battery (never less than its
+    # departure level, `EnergyInBattery + EnergyToCharge`), and must give back
+    # what it holds above its departure level before it leaves: whatever it
+    # cannot discharge at nominal power the rest of its connection, it
+    # discharges now. `MaxPowerTimeslot` is the most it may charge in this
+    # slot (negative when it has to discharge). By default (`PowerTimeslot`)
+    # a session above its departure level stays idle.
+    if (!is.null(soc_max)) {
+      sessions_timeslot <- sessions_timeslot %>%
+        mutate(
+          BatteryMax = pmax(
+            soc_max * .data$BatteryCapacity,
+            .data$EnergyInBattery + .data$EnergyToCharge
+          ),
+          MaxEnergyTimeslot = pmin(
+            .data$BatteryMax - .data$EnergyInBattery,
+            .data$EnergyToCharge + .data$PossibleEnergyRest
+          ),
+          MaxPowerTimeslot = ifelse(
+            .data$MaxEnergyTimeslot >= 0,
+            pmin(.data$MaxEnergyTimeslot / (resolution / 60), .data$PowerNominal),
+            # A discharge of `p` drains `p / discharge_eff` from the battery
+            pmax(
+              .data$MaxEnergyTimeslot * discharge_eff / (resolution / 60),
+              -.data$PowerNominal
+            )
+          ),
+          PowerTimeslot = pmin(
+            pmax(.data$EnergyToCharge, 0) / (resolution / 60),
+            .data$PowerNominal,
+            .data$MaxPowerTimeslot
+          )
+        )
+    }
 
     # Flexibility definition for V2G ---------------------------
     # The minimum power that can be charged in this time slot is
@@ -2031,6 +2172,36 @@ schedule_sessions_v2g <- function(
     } else {
       # No flexibility required: charge all sessions
       sessions_timeslot$Power <- sessions_timeslot$PowerTimeslot
+
+      # The setpoint asks for more: the sessions with room below `soc_max`
+      # charge ahead, in proportion to their room, as far as the setpoint asks.
+      if (!is.null(soc_max) && flex_req < 0) {
+        room <- pmax(
+          sessions_timeslot$MaxPowerTimeslot - sessions_timeslot$PowerTimeslot,
+          0
+        )
+        room[room < 0.1] <- 0
+        if (sum(room) > 0) {
+          increase_factor <- min(-flex_req / sum(room), 1)
+          power_up <- sessions_timeslot$PowerTimeslot + room * increase_factor
+          # As for a discharge, a session never charges ahead below
+          # `charging_power_min`: it goes up to the minimum when its room
+          # allows it, else it stays as it was.
+          small <- room > 0 &
+            power_up > 0 &
+            power_up < sessions_timeslot$ChargingPowerMin
+          power_up[small] <- ifelse(
+            sessions_timeslot$MaxPowerTimeslot[small] >=
+              sessions_timeslot$ChargingPowerMin[small],
+            sessions_timeslot$ChargingPowerMin[small],
+            sessions_timeslot$PowerTimeslot[small]
+          )
+          raised <- power_up > sessions_timeslot$PowerTimeslot
+          sessions_timeslot$Power <- power_up
+          sessions_timeslot$Flexible[raised] <- TRUE
+          sessions_timeslot$Exploited[raised] <- TRUE
+        }
+      }
     }
 
     # Set `Exploited` to `NA` if sessions are not `Flexible`
@@ -2187,6 +2358,54 @@ check_soc_min <- function(soc_min) {
       soc_min >= 1
   ) {
     stop("Error: `soc_min` must be a single number with 0 <= soc_min < 1")
+  }
+  invisible(TRUE)
+}
+
+
+#' Validate the SoC ceiling of the V2G sessions
+#'
+#' @param soc_max numeric or `NULL`, a single value with `soc_min < soc_max <=
+#'   1`, or `NULL` (no charging ahead).
+#' @param soc_min numeric, the SoC floor.
+#'
+#' @return `TRUE`, invisibly. Stops with a clear message otherwise.
+#' @keywords internal
+#'
+check_soc_max <- function(soc_max, soc_min) {
+  if (is.null(soc_max)) {
+    return(invisible(TRUE))
+  }
+  if (
+    !is.numeric(soc_max) ||
+      length(soc_max) != 1 ||
+      !is.finite(soc_max) ||
+      soc_max <= soc_min ||
+      soc_max > 1
+  ) {
+    stop(
+      "Error: `soc_max` must be NULL or a single number with soc_min < soc_max <= 1"
+    )
+  }
+  invisible(TRUE)
+}
+
+
+#' Validate the degradation cost of the V2G batteries
+#'
+#' @param degradation_cost numeric, a single value `>= 0`.
+#'
+#' @return `TRUE`, invisibly. Stops with a clear message otherwise.
+#' @keywords internal
+#'
+check_degradation_cost <- function(degradation_cost) {
+  if (
+    !is.numeric(degradation_cost) ||
+      length(degradation_cost) != 1 ||
+      !is.finite(degradation_cost) ||
+      degradation_cost < 0
+  ) {
+    stop("Error: `degradation_cost` must be a single number >= 0")
   }
   invisible(TRUE)
 }

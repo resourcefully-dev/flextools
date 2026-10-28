@@ -22,7 +22,9 @@ demand_cost_v2g_window(
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
   LFmin = NULL,
-  discharge_eff = 1
+  discharge_eff = 1,
+  headroom = NULL,
+  degradation_cost = 0
 )
 }
 \arguments{
@@ -71,6 +73,12 @@ optimized load. See \code{demand_grid_v2g_window()}.}
 Below 1, every kWh discharged must be charged back as \code{1 / discharge_eff}
 kWh, as the scheduler counts it, so a discharge pays only when the price
 spread covers the losses (see \code{solve_optimization_window_v2g()}).}
+
+\item{headroom}{numeric vector or \code{NULL}, how far \code{cumsum(O)} may run above
+\code{cumsum(LF)}. See \code{get_bounds_v2g()}.}
+
+\item{degradation_cost}{numeric, cost per kWh discharged to the grid
+(default 0), on top of the tie-break price.}
 }
 \value{
 numeric vector, the optimized load
@@ -90,6 +98,8 @@ discharges into export when the export price pays for the energy charged
 back later, which is the economic case of V2G. A fourth block of variables,
 the fleet's net discharge \code{D >= max(-O, 0)}, carries a tiny cost so that a
 discharge that earns nothing (a tie, e.g. discharging into a flat export
-price to charge in another exporting slot) is never chosen.
+price to charge in another exporting slot) is never chosen. It also carries
+the \code{degradation_cost} of the batteries, so the fleet discharges only when
+the price spread pays for it.
 }
 \keyword{internal}

@@ -21,6 +21,7 @@ smart_v2g(
   lambda = 0,
   soc_min = 0.2,
   soc_max = 1,
+  soc_final = NULL,
   degradation_cost = 0
 )
 }
@@ -150,6 +151,15 @@ up to it (\code{Energy} capped at \code{(soc_max - StateOfCharge) * BatteryCapac
 \code{soc_max} is an error.
 }}
 
+\item{soc_final}{numeric or \code{NULL} (default), State-of-Charge every V2G
+session leaves with, as a fraction of its battery capacity (\verb{soc_min <= soc_final <= 1}). It needs a \code{BatteryCapacity} column, and sets each
+session's arrival State-of-Charge from its energy: \code{StateOfCharge = soc_final - Energy / BatteryCapacity} (so \code{sessions} must not have a
+\code{StateOfCharge} column too). A session whose energy does not fit below
+\code{soc_final} (\code{Energy > soc_final * BatteryCapacity}) is an error. A
+\code{soc_final} above \code{soc_max} is lowered to \code{soc_max}, with a message, and
+one below \code{soc_min} is an error. \code{NULL} takes the arrival State-of-Charge
+from the \code{StateOfCharge} column (see Details).}
+
 \item{degradation_cost}{numeric, cost of the battery wear per kWh
 discharged to the grid (default 0, \verb{>= 0}), in the units of the prices of
 \code{opt_data}. The \code{"cost"} objective adds it to every kWh discharged, so the
@@ -185,6 +195,13 @@ still has the time to charge it back. A session must fit in its battery,
 and names it. When \code{BatteryCapacity} is absent, each session's \code{Energy}
 takes its battery from \code{StateOfCharge} to full, so its battery capacity is
 \code{Energy / (1 - StateOfCharge)} (twice the energy at 0.5).
+
+Instead of a \code{StateOfCharge} column, a fleet with a \code{BatteryCapacity} column
+can give the State-of-Charge every vehicle leaves with, \code{soc_final}: each
+session then arrives at \code{soc_final - Energy / BatteryCapacity}. Like
+\code{SOCmin}, \code{SOCmax} and \code{SOCini} of \code{add_battery_optimization()}, \code{soc_min},
+\code{soc_max} and \code{soc_final} are the floor, the ceiling and the target of the
+batteries, and \code{soc_final} stays within the other two.
 
 With \code{energy_max} below 1 the session charges only that share of its energy
 and leaves lower, at \code{StateOfCharge + energy_max * Energy / BatteryCapacity} (\code{StateOfCharge + energy_max * (1 - StateOfCharge)} without

@@ -1,17 +1,33 @@
 # flextools 1.17.0
 
-* `smart_v2g()` gains `soc_max` (default `NULL`): a V2G session may charge
-  ahead, above the level it leaves with, up to `soc_max` of its
-  `BatteryCapacity`, and give it back before it leaves. Until now the fleet
-  could never hold more than its uncontrolled profile had charged, so a
-  vehicle could only discharge what it had time to charge back after. With a
-  70 kWh battery arriving at 66% and leaving at 80%, `soc_max = 1` lets it
-  absorb 14 kWh more of a midday PV export and discharge them in an import
-  peak that lasts until it leaves, under every objective. It still leaves at
-  `StateOfCharge + Energy / BatteryCapacity`: the scheduler discharges what is
-  left above that level before departure, whatever the setpoint. A battery
-  derived from the session's energy (no `BatteryCapacity` column) leaves full,
-  so it has no headroom. Without `soc_max` nothing changes.
+* `smart_v2g()` gains `soc_max` (default 1, `soc_min < soc_max <= 1`), the
+  State-of-Charge ceiling of the V2G batteries. `soc_min` and `soc_max` are
+  always their limits:
+  * A session with a `BatteryCapacity` may charge ahead, above the level it
+    leaves with, up to `soc_max`, and give it back before it leaves. Until now
+    the fleet could never hold more than its uncontrolled profile had charged,
+    so a vehicle could only discharge what it had time to charge back after.
+    With a 70 kWh battery arriving at 66% and leaving at 80%, `soc_max = 1`
+    lets it absorb 14 kWh more of a midday PV export and discharge them in an
+    import peak that lasts until it leaves, under every objective. It still
+    leaves at `StateOfCharge + Energy / BatteryCapacity`: the scheduler
+    discharges what is left above that level before departure, whatever the
+    setpoint.
+  * A session whose departure level would be above `soc_max` charges only up
+    to it (with a message), and a session arriving at or above `soc_max` is an
+    error.
+  * A battery derived from the session's energy (no `BatteryCapacity` column)
+    leaves full, so it has no room to charge ahead: those results are
+    unchanged. A `soc_max` at the departure level of the sessions gives the
+    results of 1.16.0.
+* `smart_v2g()` gains `soc_final` (default `NULL`), the State-of-Charge every
+  V2G session leaves with. With a `BatteryCapacity` column it sets each
+  session's arrival State-of-Charge, `soc_final - Energy / BatteryCapacity`,
+  instead of a `StateOfCharge` column (giving both is an error). Like
+  `SOCmin`, `SOCmax` and `SOCini` of `add_battery_optimization()`, it stays
+  within the limits: above `soc_max` it is lowered to `soc_max` (with a
+  message), below `soc_min` it is an error, and so is a session whose energy
+  does not fit below it.
 * `smart_v2g()` gains `degradation_cost` (default 0, per kWh discharged to the
   grid). The `"cost"` objective adds it to every kWh discharged, so the fleet
   no longer discharges for a price spread (net of `discharge_eff`) below it;

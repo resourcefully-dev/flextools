@@ -248,3 +248,53 @@ test_that("smart_v2g validates soc_max and degradation_cost", {
     )
   }
 })
+
+test_that("soc_final sets the arrival State-of-Charge of the v2g sessions", {
+  session <- select(ahead_session, -StateOfCharge)
+  run_final <- function(soc_final, soc_max = 1, sessions = session) {
+    smart_v2g(
+      sessions,
+      ahead_opt_data,
+      opt_objective = "grid",
+      window_days = 1,
+      window_start_hour = 0,
+      soc_min = 0.2,
+      soc_max = soc_max,
+      soc_final = soc_final
+    )
+  }
+
+  # Leaving at 80% with 9.8 kWh: arrives at 0.8 - 9.8 / 70 = 66%
+  results <- suppressMessages(run_final(0.8))
+  expect_equal(unique(results$sessions$StateOfCharge), 0.66)
+  battery <- 0.66 * 70 + cumsum(results$demand$Fleet) * 15 / 60
+  expect_equal(battery[length(battery)], 0.8 * 70, tolerance = 0.02)
+
+  # Above soc_max it is lowered to soc_max: arrives at 0.75 - 0.14 = 61%,
+  # still with its 9.8 kWh
+  expect_message(
+    results <- run_final(0.8, soc_max = 0.75),
+    "`soc_final` \\(0.8\\) is above `soc_max`"
+  )
+  expect_equal(unique(results$sessions$StateOfCharge), 0.61)
+  expect_equal(sum(results$demand$Fleet) * 15 / 60, 9.8, tolerance = 0.02)
+
+  # Below soc_min, invalid, or not fitting below it: errors
+  expect_error(run_final(0.1), "`soc_final` cannot be below `soc_min`")
+  for (soc_final in list(1.1, NA_real_, c(0.8, 0.9), "0.8")) {
+    expect_error(run_final(soc_final), "`soc_final` must be")
+  }
+  expect_error(
+    run_final(0.5, sessions = bind_rows(
+      mutate(session, Session = "fits"),
+      mutate(session, Session = "too_big", Energy = 40)
+    )),
+    "does not fit below `soc_final`.*Sessions: too_big$"
+  )
+  # It needs BatteryCapacity, and replaces the StateOfCharge column
+  expect_error(
+    run_final(0.8, sessions = select(session, -BatteryCapacity)),
+    "needs a `BatteryCapacity` column"
+  )
+  expect_error(run_final(0.8, sessions = ahead_session), "not both")
+})

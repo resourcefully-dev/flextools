@@ -69,6 +69,16 @@
 #'     up to it (`Energy` capped at `(soc_max - StateOfCharge) *
 #'     BatteryCapacity`, with a message), and a session arriving at or above
 #'     `soc_max` is an error.
+#' @param soc_final numeric or `NULL` (default), State-of-Charge every V2G
+#'   session leaves with, as a fraction of its battery capacity (`soc_min <=
+#'   soc_final <= 1`). It needs a `BatteryCapacity` column, and sets each
+#'   session's arrival State-of-Charge from its energy: `StateOfCharge =
+#'   soc_final - Energy / BatteryCapacity` (so `sessions` must not have a
+#'   `StateOfCharge` column too). A session whose energy does not fit below
+#'   `soc_final` (`Energy > soc_final * BatteryCapacity`) is an error. A
+#'   `soc_final` above `soc_max` is lowered to `soc_max`, with a message, and
+#'   one below `soc_min` is an error. `NULL` takes the arrival State-of-Charge
+#'   from the `StateOfCharge` column (see Details).
 #' @param degradation_cost numeric, cost of the battery wear per kWh
 #'   discharged to the grid (default 0, `>= 0`), in the units of the prices of
 #'   `opt_data`. The `"cost"` objective adds it to every kWh discharged, so the
@@ -93,6 +103,13 @@
 #' and names it. When `BatteryCapacity` is absent, each session's `Energy`
 #' takes its battery from `StateOfCharge` to full, so its battery capacity is
 #' `Energy / (1 - StateOfCharge)` (twice the energy at 0.5).
+#'
+#' Instead of a `StateOfCharge` column, a fleet with a `BatteryCapacity` column
+#' can give the State-of-Charge every vehicle leaves with, `soc_final`: each
+#' session then arrives at `soc_final - Energy / BatteryCapacity`. Like
+#' `SOCmin`, `SOCmax` and `SOCini` of `add_battery_optimization()`, `soc_min`,
+#' `soc_max` and `soc_final` are the floor, the ceiling and the target of the
+#' batteries, and `soc_final` stays within the other two.
 #'
 #' With `energy_max` below 1 the session charges only that share of its energy
 #' and leaves lower, at `StateOfCharge + energy_max * Energy /
@@ -157,6 +174,7 @@ smart_v2g <- function(
   lambda = 0,
   soc_min = 0.2,
   soc_max = 1,
+  soc_final = NULL,
   degradation_cost = 0
 ) {
   if (show_progress) {
@@ -191,6 +209,7 @@ smart_v2g <- function(
   check_soc_min(soc_min)
   check_soc_max(soc_max, soc_min)
   check_degradation_cost(degradation_cost)
+  sessions <- set_soc_final(sessions, soc_final, soc_min, soc_max)
   sessions <- set_state_of_charge(sessions)
   check_v2g_battery_fit(sessions)
   sessions <- cap_v2g_departure(sessions, soc_max)
@@ -2450,18 +2469,92 @@ set_state_of_charge <- function(sessions) {
     )
   }
   if ("BatteryCapacity" %in% names(sessions)) {
-    capacity <- sessions$BatteryCapacity
-    if (!is.numeric(capacity)) {
-      stop("Error: `BatteryCapacity` in `sessions` must be numeric (kWh)")
-    }
-    bad <- !is.finite(capacity) | capacity <= 0
-    if (any(bad)) {
-      stop(
-        "Error: `BatteryCapacity` in `sessions` must be a positive finite number (kWh). Sessions: ",
-        paste(unique(sessions$Session[bad]), collapse = ", ")
-      )
-    }
+    check_battery_capacity(sessions)
   }
+  sessions
+}
+
+
+#' Validate the `BatteryCapacity` column of the V2G sessions
+#'
+#' @param sessions tibble of sessions with a `BatteryCapacity` column
+#'
+#' @return `TRUE`, invisibly. Stops naming the sessions whose capacity is not
+#'   a positive finite number.
+#' @keywords internal
+#'
+check_battery_capacity <- function(sessions) {
+  capacity <- sessions$BatteryCapacity
+  if (!is.numeric(capacity)) {
+    stop("Error: `BatteryCapacity` in `sessions` must be numeric (kWh)")
+  }
+  bad <- !is.finite(capacity) | capacity <= 0
+  if (any(bad)) {
+    stop(
+      "Error: `BatteryCapacity` in `sessions` must be a positive finite number (kWh). Sessions: ",
+      paste(unique(sessions$Session[bad]), collapse = ", ")
+    )
+  }
+  invisible(TRUE)
+}
+
+
+#' Set the arrival State-of-Charge of the V2G sessions from `soc_final`
+#'
+#' With a fleet-wide departure State-of-Charge, each session arrives at
+#' `soc_final - Energy / BatteryCapacity`. `soc_final` is lowered to
+#' `soc_max` when above it (with a message); below `soc_min` it is an error.
+#'
+#' @param sessions tibble of sessions
+#' @param soc_final numeric or `NULL`, see [smart_v2g()]
+#' @param soc_min,soc_max numeric, the SoC limits
+#'
+#' @return `sessions`, with a `StateOfCharge` column when `soc_final` is given
+#' @keywords internal
+#'
+set_soc_final <- function(sessions, soc_final, soc_min, soc_max) {
+  if (is.null(soc_final)) {
+    return(sessions)
+  }
+  if (
+    !is.numeric(soc_final) ||
+      length(soc_final) != 1 ||
+      !is.finite(soc_final) ||
+      soc_final > 1
+  ) {
+    stop(
+      "Error: `soc_final` must be NULL or a single number with soc_min <= soc_final <= 1"
+    )
+  }
+  if (soc_final < soc_min) {
+    stop("Error: `soc_final` cannot be below `soc_min`")
+  }
+  if (soc_final > soc_max) {
+    message(
+      "\u2139 `soc_final` (", soc_final, ") is above `soc_max`: the sessions ",
+      "leave at `soc_max` (", soc_max, ")."
+    )
+    soc_final <- soc_max
+  }
+  if (!("BatteryCapacity" %in% names(sessions))) {
+    stop("Error: `soc_final` needs a `BatteryCapacity` column in `sessions`")
+  }
+  if ("StateOfCharge" %in% names(sessions)) {
+    stop(
+      "Error: give either a `StateOfCharge` column in `sessions` or `soc_final`, not both"
+    )
+  }
+  check_battery_capacity(sessions)
+  soc <- soc_final - sessions$Energy / sessions$BatteryCapacity
+  too_big <- soc < -1e-9
+  if (any(too_big)) {
+    stop(
+      "Error: the `Energy` of some sessions does not fit below `soc_final` ",
+      "(`Energy > soc_final * BatteryCapacity`). Sessions: ",
+      paste(unique(sessions$Session[too_big]), collapse = ", ")
+    )
+  }
+  sessions$StateOfCharge <- pmax(soc, 0)
   sessions
 }
 

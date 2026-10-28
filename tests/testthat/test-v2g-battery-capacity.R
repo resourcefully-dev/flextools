@@ -2,7 +2,9 @@ library(dplyr)
 
 # V2G sessions with their own `BatteryCapacity` (kWh): a fleet of 70 kWh
 # batteries leaving at 80%, so the arrival SoC is 0.8 - Energy / 70. Synthetic
-# sessions at 15 minutes, one profile (`Fleet`).
+# sessions at 15 minutes, one profile (`Fleet`). `capacity_session()` takes the
+# SoC in the unit of the function it feeds: a fraction for the internal
+# functions, % for smart_v2g().
 
 capacity_dttm <- seq(
   as.POSIXct("2025-03-03 00:00", tz = "UTC"),
@@ -90,7 +92,13 @@ test_that("a session with a BatteryCapacity below soc_min charges up to the floo
     datetime = capacity_dttm,
     setpoint = c(rep(-11, 8), rep(11, 24))
   )
-  results <- schedule_sessions_v2g(session, setpoint, soc_min = 0.2)
+  # soc_max at its departure level: no charging ahead, only the floor
+  results <- schedule_sessions_v2g(
+    session,
+    setpoint,
+    soc_min = 0.2,
+    soc_max = 0.1 + 20.02 / 70
+  )
   # One row per block of constant power, in time order
   sch <- results$sessions
   energy <- sch$Energy
@@ -114,8 +122,8 @@ test_that("a BatteryCapacity matching the derived one keeps the v2g results", {
   # 22 kWh at 11 kW is exactly 2 hours, so the adapted energy is unchanged and
   # the derived battery is 22 / (1 - 0.5) = 44 kWh.
   sessions <- bind_rows(
-    capacity_session(22, 0.5, capacity = 44, id = "S1"),
-    capacity_session(22, 0.5, capacity = 44, hours = 6, id = "S2")
+    capacity_session(22, 50, capacity = 44, id = "S1"),
+    capacity_session(22, 50, capacity = 44, hours = 6, id = "S2")
   )
   opt_data <- tibble(
     datetime = capacity_dttm,
@@ -129,7 +137,7 @@ test_that("a BatteryCapacity matching the derived one keeps the v2g results", {
       opt_objective = "grid",
       window_days = 1,
       window_start_hour = 0,
-      soc_min = 0.2
+      soc_min = 20
     ))
   }
   with_capacity <- run(sessions)
@@ -158,26 +166,26 @@ test_that("smart_v2g stops on a BatteryCapacity that is invalid or too small", {
   # 40 kWh does not fit in 70 kWh above 50% (35 kWh)
   expect_error(
     run(bind_rows(
-      capacity_session(10, 0.5, id = "fits"),
-      capacity_session(40, 0.5, id = "too_big")
+      capacity_session(10, 50, id = "fits"),
+      capacity_session(40, 50, id = "too_big")
     )),
     "does not fit in their battery.*Sessions: too_big$"
   )
   # Exactly full fits
-  expect_no_error(run(capacity_session(35, 0.5)))
+  expect_no_error(run(capacity_session(35, 50)))
 
   for (capacity in list(0, -70, NA_real_, Inf)) {
     expect_error(
       run(bind_rows(
-        capacity_session(10, 0.5, id = "ok"),
-        capacity_session(10, 0.5, capacity = capacity, id = "bad")
+        capacity_session(10, 50, id = "ok"),
+        capacity_session(10, 50, capacity = capacity, id = "bad")
       )),
       "positive finite number.*Sessions: bad$",
       info = capacity
     )
   }
   expect_error(
-    run(capacity_session(10, 0.5, capacity = "70")),
+    run(capacity_session(10, 50, capacity = "70")),
     "must be numeric"
   )
 })

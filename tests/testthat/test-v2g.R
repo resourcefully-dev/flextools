@@ -355,9 +355,9 @@ v2g_price_case <- function(price_exported = NULL) {
         )
     }
     sessions <- bind_rows(
-        session(1, 17, 14, 15, 0.7),
-        session(2, 17.5, 14, 15, 0.7),
-        session(3, 18, 13.5, 20, 0.6)
+        session(1, 17, 14, 15, 70),
+        session(2, 17.5, 14, 15, 70),
+        session(3, 18, 13.5, 20, 60)
     )
     uncontrolled <- evsim::get_demand(
         evsim::adapt_charging_features(sessions, time_resolution = 15),
@@ -379,7 +379,7 @@ run_v2g_price_case <- function(case, objective, ...) {
         opt_objective = objective,
         window_days = 1,
         window_start_hour = 12,
-        soc_min = 0.2,
+        soc_min = 20,
         ...
     )))
 }
@@ -429,7 +429,7 @@ test_that("cost v2g charges in the cheap slots, discharges in the expensive ones
             opt_objective = "cost",
             window_days = 1,
             window_start_hour = 12,
-            soc_min = 0.2
+            soc_min = 20
         )
     )
     fleet <- cost_results$demand$Fleet
@@ -512,7 +512,7 @@ test_that("combined v2g blends grid and cost, with the pure objectives at its en
             opt_objective = 0.5,
             window_days = 1,
             window_start_hour = 12,
-            soc_min = 0.2
+            soc_min = 20
         )
     )
     expect_v2g_sessions_energy(case, combined_results)
@@ -922,7 +922,7 @@ test_that("v2g never discharges while the site exports, whatever the objective",
             opt_objective = objective,
             window_days = 1,
             window_start_hour = 6,
-            soc_min = 0.2
+            soc_min = 20
         )))
 
         uncontrolled <- evsim::get_demand(

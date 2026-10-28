@@ -96,7 +96,7 @@ test_that("smart_charging delivers an early departure before it leaves", {
 test_that("smart_v2g delivers an early departure before it leaves", {
   # The late session arrives at its SoC floor, so it has nothing to discharge
   # and the early session's energy has to come from the grid.
-  sessions_v2g <- mutate(deadline_sessions, StateOfCharge = c(0.5, 0.2))
+  sessions_v2g <- mutate(deadline_sessions, StateOfCharge = c(50, 20))
   v2g <- smart_v2g(
     sessions_v2g, deadline_opt_data,
     opt_objective = "grid",
@@ -214,11 +214,13 @@ soc_levels <- function(v2g, sessions, dttm_seq) {
   powers <- slot_power(v2g$sessions, dttm_seq)
   lapply(set_names(sessions$Session), function(s) {
     session <- sessions[sessions$Session == s, ]
-    capacity <- session$Energy / (1 - session$StateOfCharge)
-    level <- session$StateOfCharge * capacity + cumsum(powers[[s]]) * 15 / 60
+    # `StateOfCharge` of smart_v2g() is in %
+    soc <- session$StateOfCharge / 100
+    capacity <- session$Energy / (1 - soc)
+    level <- soc * capacity + cumsum(powers[[s]]) * 15 / 60
     list(
       capacity = capacity,
-      start = session$StateOfCharge * capacity,
+      start = soc * capacity,
       level = level,
       power = powers[[s]]
     )
@@ -227,8 +229,8 @@ soc_levels <- function(v2g, sessions, dttm_seq) {
 
 test_that("smart_v2g keeps every session above its SoC floor and fills it by departure", {
   sessions_soc <- connected_sessions %>%
-    mutate(StateOfCharge = c(0.3, 0.6, 0.1))
-  soc_min <- 0.3
+    mutate(StateOfCharge = c(30, 60, 10))
+  soc_min <- 30
 
   v2g <- smart_v2g(
     sessions_soc, connected_opt_data,
@@ -243,13 +245,13 @@ test_that("smart_v2g keeps every session above its SoC floor and fills it by dep
 
   # The scheduler returns powers rounded to 2 decimals: 0.02 kWh of slack
   for (s in c("S1", "S2")) {
-    floor <- soc_min * levels[[s]]$capacity
+    floor <- soc_min / 100 * levels[[s]]$capacity
     expect_true(all(levels[[s]]$level >= floor - 0.02), label = s)
   }
   # S3 arrives below the floor: it never discharges before reaching it, and
   # never goes back below it afterwards
   s3 <- levels$S3
-  floor <- soc_min * s3$capacity
+  floor <- soc_min / 100 * s3$capacity
   reached <- which(s3$level >= floor - 0.02)[1]
   expect_false(is.na(reached))
   expect_true(all(s3$power[seq_len(reached)] >= 0))
@@ -267,7 +269,7 @@ test_that("smart_v2g keeps every session above its SoC floor and fills it by dep
 })
 
 test_that("with energy_max below 1 a V2G session leaves below full", {
-  sessions_soc <- connected_sessions %>% mutate(StateOfCharge = 0.4)
+  sessions_soc <- connected_sessions %>% mutate(StateOfCharge = 40)
   v2g <- smart_v2g(
     sessions_soc, connected_opt_data,
     opt_objective = "grid",
@@ -281,7 +283,7 @@ test_that("with energy_max below 1 a V2G session leaves below full", {
   }
 })
 
-test_that("StateOfCharge defaults to 0.5 and both V2G arguments are validated", {
+test_that("StateOfCharge defaults to 50 % and both V2G arguments are validated", {
   run_v2g <- function(sessions, ...) {
     smart_v2g(
       sessions, connected_opt_data,
@@ -291,12 +293,12 @@ test_that("StateOfCharge defaults to 0.5 and both V2G arguments are validated", 
   }
   expect_equal(
     run_v2g(connected_sessions)$demand,
-    run_v2g(mutate(connected_sessions, StateOfCharge = 0.5))$demand
+    run_v2g(mutate(connected_sessions, StateOfCharge = 50))$demand
   )
-  expect_error(run_v2g(connected_sessions, soc_min = 1), "soc_min")
+  expect_error(run_v2g(connected_sessions, soc_min = 100), "soc_min")
   expect_error(run_v2g(connected_sessions, soc_min = -0.1), "soc_min")
   expect_error(run_v2g(connected_sessions, soc_min = c(0.1, 0.2)), "soc_min")
-  expect_error(run_v2g(mutate(connected_sessions, StateOfCharge = 1)), "StateOfCharge")
+  expect_error(run_v2g(mutate(connected_sessions, StateOfCharge = 100)), "StateOfCharge")
   expect_error(run_v2g(mutate(connected_sessions, StateOfCharge = NA_real_)), "StateOfCharge")
   expect_error(run_v2g(connected_sessions, charging_power_min = -1), "charging_power_min")
 })

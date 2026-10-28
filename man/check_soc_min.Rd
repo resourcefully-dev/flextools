@@ -4,10 +4,13 @@
 \alias{check_soc_min}
 \title{Validate the SoC floor of the V2G sessions}
 \usage{
-check_soc_min(soc_min)
+check_soc_min(soc_min, full = 1)
 }
 \arguments{
-\item{soc_min}{numeric, a single value with \verb{0 <= soc_min < 1}.}
+\item{soc_min}{numeric, a single value with \verb{0 <= soc_min < full}.}
+
+\item{full}{numeric, a full battery: 1 for a fraction (the internal
+functions), 100 for \% (\code{\link[=smart_v2g]{smart_v2g()}}).}
 }
 \value{
 \code{TRUE}, invisibly. Stops with a clear message otherwise.

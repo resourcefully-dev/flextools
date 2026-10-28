@@ -4,19 +4,22 @@
 \alias{set_state_of_charge}
 \title{Set and validate the arrival State-of-Charge of the V2G sessions}
 \usage{
-set_state_of_charge(sessions)
+set_state_of_charge(sessions, full = 1)
 }
 \arguments{
 \item{sessions}{tibble of sessions}
+
+\item{full}{numeric, a full battery: 1 for a fraction (the internal
+functions), 100 for \% (\code{\link[=smart_v2g]{smart_v2g()}}).}
 }
 \value{
 \code{sessions} with a \code{StateOfCharge} column
 }
 \description{
-Adds \code{StateOfCharge = 0.5} when the column is absent, and checks that every
-value is a fraction with \verb{0 <= StateOfCharge < 1} (a full battery has no
-energy to charge, so it gives no battery size). When \code{sessions} has a
-\code{BatteryCapacity} column, it also checks that every value is a positive
-finite number (kWh).
+Adds \code{StateOfCharge} at half a battery when the column is absent, and
+checks that every value is within \verb{0 <= StateOfCharge < full} (a full
+battery has no energy to charge, so it gives no battery size). When
+\code{sessions} has a \code{BatteryCapacity} column, it also checks that every value
+is a positive finite number (kWh).
 }
 \keyword{internal}

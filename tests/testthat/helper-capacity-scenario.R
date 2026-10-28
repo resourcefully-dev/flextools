@@ -40,7 +40,7 @@ capacity_scenario_sessions <- function() {
       ConnectionHours = hours,
       Power = 11,
       Energy = 20,
-      StateOfCharge = 0.5
+      StateOfCharge = 50
     )
   }
   dplyr::bind_rows(

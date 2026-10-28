@@ -408,7 +408,8 @@ optimization_objective_gap <- function(lower_bound, incumbent) {
 
 optimization_highs_options <- function(
   include_mip_gap = FALSE,
-  time_limit = NULL
+  time_limit = NULL,
+  ...
 ) {
   # `threads = 1L` is intentional: callers typically parallelize at the
   # window level (e.g. via mirai + purrr::in_parallel), so letting HiGHS
@@ -426,7 +427,7 @@ optimization_highs_options <- function(
     args$time_limit <- as.numeric(time_limit)
   }
 
-  do.call(highs::highs_control, args)
+  do.call(highs::highs_control, c(args, list(...)))
 }
 
 

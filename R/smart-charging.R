@@ -1119,7 +1119,11 @@ get_flex_envelope <- function(
   if (!is.null(soc_min)) {
     soc <- sessions$StateOfCharge
     reserve_slot <- (soc - soc_min) *
-      v2g_battery_capacity(sessions$Energy, soc) /
+      v2g_battery_capacity(
+        sessions$Energy,
+        soc,
+        sessions[["BatteryCapacity"]]
+      ) /
       slot_hours
     start_idx <- slots_before(sessions$ConnectionStartDateTime) + 1
     end_idx <- pmin(slots_before(sessions$ConnectionEndDateTime), due_idx) - 1

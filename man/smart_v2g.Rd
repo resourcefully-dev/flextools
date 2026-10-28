@@ -146,11 +146,22 @@ untouched.
 \details{
 The \code{sessions} tibble can carry a \code{StateOfCharge} column, the State-of-Charge
 of each vehicle at arrival as a fraction (\verb{0 <= StateOfCharge < 1}); when it
-is absent every session arrives at 0.5. Each session's \code{Energy} takes its
-battery from \code{StateOfCharge} to full, so its battery capacity is
-\code{Energy / (1 - StateOfCharge)} (twice the energy at 0.5). With \code{energy_max}
-below 1 the session charges only that share of its energy and leaves below
-full, at \code{StateOfCharge + energy_max * (1 - StateOfCharge)}.
+is absent every session arrives at 0.5.
+
+It can also carry a \code{BatteryCapacity} column, the battery size of each
+vehicle in kWh (a positive finite number). The session then leaves at
+\code{StateOfCharge + Energy / BatteryCapacity}, not necessarily full: a 10 kWh
+session on a 70 kWh battery arriving at 0.66 leaves at about 0.8, and can
+discharge \code{(0.66 - soc_min) * 70} kWh (32.2 kWh at \code{soc_min = 0.2}) while it
+still has the time to charge it back. A session must fit in its battery,
+\code{Energy <= BatteryCapacity * (1 - StateOfCharge)}, or \code{smart_v2g()} stops
+and names it. When \code{BatteryCapacity} is absent, each session's \code{Energy}
+takes its battery from \code{StateOfCharge} to full, so its battery capacity is
+\code{Energy / (1 - StateOfCharge)} (twice the energy at 0.5).
+
+With \code{energy_max} below 1 the session charges only that share of its energy
+and leaves lower, at \code{StateOfCharge + energy_max * Energy / BatteryCapacity} (\code{StateOfCharge + energy_max * (1 - StateOfCharge)} without
+a \code{BatteryCapacity} column).
 
 The setpoint plans charge and discharge only while the responsive sessions
 are connected, within their nominal power in both directions (and

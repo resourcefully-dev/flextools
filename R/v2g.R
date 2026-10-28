@@ -57,11 +57,23 @@
 #' @details
 #' The `sessions` tibble can carry a `StateOfCharge` column, the State-of-Charge
 #' of each vehicle at arrival as a fraction (`0 <= StateOfCharge < 1`); when it
-#' is absent every session arrives at 0.5. Each session's `Energy` takes its
-#' battery from `StateOfCharge` to full, so its battery capacity is
-#' `Energy / (1 - StateOfCharge)` (twice the energy at 0.5). With `energy_max`
-#' below 1 the session charges only that share of its energy and leaves below
-#' full, at `StateOfCharge + energy_max * (1 - StateOfCharge)`.
+#' is absent every session arrives at 0.5.
+#'
+#' It can also carry a `BatteryCapacity` column, the battery size of each
+#' vehicle in kWh (a positive finite number). The session then leaves at
+#' `StateOfCharge + Energy / BatteryCapacity`, not necessarily full: a 10 kWh
+#' session on a 70 kWh battery arriving at 0.66 leaves at about 0.8, and can
+#' discharge `(0.66 - soc_min) * 70` kWh (32.2 kWh at `soc_min = 0.2`) while it
+#' still has the time to charge it back. A session must fit in its battery,
+#' `Energy <= BatteryCapacity * (1 - StateOfCharge)`, or `smart_v2g()` stops
+#' and names it. When `BatteryCapacity` is absent, each session's `Energy`
+#' takes its battery from `StateOfCharge` to full, so its battery capacity is
+#' `Energy / (1 - StateOfCharge)` (twice the energy at 0.5).
+#'
+#' With `energy_max` below 1 the session charges only that share of its energy
+#' and leaves lower, at `StateOfCharge + energy_max * Energy /
+#' BatteryCapacity` (`StateOfCharge + energy_max * (1 - StateOfCharge)` without
+#' a `BatteryCapacity` column).
 #'
 #' The setpoint plans charge and discharge only while the responsive sessions
 #' are connected, within their nominal power in both directions (and
@@ -148,6 +160,7 @@ smart_v2g <- function(
   check_charging_power_min(charging_power_min)
   check_soc_min(soc_min)
   sessions <- set_state_of_charge(sessions)
+  check_v2g_battery_fit(sessions)
 
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
@@ -1831,22 +1844,26 @@ schedule_sessions_v2g <- function(
           "Session",
           "ConnectionStartDateTime",
           "FlexibilityHours",
-          "StateOfCharge"
+          "StateOfCharge",
+          "BatteryCapacity"
         ))
       ),
       by = "Session"
-    ) %>%
+    )
+  # Without a `BatteryCapacity` column, the ORIGINAL requirement takes the
+  # battery from its arrival SoC to full, whatever `energy_max` (which only
+  # makes it leave below full).
+  sessions_expanded$BatteryCapacity <- v2g_battery_capacity(
+    sessions_expanded$EnergyRequired / energy_max,
+    sessions_expanded$StateOfCharge,
+    sessions_expanded[["BatteryCapacity"]]
+  )
+  sessions_expanded <- sessions_expanded %>%
     mutate(
       Power = 0,
       EnergyToCharge = .data$EnergyRequired,
       Flexible = NA,
       Exploited = NA,
-      # The ORIGINAL requirement takes the battery from its arrival SoC to
-      # full, whatever `energy_max` (which only makes it leave below full).
-      BatteryCapacity = v2g_battery_capacity(
-        .data$EnergyRequired / energy_max,
-        .data$StateOfCharge
-      ),
       EnergyInBattery = .data$BatteryCapacity * .data$StateOfCharge
     )
 
@@ -2264,7 +2281,9 @@ check_soc_min <- function(soc_min) {
 #'
 #' Adds `StateOfCharge = 0.5` when the column is absent, and checks that every
 #' value is a fraction with `0 <= StateOfCharge < 1` (a full battery has no
-#' energy to charge, so it gives no battery size).
+#' energy to charge, so it gives no battery size). When `sessions` has a
+#' `BatteryCapacity` column, it also checks that every value is a positive
+#' finite number (kWh).
 #'
 #' @param sessions tibble of sessions
 #'
@@ -2281,21 +2300,75 @@ set_state_of_charge <- function(sessions) {
       "Error: `StateOfCharge` in `sessions` must be a fraction with 0 <= StateOfCharge < 1"
     )
   }
+  if ("BatteryCapacity" %in% names(sessions)) {
+    capacity <- sessions$BatteryCapacity
+    if (!is.numeric(capacity)) {
+      stop("Error: `BatteryCapacity` in `sessions` must be numeric (kWh)")
+    }
+    bad <- !is.finite(capacity) | capacity <= 0
+    if (any(bad)) {
+      stop(
+        "Error: `BatteryCapacity` in `sessions` must be a positive finite number (kWh). Sessions: ",
+        paste(unique(sessions$Session[bad]), collapse = ", ")
+      )
+    }
+  }
   sessions
+}
+
+
+#' Check that every V2G session fits in its battery
+#'
+#' With a `BatteryCapacity` column, a session can charge at most what its
+#' battery holds above its arrival SoC: `Energy <= BatteryCapacity * (1 -
+#' StateOfCharge)`. Run on the sessions as given to `smart_v2g()`, before
+#' `evsim::adapt_charging_features()` rounds their energy.
+#'
+#' @param sessions tibble of sessions, with `StateOfCharge` (see
+#'   `set_state_of_charge()`)
+#' @param tol numeric, tolerance in kWh
+#'
+#' @return `TRUE`, invisibly. Stops naming the sessions that do not fit.
+#' @keywords internal
+#'
+check_v2g_battery_fit <- function(sessions, tol = 1e-9) {
+  if (!("BatteryCapacity" %in% names(sessions))) {
+    return(invisible(TRUE))
+  }
+  room <- sessions$BatteryCapacity * (1 - sessions$StateOfCharge)
+  too_big <- sessions$Energy > room + tol
+  if (any(too_big)) {
+    stop(
+      "Error: the `Energy` of some sessions does not fit in their battery ",
+      "(`Energy > BatteryCapacity * (1 - StateOfCharge)`). Sessions: ",
+      paste(unique(sessions$Session[too_big]), collapse = ", ")
+    )
+  }
+  invisible(TRUE)
 }
 
 
 #' Battery capacity of a V2G session
 #'
-#' The session's energy takes the battery from its arrival State-of-Charge to
-#' full: `Energy / (1 - StateOfCharge)` (twice the energy at 50%).
+#' The session's own `BatteryCapacity` when it has one. Otherwise its energy
+#' takes the battery from its arrival State-of-Charge to full: `Energy / (1 -
+#' StateOfCharge)` (twice the energy at 50%).
 #'
 #' @param energy numeric, energy the session requires (kWh)
 #' @param state_of_charge numeric, arrival State-of-Charge (fraction, < 1)
+#' @param battery_capacity numeric or `NULL`, the sessions' `BatteryCapacity`
+#'   column (kWh), `NULL` when the sessions have none
 #'
 #' @return numeric, battery capacity (kWh)
 #' @keywords internal
 #'
-v2g_battery_capacity <- function(energy, state_of_charge) {
+v2g_battery_capacity <- function(
+  energy,
+  state_of_charge,
+  battery_capacity = NULL
+) {
+  if (!is.null(battery_capacity)) {
+    return(battery_capacity)
+  }
   energy / (1 - state_of_charge)
 }

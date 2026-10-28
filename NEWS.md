@@ -1,3 +1,21 @@
+# flextools 1.15.0
+
+* `smart_v2g()` accepts a `BatteryCapacity` column (kWh) in `sessions`, the
+  battery size of each vehicle. Until now every session's battery was derived
+  from the session, `Energy / (1 - StateOfCharge)`, as if it always left full:
+  a small session was a small battery with almost nothing to discharge. With
+  `BatteryCapacity` the session leaves at `StateOfCharge + Energy /
+  BatteryCapacity`, and it can discharge `(StateOfCharge - soc_min) *
+  BatteryCapacity` (the reserve of the setpoint and the floor of the
+  scheduler). On a 70 kWh battery with `soc_min = 0.2`, a 10 kWh session
+  arriving at 66% has 32.2 kWh to discharge (13.5 kWh when derived), and a
+  40 kWh session arriving at 23% has 2.1 kWh. A session arriving below
+  `soc_min` still charges up to the floor first, now the floor of its own
+  battery. Without the column nothing changes.
+* `smart_v2g()` stops, naming the sessions, when a `BatteryCapacity` is not a
+  positive finite number or when a session does not fit in its battery,
+  `Energy > BatteryCapacity * (1 - StateOfCharge)`.
+
 # flextools 1.14.1
 
 * Fix: `get_tank_unmet_heat()` (and so `attr(, "unmet_heat_kw")` of

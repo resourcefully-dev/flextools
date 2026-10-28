@@ -51,9 +51,10 @@ a number between \code{0} and \code{1} to perform combined optimization
 where \code{0 == "cost"} and \code{1 == "grid"}.
 The \code{"capacity"} objective minimizes the amount of flexible demand that
 needs to be moved to respect \code{import_capacity} and \code{export_capacity},
-then applies the grid-minimizing formulation only to that moved slice.
-If that constrained problem is infeasible, grid limits are removed for the
-affected optimization window.}
+then applies the grid-minimizing formulation only to that moved slice. A
+window within its capacities is left unchanged. When a breach cannot be
+removed, the slice brings the excess down as far as the flexibility allows,
+never beyond the original profile's.}
 
 \item{direction}{character, being \code{forward} or \code{backward}. The direction where energy can be shifted}
 

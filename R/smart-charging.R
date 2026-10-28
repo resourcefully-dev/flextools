@@ -125,10 +125,14 @@
 #' If `production` is not found in `opt_data`, only a peak shaving objective
 #' will be considered.
 #'
-#' - Minimize capacity violations (`opt_objective = "capacity"`): minimizes only
-#' the load slices that exceed the grid capacity limits (`import_capacity` or
-#' `export_capacity` in `opt_data`), leaving the rest of the load profile
-#' unchanged. Falls back to grid objective when the capacity slice is infeasible.
+#' - Minimize capacity violations (`opt_objective = "capacity"`): moves only
+#' the slice of the load that a breach of the grid capacity limits
+#' (`import_capacity` or `export_capacity` in `opt_data`) needs, and places it
+#' with the grid objective, leaving the rest of the load profile unchanged. A
+#' window within its limits is left unchanged. When the breach cannot be
+#' removed, the slice brings the excess down as far as the flexibility allows
+#' (largest excess first), and no slot ends up beyond its limit by more than in
+#' the original profile.
 #'
 #' - Minimize the energy cost (`opt_objective = "cost"`): minimizes the energy cost.
 #' In this case, the columns

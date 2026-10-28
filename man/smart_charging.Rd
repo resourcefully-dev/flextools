@@ -140,10 +140,14 @@ There are four different optimization objectives implemented by this function:
 the flexible load and the amount of imported power from the grid.
 If \code{production} is not found in \code{opt_data}, only a peak shaving objective
 will be considered.
-\item Minimize capacity violations (\code{opt_objective = "capacity"}): minimizes only
-the load slices that exceed the grid capacity limits (\code{import_capacity} or
-\code{export_capacity} in \code{opt_data}), leaving the rest of the load profile
-unchanged. Falls back to grid objective when the capacity slice is infeasible.
+\item Minimize capacity violations (\code{opt_objective = "capacity"}): moves only
+the slice of the load that a breach of the grid capacity limits
+(\code{import_capacity} or \code{export_capacity} in \code{opt_data}) needs, and places it
+with the grid objective, leaving the rest of the load profile unchanged. A
+window within its limits is left unchanged. When the breach cannot be
+removed, the slice brings the excess down as far as the flexibility allows
+(largest excess first), and no slot ends up beyond its limit by more than in
+the original profile.
 \item Minimize the energy cost (\code{opt_objective = "cost"}): minimizes the energy cost.
 In this case, the columns
 \code{grid_capacity}, \code{price_imported}, \code{price_exported},

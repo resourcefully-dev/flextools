@@ -19,17 +19,20 @@ capacity_v2g_window(
 )
 }
 \arguments{
+\item{lambda}{numeric, penalty on change of the placed slice.}
+
 \item{energy_ratio}{numeric vector \code{c(min, max)}, share of the flexible
 load's energy the optimized load must carry. See
 \code{demand_capacity_window()}.}
 }
 \description{
-Mirrors \code{demand_capacity_window()} but falls back to
-\code{demand_grid_v2g_window()} so that discharge is considered when
-resolving capacity violations.
-}
-\details{
-The fleet discharges only to cut import (see \code{v2g_discharge_floor()}),
-also in the grid LP that places the shifted energy.
+The V2G counterpart of \code{demand_capacity_window()}. The slice that has to
+move may include discharge: the fleet may discharge (within the connected
+power \code{LFmax} and only to cut import, see \code{v2g_discharge_floor()}) to make
+room for energy it charges back in an export breach, within the departure
+deadlines and SoC floor of \code{cumsum_min}. The slice is then placed with
+\code{demand_grid_v2g_window()} charge-only (\code{LFmin = 0}): the placement only
+puts back the energy the slice took, and never discharges the rest of the
+fleet to flatten slots within the caps.
 }
 \keyword{internal}

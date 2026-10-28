@@ -956,3 +956,144 @@ test_that("v2g never discharges while the site exports, whatever the objective",
         )
     }
 })
+
+
+# Capacity objective: change only what a breach needs ---------------------
+
+test_that("v2g capacity leaves the evening alone and absorbs the midday export", {
+    opt_data_cap <- capacity_scenario_opt_data()
+    sessions_cap <- capacity_scenario_sessions()
+    uncontrolled <- capacity_scenario_uncontrolled(sessions_cap)
+
+    results <- suppressMessages(smart_v2g(
+        sessions_cap, opt_data_cap,
+        opt_objective = "capacity",
+        window_days = 1, window_start_hour = 6
+    ))
+    fleet <- results$demand$Fleet
+
+    # The evening import peaks within the import capacity: no discharge to
+    # shave it, as the grid objective does on the same input.
+    evening <- opt_data_cap$datetime >= as.POSIXct("2025-03-12 17:00", tz = "UTC") &
+        opt_data_cap$datetime < as.POSIXct("2025-03-13 06:00", tz = "UTC")
+    expect_equal(fleet[evening], uncontrolled[evening])
+    expect_equal(results$setpoints$Fleet[evening], uncontrolled[evening])
+    grid <- suppressMessages(smart_v2g(
+        sessions_cap, opt_data_cap,
+        opt_objective = "grid",
+        window_days = 1, window_start_hour = 6
+    ))
+    expect_false(isTRUE(all.equal(grid$demand$Fleet[evening], uncontrolled[evening])))
+
+    # Discharge in the morning, while the site imports, and charge it back in
+    # the export breach: more export absorbed than the one-way capacity
+    # objective of smart_charging() manages on the same input.
+    net_without_fleet <- opt_data_cap$static - opt_data_cap$production
+    morning <- opt_data_cap$datetime < as.POSIXct("2025-03-12 12:00", tz = "UTC")
+    expect_true(any(fleet[morning & net_without_fleet > 0] < -1))
+    breach <- -net_without_fleet > opt_data_cap$export_capacity
+    expect_gt(sum(fleet[breach]), sum(uncontrolled[breach]))
+
+    one_way <- suppressMessages(smart_charging(
+        sessions_cap, opt_data_cap,
+        opt_objective = "capacity", method = "curtail",
+        window_days = 1, window_start_hour = 6
+    ))
+    excess_before <- capacity_scenario_excess(opt_data_cap, uncontrolled)
+    excess_one_way <- capacity_scenario_excess(opt_data_cap, one_way$demand$Fleet)
+    excess_v2g <- capacity_scenario_excess(opt_data_cap, fleet)
+    expect_lt(excess_v2g[["export"]], excess_one_way[["export"]] - 20)
+    expect_lt(excess_one_way[["export"]], excess_before[["export"]])
+
+    # No import breach, no discharge into export, and every session gets its
+    # energy.
+    expect_equal(excess_v2g[["import"]], 0)
+    expect_true(all(fleet[net_without_fleet < 0] >= -0.05))
+    delivered <- results$sessions %>%
+        group_by(Session) %>%
+        summarise(Energy = sum(Energy))
+    expect_equal(
+        delivered$Energy[match(sessions_cap$Session, delivered$Session)],
+        sessions_cap$Energy,
+        tolerance = 0.01
+    )
+})
+
+test_that("v2g capacity returns a window within its caps unchanged", {
+    opt_data_cap <- capacity_scenario_opt_data(
+        import_capacity = 200, export_capacity = 200
+    )
+    sessions_cap <- capacity_scenario_sessions()
+    uncontrolled <- capacity_scenario_uncontrolled(sessions_cap)
+
+    expect_no_message(results <- smart_v2g(
+        sessions_cap, opt_data_cap,
+        opt_objective = "capacity",
+        window_days = 1, window_start_hour = 6
+    ))
+    expect_equal(results$setpoints$Fleet, uncontrolled)
+    expect_equal(results$demand$Fleet, uncontrolled)
+})
+
+test_that("capacity_v2g_window only discharges where it cuts import", {
+    # Import of 5 kW in slots 1-2, an export breach of 6 kW in slots 3-4; the
+    # flexible load charges 4 kW in slot 1 only. Discharging 5 kW in slots 1-2
+    # and charging back in slots 3-4 absorbs the breach; slot 5 exports
+    # within its cap and is left alone.
+    O <- flextools:::capacity_v2g_window(
+        G = c(0, 0, 20, 20, 12), LF = c(4, 0, 0, 0, 0), LS = c(5, 5, 4, 4, 4),
+        direction = "forward", time_horizon = NULL, LFmax = 10,
+        import_capacity = 100, export_capacity = 10
+    )
+    expect_equal(sum(O), 4, tolerance = 1e-6)
+    expect_true(all(O[1:2] >= -5 - 1e-6))
+    expect_equal(O[3:4], c(6, 6), tolerance = 1e-6)
+    expect_equal(O[5], 0)
+
+    # Without a breach, the input comes back as it is.
+    expect_identical(
+        flextools:::capacity_v2g_window(
+            G = c(0, 0, 20, 20, 12), LF = c(4, 0, 0, 0, 0), LS = c(5, 5, 4, 4, 4),
+            direction = "forward", time_horizon = NULL, LFmax = 10,
+            import_capacity = 100, export_capacity = 20
+        ),
+        c(4, 0, 0, 0, 0)
+    )
+})
+
+test_that("v2g capacity reduces an export breach it cannot remove, moving only the slice", {
+    opt_data_cap <- capacity_scenario_opt_data()
+    sessions_cap <- capacity_scenario_sessions()
+    uncontrolled <- capacity_scenario_uncontrolled(sessions_cap)
+
+    expect_message(
+        results <- smart_v2g(
+            sessions_cap, opt_data_cap,
+            opt_objective = "capacity",
+            window_days = 1, window_start_hour = 6
+        ),
+        "never beyond the original profile"
+    )
+    fleet <- results$setpoints$Fleet
+
+    # The morning charge and the discharge down to the SoC floor (12 kWh per
+    # vehicle) move into the breach.
+    excess_before <- capacity_scenario_excess(opt_data_cap, uncontrolled)
+    excess_after <- capacity_scenario_excess(opt_data_cap, fleet)
+    expect_equal(
+        excess_after[["export"]], excess_before[["export"]] - 60 - 36,
+        tolerance = 0.05
+    )
+
+    # Only the slice moves: the fleet charges less or discharges in the
+    # morning while the site imports, and charges more in the breach.
+    net_without_fleet <- opt_data_cap$static - opt_data_cap$production
+    breach <- -net_without_fleet > opt_data_cap$export_capacity
+    morning_import <- net_without_fleet > 0 &
+        opt_data_cap$datetime < as.POSIXct("2025-03-12 12:00", tz = "UTC")
+    changed <- abs(fleet - uncontrolled) > 0.005
+    expect_true(all(changed <= (morning_import | breach)))
+    expect_true(all(fleet[changed & !breach] < uncontrolled[changed & !breach]))
+    expect_true(all(fleet[changed & breach] > uncontrolled[changed & breach]))
+    expect_true(all(fleet >= pmin(-net_without_fleet, 0) - 0.005 | !morning_import))
+})

@@ -185,8 +185,12 @@ that earns nothing. The import and export capacities still bind.
 power and \code{1 - w} the cost, as in \code{smart_charging()}. \code{w = 1} is \code{"grid"}
 and \code{w = 0} is \code{"cost"}; in between the fleet discharges only to cut
 import, as under \code{"grid"}.
-\item \code{"capacity"} keeps the site within its grid capacities, discharging only
-to cut import.
+\item \code{"capacity"} moves only the slice of the plan that a breach of the grid
+capacities needs (see \code{smart_charging()}), and leaves windows within them
+unchanged. The slice may discharge, only to cut import: to cut an import
+breach, or to make room, while the site imports, for the energy it then
+charges back in an export breach. The rest of the fleet is not
+discharged to flatten slots within the caps.
 }
 
 Under \code{"cost"} and combined objectives the setpoint counts the discharge

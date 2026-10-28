@@ -1,3 +1,29 @@
+# flextools 1.17.1
+
+* The `"capacity"` objective of `smart_v2g()` and `optimize_demand()` no
+  longer hangs on some windows (seen with V2G charging ahead, `soc_max` above
+  the departure level). The breach was a QP on the squared excess over the
+  caps, solved by HiGHS's active-set QP solver. Two things made it ill posed:
+  * It carried the shift and discharge columns of the later tie-breaks: free
+    columns with no cost and no upper bound, so its optimum set was unbounded.
+    The breach and the energy moved are now solved without them; they join
+    only in the stages that price them.
+  * Its optimum is a degenerate vertex (many slots exactly on their cap with
+    no excess, more active constraints than columns), on which the active-set
+    solver cycled. No reformulation of the QP avoided that, so the breach is
+    now brought down lexicographically from the largest excess with a
+    sequence of LPs: each minimises the largest excess left among the slots
+    not yet fixed, and fixes the slots that cannot go lower.
+  A window whose breach can be removed is unchanged. A window that cannot
+  remove it keeps the same meaning (the largest excess comes down first), but
+  the excess left below the largest is now the lexicographic minimum instead
+  of the least sum of squares. In practice the two hardly differ: the
+  `optimize_demand()` golden, whose windows cannot meet the cap, is
+  unchanged, and over a month of a V2G fleet no slot moves by more than
+  0.08 kW, except in the window 1.17.0 never finished. The iteration
+  limit and regularised retry of 1.17.0 are gone: the retry had no iteration
+  limit itself and was where a stalled window ran without end.
+
 # flextools 1.17.0
 
 * Breaking: the State-of-Charge of `smart_v2g()` is in %, as in

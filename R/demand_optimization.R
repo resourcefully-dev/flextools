@@ -395,8 +395,8 @@ demand_select_window_solver <- function(solver_data) {
 # caps. The load is written as `O = LF - slice + added`, and one problem over
 # [slice, added, import_excess, export_excess, shift, discharge] is solved
 # lexicographically (see select_capacity_slice()):
-#   1. the breach left above the caps, `sum(import_excess^2 + export_excess^2)`,
-#      so the largest excess comes down first,
+#   1. the breach left above the caps, lexicographically from the largest
+#      excess (see capacity_minmax_excess()),
 #   2. the slice: the energy moved (or dropped) to get there,
 #   3. (V2G) the energy discharged, `sum(max(-O, 0))`,
 #   4. how far in time it moves, `sum(|cumsum(added - slice)|)`.
@@ -525,6 +525,11 @@ capacity_slice_problem <- function(
 
   list(
     time_slots = time_slots,
+    # The columns and rows of the load and its excess (see
+    # select_capacity_slice()); the shift and discharge columns and their
+    # rows come after them.
+    core_cols = seq_len(4 * n),
+    core_rows = seq_len(6 * n + 1),
     L_moved = L_moved,
     L_shift = c(rep(0, 4 * n), rep(1, n), rep(0, n)),
     L_discharge = c(rep(0, 5 * n), rep(1, n)),
@@ -582,9 +587,9 @@ capacity_slice_problem <- function(
 }
 
 
-# Solves the problem of capacity_slice_problem() lexicographically: the breach
-# first (a QP), then the energy moved, the energy discharged (V2G) and how far
-# it moves (LPs). Each stage keeps the optimum of the previous one as a
+# Solves the problem of capacity_slice_problem() lexicographically, with LPs:
+# the breach first, then the energy moved, the energy discharged (V2G) and how
+# far it moves. Each stage keeps the optimum of the previous one as a
 # constraint. Returns the optimized load with its energy and the breach left
 # (`breach`), or NULL when HiGHS fails.
 select_capacity_slice <- function(
@@ -625,58 +630,46 @@ select_capacity_slice <- function(
     headroom = headroom
   )
 
-  solve <- function(Q, L, upper, A, lhs, rhs,
-                    control = optimization_highs_options(
-                      include_mip_gap = FALSE
-                    )) {
+  solve <- function(L, lower, upper, A, lhs, rhs) {
     result <- highs::highs_solve(
-      Q = Q,
       L = L,
-      lower = problem$lower,
+      lower = lower,
       upper = upper,
       A = A,
       lhs = lhs,
       rhs = rhs,
-      control = control
+      control = optimization_highs_options(include_mip_gap = FALSE)
     )
     if (!demand_highs_is_optimal(result) || is.null(result$primal_solution)) {
       return(NULL)
     }
     result
   }
-  n_variables <- ncol(problem$A)
   excess_idx <- 2 * time_slots + seq_len(2 * time_slots)
 
-  # 1. The breach: the squared excess over the caps, so the largest excess
-  # comes down first and the excess energy with it. Only the excess is
-  # weighed, so a slot within its caps is never reshaped for it.
-  Q <- Matrix::sparseMatrix(
-    i = excess_idx,
-    j = excess_idx,
-    x = 2,
-    dims = c(n_variables, n_variables)
+  # Stages 1 and 2 solve on the core of the problem: the slice, the added
+  # energy and the excess, without the shift and discharge columns. Those only
+  # measure the tie-breaks of stages 3 and 4; before then they are free (no
+  # cost, no upper bound, only held from below by their rows), so the optimum
+  # set of stage 1 would be unbounded. On the core every column is bounded
+  # (`added` through the load's upper bound).
+  core <- problem$core_cols
+  core_rows <- problem$core_rows
+  A_core <- problem$A[core_rows, core, drop = FALSE]
+  lhs_core <- problem$lhs[core_rows]
+  rhs_core <- problem$rhs[core_rows]
+
+  # 1. The breach: the largest excess first (see capacity_minmax_excess()).
+  excess <- capacity_minmax_excess(
+    solve = solve,
+    lower = problem$lower[core],
+    upper = problem$upper[core],
+    A = A_core,
+    lhs = lhs_core,
+    rhs = rhs_core,
+    excess_idx = excess_idx
   )
-  # HiGHS's QP solver can cycle on a degenerate breach (seen with V2G
-  # charging ahead, `headroom`), so the QP gets an iteration limit and, when it
-  # hits it, a second try with a stronger regularisation, which solves it.
-  result <- solve(
-    Q, rep(0, n_variables), problem$upper, problem$A, problem$lhs, problem$rhs,
-    control = optimization_highs_options(
-      include_mip_gap = FALSE,
-      qp_iteration_limit = 20000L
-    )
-  )
-  if (is.null(result)) {
-    result <- solve(
-      Q, rep(0, n_variables), problem$upper, problem$A, problem$lhs,
-      problem$rhs,
-      control = optimization_highs_options(
-        include_mip_gap = FALSE,
-        qp_regularization_value = 1e-5
-      )
-    )
-  }
-  if (is.null(result)) {
+  if (is.null(excess)) {
     return(NULL)
   }
 
@@ -684,12 +677,10 @@ select_capacity_slice <- function(
   # optimum of 1 (up to the solver tolerance).
   tolerance <- optimization_solution_tolerance()
   upper <- problem$upper
-  upper[excess_idx] <- pmin(
-    upper[excess_idx],
-    pmax(result$primal_solution[excess_idx], 0) + tolerance
-  )
+  upper[excess_idx] <- pmin(upper[excess_idx], excess + tolerance)
   result <- solve(
-    NULL, problem$L_moved, upper, problem$A, problem$lhs, problem$rhs
+    problem$L_moved[core], problem$lower[core], upper[core], A_core,
+    lhs_core, rhs_core
   )
   if (is.null(result)) {
     return(NULL)
@@ -712,7 +703,7 @@ select_capacity_slice <- function(
     A <- rbind(A, matrix(previous_L, nrow = 1))
     lhs <- c(lhs, -Inf)
     rhs <- c(rhs, optimum + tolerance * max(1, abs(optimum)))
-    result <- solve(NULL, L, upper, A, lhs, rhs)
+    result <- solve(L, problem$lower, upper, A, lhs, rhs)
     if (is.null(result)) {
       return(NULL)
     }
@@ -738,6 +729,77 @@ select_capacity_slice <- function(
     breach = if (breach < 0.01) 0 else breach,
     result = result
   )
+}
+
+
+# Stage 1 of select_capacity_slice(): the excess over the caps, brought down
+# lexicographically from the largest, as a sequence of LPs. Each LP minimises
+# `z`, the largest excess among the slots still free (`excess <= z`). A slot
+# whose row `excess <= z` has a nonzero dual is at `z` in every optimum
+# (complementary slackness), so it is fixed there and the next LP brings the
+# rest further down. Every LP fixes at least one slot (the duals of those rows
+# sum to 1), and the sequence ends when the largest free excess is 0. Returns
+# the excess of each slot (the `excess_idx` columns), or NULL when HiGHS
+# fails.
+#
+# The breach used to be a QP on the squared excess. Its optimum is a
+# degenerate vertex (many slots exactly on their cap with no excess), on which
+# HiGHS's active-set QP solver can cycle without end; the simplex of the LPs
+# does not.
+capacity_minmax_excess <- function(
+  solve,
+  lower,
+  upper,
+  A,
+  lhs,
+  rhs,
+  excess_idx
+) {
+  n_cols <- length(lower)
+  # The most excess each slot may keep: the original profile's own breach
+  bound <- upper[excess_idx]
+  level <- bound
+  free <- which(level > 0)
+  # The margin above a fixed level, so that the next LPs and stage 2 stay
+  # feasible to the precision of the simplex; well below the 0.01 grid of the
+  # data.
+  margin <- 1e-4
+
+  while (length(free) > 0) {
+    upper_lp <- upper
+    upper_lp[excess_idx] <- level
+    # excess_j - z <= 0 for every free slot j
+    A_level <- matrix(0, nrow = length(free), ncol = n_cols + 1)
+    A_level[cbind(seq_along(free), excess_idx[free])] <- 1
+    A_level[, n_cols + 1] <- -1
+    result <- solve(
+      c(rep(0, n_cols), 1),
+      c(lower, 0),
+      c(upper_lp, Inf),
+      rbind(cbind(A, 0), A_level),
+      c(lhs, rep(-Inf, length(free))),
+      c(rhs, rep(0, length(free)))
+    )
+    if (is.null(result)) {
+      return(NULL)
+    }
+
+    z <- max(result$objective_value, 0)
+    if (z <= optimization_solution_tolerance()) {
+      level[free] <- 0
+      break
+    }
+    dual <- result$solver_msg$row_dual[nrow(A) + seq_along(free)]
+    fixed <- free[abs(dual) > 1e-9]
+    if (length(fixed) == 0) {
+      excess <- result$primal_solution[excess_idx[free]]
+      fixed <- free[excess >= z - margin]
+    }
+    level[fixed] <- pmin(z + margin, bound[fixed])
+    free <- setdiff(free, fixed)
+  }
+
+  level
 }
 
 

@@ -329,3 +329,42 @@ test_that("soc_final sets the arrival State-of-Charge of the v2g sessions", {
   )
   expect_error(run_final(80, sessions = ahead_session), "not both")
 })
+
+test_that("v2g capacity solves a degenerate window with charging ahead quickly", {
+  # One window of a month-long V2G fleet (3 sessions, charging ahead up to
+  # 56 kW above the uncontrolled profile) with an export breach the fleet
+  # cannot remove. The squared-excess QP of 1.17.0 cycled on it in HiGHS
+  # without end.
+  w <- readRDS(test_path("v2g-capacity-degenerate-window.rds"))
+  elapsed <- system.time(
+    O <- suppressMessages(capacity_v2g_window(
+      G = w$G,
+      LF = w$LF,
+      LS = w$LS,
+      direction = "forward",
+      time_horizon = NULL,
+      LFmax = w$LFmax,
+      import_capacity = w$import_capacity,
+      export_capacity = w$export_capacity,
+      cumsum_min = w$cumsum_min,
+      headroom = w$headroom
+    ))
+  )[["elapsed"]]
+  expect_lt(elapsed, 5)
+
+  net <- w$LS + O - w$G
+  net_uncontrolled <- w$LS + w$LF - w$G
+  export_excess <- pmax(-net - w$export_capacity, 0)
+  export_excess_uncontrolled <- pmax(-net_uncontrolled - w$export_capacity, 0)
+  # No discharge while exporting, and never more export above the cap than
+  # uncontrolled, but less in total: it charges ahead into the export
+  expect_false(any(O < -0.01 & net < -0.01))
+  expect_true(all(export_excess <= export_excess_uncontrolled + 0.01))
+  expect_lt(sum(export_excess), sum(export_excess_uncontrolled) - 100)
+  # Within the caps on import, the same energy, within the headroom and the
+  # departure deadlines
+  expect_true(all(net <= w$import_capacity + 0.01))
+  expect_equal(sum(O), sum(w$LF), tolerance = 0.01)
+  expect_true(all(cumsum(O) <= cumsum(w$LF) + w$headroom + 0.02))
+  expect_true(all(cumsum(O) >= pmin(w$cumsum_min, cumsum(w$LF)) - 0.02))
+})

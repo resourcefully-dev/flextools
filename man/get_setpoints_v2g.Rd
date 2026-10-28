@@ -15,7 +15,7 @@ get_setpoints_v2g(
   soc_min = 0.2,
   discharge_eff = 1,
   soc_max = 1,
-  degradation_cost = 0
+  cycle_cost = 0
 )
 }
 \arguments{
@@ -23,15 +23,17 @@ get_setpoints_v2g(
 and 1) of each profile's energy the setpoint must carry, net of discharge.
 See \code{\link[=smart_v2g]{smart_v2g()}}.}
 
-\item{soc_min}{numeric, SoC floor of the sessions. See \code{\link[=smart_v2g]{smart_v2g()}}.}
+\item{soc_min}{numeric, SoC floor of the sessions, as a fraction (the
+\code{soc_min} of \code{\link[=smart_v2g]{smart_v2g()}} divided by 100).}
 
 \item{discharge_eff}{numeric, discharge efficiency of the vehicles, counted
 by the cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 
-\item{soc_max}{numeric, SoC ceiling of the sessions. See \code{\link[=smart_v2g]{smart_v2g()}}.}
+\item{soc_max}{numeric, SoC ceiling of the sessions, as a fraction. See
+\code{\link[=smart_v2g]{smart_v2g()}}.}
 
-\item{degradation_cost}{numeric, cost per kWh discharged, counted by the
-cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}
+\item{cycle_cost}{numeric, cost of one full battery cycle, counted by the
+cost and combined objectives per kWh discharged as \code{cycle_cost / BatteryCapacity}. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 }
 \description{
 The setpoint plans charge and discharge within the physical envelope of the

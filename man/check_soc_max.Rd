@@ -4,12 +4,15 @@
 \alias{check_soc_max}
 \title{Validate the SoC ceiling of the V2G sessions}
 \usage{
-check_soc_max(soc_max, soc_min)
+check_soc_max(soc_max, soc_min, full = 1)
 }
 \arguments{
-\item{soc_max}{numeric, a single value with \verb{soc_min < soc_max <= 1}.}
+\item{soc_max}{numeric, a single value with \verb{soc_min < soc_max <= full}.}
 
 \item{soc_min}{numeric, the SoC floor.}
+
+\item{full}{numeric, a full battery: 1 for a fraction (the internal
+functions), 100 for \% (\code{\link[=smart_v2g]{smart_v2g()}}).}
 }
 \value{
 \code{TRUE}, invisibly. Stops with a clear message otherwise.

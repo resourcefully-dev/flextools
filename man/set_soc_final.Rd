@@ -9,16 +9,17 @@ set_soc_final(sessions, soc_final, soc_min, soc_max)
 \arguments{
 \item{sessions}{tibble of sessions}
 
-\item{soc_final}{numeric or \code{NULL}, see \code{\link[=smart_v2g]{smart_v2g()}}}
+\item{soc_final}{numeric or \code{NULL}, in \%, see \code{\link[=smart_v2g]{smart_v2g()}}}
 
-\item{soc_min, soc_max}{numeric, the SoC limits}
+\item{soc_min, soc_max}{numeric, the SoC limits in \%}
 }
 \value{
 \code{sessions}, with a \code{StateOfCharge} column when \code{soc_final} is given
 }
 \description{
 With a fleet-wide departure State-of-Charge, each session arrives at
-\code{soc_final - Energy / BatteryCapacity}. \code{soc_final} is lowered to
-\code{soc_max} when above it (with a message); below \code{soc_min} it is an error.
+\code{soc_final - 100 * Energy / BatteryCapacity}, all in \%. \code{soc_final} is
+lowered to \code{soc_max} when above it (with a message); below \code{soc_min} it is
+an error.
 }
 \keyword{internal}

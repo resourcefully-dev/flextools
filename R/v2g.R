@@ -47,74 +47,82 @@
 #'   uncontrolled, never discharges, and the setpoint carries its load as
 #'   fixed. Up to version 1.12.0 a value below 1 was a share of the nominal
 #'   power; it is now always kW.
-#' @param soc_min numeric, State-of-Charge floor of every V2G session, as a
-#'   fraction of its battery capacity (default 0.2, `0 <= soc_min < 1`). A
-#'   session never discharges below it. A session that arrives below it
-#'   (`StateOfCharge < soc_min`) charges up to the floor first, as fast as it
-#'   needs to (at nominal power when necessary), and can neither be curtailed
-#'   nor discharge before it reaches the floor.
-#' @param soc_max numeric, State-of-Charge ceiling of every V2G session, as a
-#'   fraction of its battery capacity (default 1, `soc_min < soc_max <= 1`).
-#'   `soc_min` and `soc_max` are always the limits of the battery:
+#' @param soc_min numeric, State-of-Charge floor of every V2G session, in % of
+#'   its battery capacity (default 20, `0 <= soc_min < 100`). A session never
+#'   discharges below it. A session that arrives below it (`StateOfCharge <
+#'   soc_min`) charges up to the floor first, as fast as it needs to (at
+#'   nominal power when necessary), and can neither be curtailed nor discharge
+#'   before it reaches the floor. Up to version 1.16.0 it was a fraction
+#'   (default 0.2).
+#' @param soc_max numeric, State-of-Charge ceiling of every V2G session, in % of
+#'   its battery capacity (default 100, `soc_min < soc_max <= 100`). `soc_min`
+#'   and `soc_max` are always the limits of the battery:
 #'   * A session may charge ahead, above the level it leaves with, up to
 #'     `soc_max`, as long as it gives that back and still leaves at its
-#'     departure level, `StateOfCharge + Energy / BatteryCapacity`: it charges
-#'     ahead in the cheap or exporting slots and discharges in the expensive
-#'     or importing ones. Its headroom is `(soc_max - StateOfCharge) *
-#'     BatteryCapacity - Energy`, so it needs a `BatteryCapacity` column: a
-#'     battery derived from the session's energy leaves full and has no
-#'     headroom. A `soc_max` at a session's departure level keeps it at or
+#'     departure level, `StateOfCharge + 100 * Energy / BatteryCapacity`: it
+#'     charges ahead in the cheap or exporting slots and discharges in the
+#'     expensive or importing ones. Its headroom is `(soc_max - StateOfCharge)
+#'     / 100 * BatteryCapacity - Energy` kWh, so it needs a `BatteryCapacity`
+#'     column: a battery derived from the session's energy leaves full and has
+#'     no headroom. A `soc_max` at a session's departure level keeps it at or
 #'     below that level, as before 1.17.0.
 #'   * A session whose departure level would be above `soc_max` charges only
-#'     up to it (`Energy` capped at `(soc_max - StateOfCharge) *
+#'     up to it (`Energy` capped at `(soc_max - StateOfCharge) / 100 *
 #'     BatteryCapacity`, with a message), and a session arriving at or above
 #'     `soc_max` is an error.
 #' @param soc_final numeric or `NULL` (default), State-of-Charge every V2G
-#'   session leaves with, as a fraction of its battery capacity (`soc_min <=
-#'   soc_final <= 1`). It needs a `BatteryCapacity` column, and sets each
-#'   session's arrival State-of-Charge from its energy: `StateOfCharge =
-#'   soc_final - Energy / BatteryCapacity` (so `sessions` must not have a
+#'   session leaves with, in % of its battery capacity (`soc_min <= soc_final
+#'   <= 100`). It needs a `BatteryCapacity` column, and sets each session's
+#'   arrival State-of-Charge from its energy: `StateOfCharge = soc_final - 100
+#'   * Energy / BatteryCapacity` (so `sessions` must not have a
 #'   `StateOfCharge` column too). A session whose energy does not fit below
-#'   `soc_final` (`Energy > soc_final * BatteryCapacity`) is an error. A
+#'   `soc_final` (`Energy > soc_final / 100 * BatteryCapacity`) is an error. A
 #'   `soc_final` above `soc_max` is lowered to `soc_max`, with a message, and
 #'   one below `soc_min` is an error. `NULL` takes the arrival State-of-Charge
 #'   from the `StateOfCharge` column (see Details).
-#' @param degradation_cost numeric, cost of the battery wear per kWh
-#'   discharged to the grid (default 0, `>= 0`), in the units of the prices of
-#'   `opt_data`. The `"cost"` objective adds it to every kWh discharged, so the
-#'   fleet discharges only when the price spread, net of the `discharge_eff`
-#'   losses, pays more than it. A combined objective `w` counts `(1 - w) *
-#'   degradation_cost`, the cost side's share. The `"grid"` and `"capacity"`
-#'   objectives, which carry no prices and discharge only to cut import, do
-#'   not count it.
+#' @param cycle_cost numeric, degradation cost of one full cycle of a V2G
+#'   battery, in Euro per `BatteryCapacity` kWh discharged (NOT Euro/kWh), as
+#'   in `add_battery_optimization()`. Default 0. Divided by the battery
+#'   capacity to obtain the per-kWh penalty, so a battery costing `p` Euro/kWh
+#'   and rated for `n` cycles has `cycle_cost = p * BatteryCapacity / n`. The
+#'   setpoint plans each profile's fleet as a whole, so it divides by the mean
+#'   battery capacity of the profile's responsive sessions (exact for a fleet
+#'   of one battery size). The `"cost"` objective adds the per-kWh penalty to
+#'   every kWh discharged to the grid, so the fleet discharges only when the
+#'   price spread, net of the `discharge_eff` losses, pays more than it. A
+#'   combined objective `w` counts `(1 - w)` of it, the cost side's share. The
+#'   `"grid"` and `"capacity"` objectives, which carry no prices and discharge
+#'   only to cut import, do not count it.
 #'
 #' @details
 #' The `sessions` tibble can carry a `StateOfCharge` column, the State-of-Charge
-#' of each vehicle at arrival as a fraction (`0 <= StateOfCharge < 1`); when it
-#' is absent every session arrives at 0.5.
+#' of each vehicle at arrival in % (`0 <= StateOfCharge < 100`); when it is
+#' absent every session arrives at 50. Up to version 1.16.0 it was a fraction.
+#' The returned `sessions` carry it in % too.
 #'
 #' It can also carry a `BatteryCapacity` column, the battery size of each
 #' vehicle in kWh (a positive finite number). The session then leaves at
-#' `StateOfCharge + Energy / BatteryCapacity`, not necessarily full: a 10 kWh
-#' session on a 70 kWh battery arriving at 0.66 leaves at about 0.8, and can
-#' discharge `(0.66 - soc_min) * 70` kWh (32.2 kWh at `soc_min = 0.2`) while it
-#' still has the time to charge it back. A session must fit in its battery,
-#' `Energy <= BatteryCapacity * (1 - StateOfCharge)`, or `smart_v2g()` stops
-#' and names it. When `BatteryCapacity` is absent, each session's `Energy`
-#' takes its battery from `StateOfCharge` to full, so its battery capacity is
-#' `Energy / (1 - StateOfCharge)` (twice the energy at 0.5).
+#' `StateOfCharge + 100 * Energy / BatteryCapacity`, not necessarily full: a
+#' 10 kWh session on a 70 kWh battery arriving at 66 % leaves at about 80 %,
+#' and can discharge `(66 - soc_min) / 100 * 70` kWh (32.2 kWh at `soc_min =
+#' 20`) while it still has the time to charge it back. A session must fit in
+#' its battery, `Energy <= BatteryCapacity * (100 - StateOfCharge) / 100`, or
+#' `smart_v2g()` stops and names it. When `BatteryCapacity` is absent, each
+#' session's `Energy` takes its battery from `StateOfCharge` to full, so its
+#' battery capacity is `Energy / (1 - StateOfCharge / 100)` (twice the energy
+#' at 50 %).
 #'
 #' Instead of a `StateOfCharge` column, a fleet with a `BatteryCapacity` column
 #' can give the State-of-Charge every vehicle leaves with, `soc_final`: each
-#' session then arrives at `soc_final - Energy / BatteryCapacity`. Like
+#' session then arrives at `soc_final - 100 * Energy / BatteryCapacity`. Like
 #' `SOCmin`, `SOCmax` and `SOCini` of `add_battery_optimization()`, `soc_min`,
 #' `soc_max` and `soc_final` are the floor, the ceiling and the target of the
-#' batteries, and `soc_final` stays within the other two.
+#' batteries (in %), and `soc_final` stays within the other two.
 #'
 #' With `energy_max` below 1 the session charges only that share of its energy
-#' and leaves lower, at `StateOfCharge + energy_max * Energy /
-#' BatteryCapacity` (`StateOfCharge + energy_max * (1 - StateOfCharge)` without
-#' a `BatteryCapacity` column).
+#' and leaves lower, at `StateOfCharge + energy_max * 100 * Energy /
+#' BatteryCapacity` (`StateOfCharge + energy_max * (100 - StateOfCharge)`
+#' without a `BatteryCapacity` column).
 #'
 #' The setpoint plans charge and discharge only while the responsive sessions
 #' are connected, within their nominal power in both directions (and
@@ -172,10 +180,10 @@ smart_v2g <- function(
   include_log = FALSE,
   show_progress = FALSE,
   lambda = 0,
-  soc_min = 0.2,
-  soc_max = 1,
+  soc_min = 20,
+  soc_max = 100,
   soc_final = NULL,
-  degradation_cost = 0
+  cycle_cost = 0
 ) {
   if (show_progress) {
     cli::cli_h1("Set up (V2G)")
@@ -206,11 +214,16 @@ smart_v2g <- function(
 
   check_energy_ratios(energy_min, energy_max)
   check_charging_power_min(charging_power_min)
-  check_soc_min(soc_min)
-  check_soc_max(soc_max, soc_min)
-  check_degradation_cost(degradation_cost)
+  check_soc_min(soc_min, full = 100)
+  check_soc_max(soc_max, soc_min, full = 100)
+  check_cycle_cost(cycle_cost)
   sessions <- set_soc_final(sessions, soc_final, soc_min, soc_max)
-  sessions <- set_state_of_charge(sessions)
+  sessions <- set_state_of_charge(sessions, full = 100)
+  # The arguments and the `StateOfCharge` column are in %, as in
+  # add_battery_optimization(); the V2G internals work with fractions.
+  sessions$StateOfCharge <- sessions$StateOfCharge / 100
+  soc_min <- soc_min / 100
+  soc_max <- soc_max / 100
   check_v2g_battery_fit(sessions)
   sessions <- cap_v2g_departure(sessions, soc_max)
 
@@ -337,7 +350,7 @@ smart_v2g <- function(
     soc_min,
     discharge_eff,
     soc_max,
-    degradation_cost
+    cycle_cost
   )
 
   if (show_progress) {
@@ -415,6 +428,9 @@ smart_v2g <- function(
   log_lst <- purrr::map(scheduling_lst, ~ .x$log)
   log <- do.call(c, log_lst)
 
+  # Back to %, as given
+  sessions_opt$StateOfCharge <- round(sessions_opt$StateOfCharge * 100, 8)
+
   structure(
     list(
       sessions = sessions_opt,
@@ -438,12 +454,15 @@ smart_v2g <- function(
 #' @param energy_min,energy_max numeric, minimum and maximum share (between 0
 #'   and 1) of each profile's energy the setpoint must carry, net of discharge.
 #'   See [smart_v2g()].
-#' @param soc_min numeric, SoC floor of the sessions. See [smart_v2g()].
+#' @param soc_min numeric, SoC floor of the sessions, as a fraction (the
+#'   `soc_min` of [smart_v2g()] divided by 100).
 #' @param discharge_eff numeric, discharge efficiency of the vehicles, counted
 #'   by the cost and combined objectives. See [smart_v2g()].
-#' @param soc_max numeric, SoC ceiling of the sessions. See [smart_v2g()].
-#' @param degradation_cost numeric, cost per kWh discharged, counted by the
-#'   cost and combined objectives. See [smart_v2g()].
+#' @param soc_max numeric, SoC ceiling of the sessions, as a fraction. See
+#'   [smart_v2g()].
+#' @param cycle_cost numeric, cost of one full battery cycle, counted by the
+#'   cost and combined objectives per kWh discharged as `cycle_cost /
+#'   BatteryCapacity`. See [smart_v2g()].
 #'
 #' @keywords internal
 #'
@@ -458,7 +477,7 @@ get_setpoints_v2g <- function(
   soc_min = 0.2,
   discharge_eff = 1,
   soc_max = 1,
-  degradation_cost = 0
+  cycle_cost = 0
 ) {
   # Both ratios are shares of the responsive sessions' own demand `LF`; the
   # non-responsive demand `L_fixed_prof` is added back untouched below.
@@ -556,6 +575,18 @@ get_setpoints_v2g <- function(
         if (all(headroom == 0)) {
           headroom <- NULL
         }
+        # Wear per kWh discharged: the cost of a full cycle over the mean
+        # battery of the profile's responsive sessions.
+        discharge_cost <- 0
+        if (cycle_cost > 0) {
+          sessions_soc <- set_state_of_charge(sessions_window_prof_flex)
+          discharge_cost <- cycle_cost /
+            mean(v2g_battery_capacity(
+              sessions_soc$Energy,
+              sessions_soc$StateOfCharge,
+              sessions_soc[["BatteryCapacity"]]
+            ))
+        }
         # The objectives with a squared-net-power term (grid, combined and
         # capacity) discharge only to cut import (see v2g_discharge_floor()).
         discharge_floor <- v2g_discharge_floor(
@@ -602,7 +633,7 @@ get_setpoints_v2g <- function(
             cumsum_min = cumsum_min,
             discharge_eff = discharge_eff,
             headroom = headroom,
-            degradation_cost = degradation_cost
+            discharge_cost = discharge_cost
           )
         } else if (opt_objective == "capacity") {
           O <- capacity_v2g_window(
@@ -640,7 +671,7 @@ get_setpoints_v2g <- function(
             LFmin = discharge_floor,
             discharge_eff = discharge_eff,
             headroom = headroom,
-            degradation_cost = degradation_cost
+            discharge_cost = discharge_cost
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -680,7 +711,7 @@ get_setpoints_v2g_parallel <- function(
   soc_min = 0.2,
   discharge_eff = 1,
   soc_max = 1,
-  degradation_cost = 0
+  cycle_cost = 0
 ) {
   reset_message_once()
 
@@ -697,7 +728,7 @@ get_setpoints_v2g_parallel <- function(
       soc_min = soc_min,
       discharge_eff = discharge_eff,
       soc_max = soc_max,
-      degradation_cost = degradation_cost
+      cycle_cost = cycle_cost
     )
   )
 }
@@ -1046,7 +1077,7 @@ demand_grid_v2g_window <- function(
 #' the fleet's net discharge `D >= max(-O, 0)`, carries a tiny cost so that a
 #' discharge that earns nothing (a tie, e.g. discharging into a flat export
 #' price to charge in another exporting slot) is never chosen. It also carries
-#' the `degradation_cost` of the batteries, so the fleet discharges only when
+#' the `discharge_cost` of the batteries, so the fleet discharges only when
 #' the price spread pays for it.
 #'
 #' @inheritParams demand_cost_window
@@ -1060,7 +1091,7 @@ demand_grid_v2g_window <- function(
 #'   spread covers the losses (see `solve_optimization_window_v2g()`).
 #' @param headroom numeric vector or `NULL`, how far `cumsum(O)` may run above
 #'   `cumsum(LF)`. See `get_bounds_v2g()`.
-#' @param degradation_cost numeric, cost per kWh discharged to the grid
+#' @param discharge_cost numeric, cost per kWh discharged to the grid
 #'   (default 0), on top of the tie-break price.
 #'
 #' @return numeric vector, the optimized load
@@ -1085,7 +1116,7 @@ demand_cost_v2g_window <- function(
   LFmin = NULL,
   discharge_eff = 1,
   headroom = NULL,
-  degradation_cost = 0
+  discharge_cost = 0
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1108,7 +1139,7 @@ demand_cost_v2g_window <- function(
     PTD - PTU,
     PI,
     -PE + tiebreak,
-    rep(tiebreak + degradation_cost, time_slots)
+    rep(tiebreak + discharge_cost, time_slots)
   )
 
   solve_optimization_window_v2g(
@@ -1143,9 +1174,9 @@ demand_cost_v2g_window <- function(
 #' because the squared net-power term trades a shallow export for a deeper one
 #' (see `v2g_discharge_floor()`).
 #'
-#' With a `degradation_cost` above 0, a fourth block of variables, the net
+#' With a `discharge_cost` above 0, a fourth block of variables, the net
 #' discharge `D` (as in `demand_cost_v2g_window()`), carries `(1 - w) *
-#' degradation_cost`, the cost side's share.
+#' discharge_cost`, the cost side's share.
 #'
 #' @inheritParams demand_cost_v2g_window
 #' @param w numeric, optimization objective weight (`w = 1` minimizes net
@@ -1174,7 +1205,7 @@ demand_combined_v2g_window <- function(
   LFmin = NULL,
   discharge_eff = 1,
   headroom = NULL,
-  degradation_cost = 0
+  discharge_cost = 0
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1195,14 +1226,14 @@ demand_combined_v2g_window <- function(
     (1 - w) * PI,
     -(1 - w) * PE
   )
-  if (degradation_cost > 0) {
+  if (discharge_cost > 0) {
     # X = [O, I, E, D], with the net discharge `D` priced at the cost side's
     # share of the degradation.
     P <- rbind(
       cbind(P, matrix(0, 3 * time_slots, time_slots)),
       matrix(0, time_slots, 4 * time_slots)
     )
-    q <- c(q, rep((1 - w) * degradation_cost, time_slots))
+    q <- c(q, rep((1 - w) * discharge_cost, time_slots))
   }
 
   solve_optimization_window_v2g(
@@ -2382,20 +2413,24 @@ schedule_sessions_v2g <- function(
 
 #' Validate the SoC floor of the V2G sessions
 #'
-#' @param soc_min numeric, a single value with `0 <= soc_min < 1`.
+#' @param soc_min numeric, a single value with `0 <= soc_min < full`.
+#' @param full numeric, a full battery: 1 for a fraction (the internal
+#'   functions), 100 for % ([smart_v2g()]).
 #'
 #' @return `TRUE`, invisibly. Stops with a clear message otherwise.
 #' @keywords internal
 #'
-check_soc_min <- function(soc_min) {
+check_soc_min <- function(soc_min, full = 1) {
   if (
     !is.numeric(soc_min) ||
       length(soc_min) != 1 ||
       !is.finite(soc_min) ||
       soc_min < 0 ||
-      soc_min >= 1
+      soc_min >= full
   ) {
-    stop("Error: `soc_min` must be a single number with 0 <= soc_min < 1")
+    stop(
+      "Error: `soc_min` must be a single number with 0 <= soc_min < ", full
+    )
   }
   invisible(TRUE)
 }
@@ -2403,43 +2438,45 @@ check_soc_min <- function(soc_min) {
 
 #' Validate the SoC ceiling of the V2G sessions
 #'
-#' @param soc_max numeric, a single value with `soc_min < soc_max <= 1`.
+#' @param soc_max numeric, a single value with `soc_min < soc_max <= full`.
 #' @param soc_min numeric, the SoC floor.
+#' @inheritParams check_soc_min
 #'
 #' @return `TRUE`, invisibly. Stops with a clear message otherwise.
 #' @keywords internal
 #'
-check_soc_max <- function(soc_max, soc_min) {
+check_soc_max <- function(soc_max, soc_min, full = 1) {
   if (
     !is.numeric(soc_max) ||
       length(soc_max) != 1 ||
       !is.finite(soc_max) ||
       soc_max <= soc_min ||
-      soc_max > 1
+      soc_max > full
   ) {
     stop(
-      "Error: `soc_max` must be a single number with soc_min < soc_max <= 1"
+      "Error: `soc_max` must be a single number with soc_min < soc_max <= ",
+      full
     )
   }
   invisible(TRUE)
 }
 
 
-#' Validate the degradation cost of the V2G batteries
+#' Validate the cycle cost of the V2G batteries
 #'
-#' @param degradation_cost numeric, a single value `>= 0`.
+#' @param cycle_cost numeric, a single value `>= 0`.
 #'
 #' @return `TRUE`, invisibly. Stops with a clear message otherwise.
 #' @keywords internal
 #'
-check_degradation_cost <- function(degradation_cost) {
+check_cycle_cost <- function(cycle_cost) {
   if (
-    !is.numeric(degradation_cost) ||
-      length(degradation_cost) != 1 ||
-      !is.finite(degradation_cost) ||
-      degradation_cost < 0
+    !is.numeric(cycle_cost) ||
+      length(cycle_cost) != 1 ||
+      !is.finite(cycle_cost) ||
+      cycle_cost < 0
   ) {
-    stop("Error: `degradation_cost` must be a single number >= 0")
+    stop("Error: `cycle_cost` must be a single number >= 0")
   }
   invisible(TRUE)
 }
@@ -2447,25 +2484,28 @@ check_degradation_cost <- function(degradation_cost) {
 
 #' Set and validate the arrival State-of-Charge of the V2G sessions
 #'
-#' Adds `StateOfCharge = 0.5` when the column is absent, and checks that every
-#' value is a fraction with `0 <= StateOfCharge < 1` (a full battery has no
-#' energy to charge, so it gives no battery size). When `sessions` has a
-#' `BatteryCapacity` column, it also checks that every value is a positive
-#' finite number (kWh).
+#' Adds `StateOfCharge` at half a battery when the column is absent, and
+#' checks that every value is within `0 <= StateOfCharge < full` (a full
+#' battery has no energy to charge, so it gives no battery size). When
+#' `sessions` has a `BatteryCapacity` column, it also checks that every value
+#' is a positive finite number (kWh).
 #'
 #' @param sessions tibble of sessions
+#' @inheritParams check_soc_min
 #'
 #' @return `sessions` with a `StateOfCharge` column
 #' @keywords internal
 #'
-set_state_of_charge <- function(sessions) {
+set_state_of_charge <- function(sessions, full = 1) {
   if (!("StateOfCharge" %in% names(sessions))) {
-    sessions$StateOfCharge <- rep(0.5, nrow(sessions))
+    sessions$StateOfCharge <- rep(0.5 * full, nrow(sessions))
   }
   soc <- sessions$StateOfCharge
-  if (!is.numeric(soc) || any(!is.finite(soc)) || any(soc < 0 | soc >= 1)) {
+  if (!is.numeric(soc) || any(!is.finite(soc)) || any(soc < 0 | soc >= full)) {
     stop(
-      "Error: `StateOfCharge` in `sessions` must be a fraction with 0 <= StateOfCharge < 1"
+      "Error: `StateOfCharge` in `sessions` must be within 0 <= StateOfCharge < ",
+      full,
+      if (full == 100) " (%)" else " (fraction)"
     )
   }
   if ("BatteryCapacity" %in% names(sessions)) {
@@ -2502,12 +2542,13 @@ check_battery_capacity <- function(sessions) {
 #' Set the arrival State-of-Charge of the V2G sessions from `soc_final`
 #'
 #' With a fleet-wide departure State-of-Charge, each session arrives at
-#' `soc_final - Energy / BatteryCapacity`. `soc_final` is lowered to
-#' `soc_max` when above it (with a message); below `soc_min` it is an error.
+#' `soc_final - 100 * Energy / BatteryCapacity`, all in %. `soc_final` is
+#' lowered to `soc_max` when above it (with a message); below `soc_min` it is
+#' an error.
 #'
 #' @param sessions tibble of sessions
-#' @param soc_final numeric or `NULL`, see [smart_v2g()]
-#' @param soc_min,soc_max numeric, the SoC limits
+#' @param soc_final numeric or `NULL`, in %, see [smart_v2g()]
+#' @param soc_min,soc_max numeric, the SoC limits in %
 #'
 #' @return `sessions`, with a `StateOfCharge` column when `soc_final` is given
 #' @keywords internal
@@ -2520,10 +2561,10 @@ set_soc_final <- function(sessions, soc_final, soc_min, soc_max) {
     !is.numeric(soc_final) ||
       length(soc_final) != 1 ||
       !is.finite(soc_final) ||
-      soc_final > 1
+      soc_final > 100
   ) {
     stop(
-      "Error: `soc_final` must be NULL or a single number with soc_min <= soc_final <= 1"
+      "Error: `soc_final` must be NULL or a single number with soc_min <= soc_final <= 100"
     )
   }
   if (soc_final < soc_min) {
@@ -2531,8 +2572,8 @@ set_soc_final <- function(sessions, soc_final, soc_min, soc_max) {
   }
   if (soc_final > soc_max) {
     message(
-      "\u2139 `soc_final` (", soc_final, ") is above `soc_max`: the sessions ",
-      "leave at `soc_max` (", soc_max, ")."
+      "\u2139 `soc_final` (", soc_final, " %) is above `soc_max`: the ",
+      "sessions leave at `soc_max` (", soc_max, " %)."
     )
     soc_final <- soc_max
   }
@@ -2545,12 +2586,12 @@ set_soc_final <- function(sessions, soc_final, soc_min, soc_max) {
     )
   }
   check_battery_capacity(sessions)
-  soc <- soc_final - sessions$Energy / sessions$BatteryCapacity
+  soc <- soc_final - 100 * sessions$Energy / sessions$BatteryCapacity
   too_big <- soc < -1e-9
   if (any(too_big)) {
     stop(
       "Error: the `Energy` of some sessions does not fit below `soc_final` ",
-      "(`Energy > soc_final * BatteryCapacity`). Sessions: ",
+      "(`Energy > soc_final / 100 * BatteryCapacity`). Sessions: ",
       paste(unique(sessions$Session[too_big]), collapse = ", ")
     )
   }
@@ -2582,7 +2623,7 @@ check_v2g_battery_fit <- function(sessions, tol = 1e-9) {
   if (any(too_big)) {
     stop(
       "Error: the `Energy` of some sessions does not fit in their battery ",
-      "(`Energy > BatteryCapacity * (1 - StateOfCharge)`). Sessions: ",
+      "(`Energy > BatteryCapacity * (100 - StateOfCharge) / 100`). Sessions: ",
       paste(unique(sessions$Session[too_big]), collapse = ", ")
     )
   }

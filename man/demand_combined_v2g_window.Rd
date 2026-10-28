@@ -24,7 +24,7 @@ demand_combined_v2g_window(
   LFmin = NULL,
   discharge_eff = 1,
   headroom = NULL,
-  degradation_cost = 0
+  discharge_cost = 0
 )
 }
 \arguments{
@@ -80,7 +80,7 @@ spread covers the losses (see \code{solve_optimization_window_v2g()}).}
 \item{headroom}{numeric vector or \code{NULL}, how far \code{cumsum(O)} may run above
 \code{cumsum(LF)}. See \code{get_bounds_v2g()}.}
 
-\item{degradation_cost}{numeric, cost per kWh discharged to the grid
+\item{discharge_cost}{numeric, cost per kWh discharged to the grid
 (default 0), on top of the tie-break price.}
 }
 \value{
@@ -98,7 +98,7 @@ because the squared net-power term trades a shallow export for a deeper one
 (see \code{v2g_discharge_floor()}).
 }
 \details{
-With a \code{degradation_cost} above 0, a fourth block of variables, the net
-discharge \code{D} (as in \code{demand_cost_v2g_window()}), carries \code{(1 - w) * degradation_cost}, the cost side's share.
+With a \code{discharge_cost} above 0, a fourth block of variables, the net
+discharge \code{D} (as in \code{demand_cost_v2g_window()}), carries \code{(1 - w) * discharge_cost}, the cost side's share.
 }
 \keyword{internal}

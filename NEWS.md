@@ -1,18 +1,23 @@
 # flextools 1.17.0
 
-* `smart_v2g()` gains `soc_max` (default 1, `soc_min < soc_max <= 1`), the
+* Breaking: the State-of-Charge of `smart_v2g()` is in %, as in
+  `add_battery_optimization()`: `soc_min` (default 20, was 0.2) and the
+  `StateOfCharge` column of `sessions` (default 50, was 0.5), as well as the
+  new `soc_max` and `soc_final` below. An old call with `soc_min = 0.2` now
+  means 0.2 %. The returned `sessions` carry `StateOfCharge` in % too.
+* `smart_v2g()` gains `soc_max` (default 100, `soc_min < soc_max <= 100`), the
   State-of-Charge ceiling of the V2G batteries. `soc_min` and `soc_max` are
   always their limits:
   * A session with a `BatteryCapacity` may charge ahead, above the level it
     leaves with, up to `soc_max`, and give it back before it leaves. Until now
     the fleet could never hold more than its uncontrolled profile had charged,
     so a vehicle could only discharge what it had time to charge back after.
-    With a 70 kWh battery arriving at 66% and leaving at 80%, `soc_max = 1`
-    lets it absorb 14 kWh more of a midday PV export and discharge them in an
-    import peak that lasts until it leaves, under every objective. It still
-    leaves at `StateOfCharge + Energy / BatteryCapacity`: the scheduler
-    discharges what is left above that level before departure, whatever the
-    setpoint.
+    With a 70 kWh battery arriving at 66 % and leaving at 80 %, `soc_max =
+    100` lets it absorb 14 kWh more of a midday PV export and discharge them
+    in an import peak that lasts until it leaves, under every objective. It
+    still leaves at `StateOfCharge + 100 * Energy / BatteryCapacity`: the
+    scheduler discharges what is left above that level before departure,
+    whatever the setpoint.
   * A session whose departure level would be above `soc_max` charges only up
     to it (with a message), and a session arriving at or above `soc_max` is an
     error.
@@ -20,20 +25,22 @@
     leaves full, so it has no room to charge ahead: those results are
     unchanged. A `soc_max` at the departure level of the sessions gives the
     results of 1.16.0.
-* `smart_v2g()` gains `soc_final` (default `NULL`), the State-of-Charge every
-  V2G session leaves with. With a `BatteryCapacity` column it sets each
-  session's arrival State-of-Charge, `soc_final - Energy / BatteryCapacity`,
-  instead of a `StateOfCharge` column (giving both is an error). Like
-  `SOCmin`, `SOCmax` and `SOCini` of `add_battery_optimization()`, it stays
-  within the limits: above `soc_max` it is lowered to `soc_max` (with a
-  message), below `soc_min` it is an error, and so is a session whose energy
-  does not fit below it.
-* `smart_v2g()` gains `degradation_cost` (default 0, per kWh discharged to the
-  grid). The `"cost"` objective adds it to every kWh discharged, so the fleet
-  no longer discharges for a price spread (net of `discharge_eff`) below it;
-  a combined objective `w` counts `(1 - w) * degradation_cost`. The `"grid"`
-  and `"capacity"` objectives, which discharge only to cut import and carry no
-  prices, do not count it.
+* `smart_v2g()` gains `soc_final` (default `NULL`, in %), the State-of-Charge
+  every V2G session leaves with. With a `BatteryCapacity` column it sets each
+  session's arrival State-of-Charge, `soc_final - 100 * Energy /
+  BatteryCapacity`, instead of a `StateOfCharge` column (giving both is an
+  error). Like `SOCmin`, `SOCmax` and `SOCini` of
+  `add_battery_optimization()`, it stays within the limits: above `soc_max` it
+  is lowered to `soc_max` (with a message), below `soc_min` it is an error,
+  and so is a session whose energy does not fit below it.
+* `smart_v2g()` gains `cycle_cost` (default 0), the degradation cost of one
+  full cycle of a V2G battery, in Euro per `BatteryCapacity` kWh discharged,
+  as in `add_battery_optimization()`. Divided by the battery capacity (the
+  mean of each profile's responsive sessions) it prices every kWh discharged
+  to the grid under the `"cost"` objective, so the fleet no longer discharges
+  for a price spread (net of `discharge_eff`) below it; a combined objective
+  `w` counts `(1 - w)` of it. The `"grid"` and `"capacity"` objectives, which
+  discharge only to cut import and carry no prices, do not count it.
 * Fix: the `"capacity"` objective could hang in HiGHS's QP solver on a
   degenerate breach (seen with `soc_max`). The breach QP now has an iteration
   limit and, when it hits it, solves again with a stronger regularisation.

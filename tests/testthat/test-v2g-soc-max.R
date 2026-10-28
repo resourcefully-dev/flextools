@@ -142,11 +142,11 @@ test_that("the v2g scheduler gives back the charge ahead before departure", {
   }
 })
 
-test_that("degradation_cost stops the v2g arbitrage the price spread does not pay", {
-  # Plugged in all day at 50% of 70 kWh with 10 kWh to charge. Import costs
-  # 0.30 in the morning and evening and 0.10 midday; a discharge in the
-  # expensive slots saves 0.30 and its energy is charged back midday at
-  # 0.10 / 0.9: a spread of about 0.19 per kWh discharged.
+# Plugged in all day at 50% of 70 kWh with 10 kWh to charge. Import costs
+# 0.30 in the morning and evening and 0.10 midday; a discharge in the
+# expensive slots saves 0.30 and its energy is charged back midday at
+# 0.10 / 0.9: a spread of about 0.19 per kWh discharged.
+degradation_discharged <- function(objective, degradation_cost) {
   dttm <- ahead_dttm
   hour <- as.numeric(format(dttm, "%H"))
   opt_data <- tibble(
@@ -167,23 +167,43 @@ test_that("degradation_cost stops the v2g arbitrage the price spread does not pa
     StateOfCharge = 0.5,
     BatteryCapacity = 70
   )
-  discharged <- function(degradation_cost) {
-    results <- suppressMessages(smart_v2g(
-      session,
-      opt_data,
-      opt_objective = "cost",
-      window_days = 1,
-      window_start_hour = 0,
-      soc_min = 0.2,
-      discharge_eff = 0.9,
-      degradation_cost = degradation_cost
-    ))
-    -sum(pmin(results$demand$Fleet, 0)) * 15 / 60
-  }
+  results <- suppressMessages(smart_v2g(
+    session,
+    opt_data,
+    opt_objective = objective,
+    window_days = 1,
+    window_start_hour = 0,
+    soc_min = 0.2,
+    discharge_eff = 0.9,
+    degradation_cost = degradation_cost
+  ))
+  -sum(pmin(results$demand$Fleet, 0)) * 15 / 60
+}
 
-  expect_gt(discharged(0), 1)
-  expect_gt(discharged(0.1), 1)
-  expect_equal(discharged(0.25), 0)
+test_that("degradation_cost stops the v2g arbitrage the price spread does not pay", {
+  # Below the spread the fleet discharges as much as without it, above it not
+  # at all.
+  expect_gt(degradation_discharged("cost", 0), 1)
+  expect_equal(
+    degradation_discharged("cost", 0.1),
+    degradation_discharged("cost", 0),
+    tolerance = 0.02
+  )
+  expect_equal(degradation_discharged("cost", 0.25), 0)
+})
+
+test_that("degradation_cost weighs on the cost side of a combined v2g objective", {
+  # w = 0.1: the cost side (0.9 of the objective) makes the fleet discharge.
+  # The degradation is counted on the same side, (1 - w) * degradation_cost,
+  # so it trims the discharge where the squared net power gains little (at
+  # 0.1, below the spread) and stops it above the spread (0.25), as under
+  # "cost".
+  no_degradation <- degradation_discharged(0.1, 0)
+  below_spread <- degradation_discharged(0.1, 0.1)
+  expect_gt(no_degradation, 1)
+  expect_gt(below_spread, 0)
+  expect_lt(below_spread, no_degradation - 1)
+  expect_equal(degradation_discharged(0.1, 0.25), 0)
 })
 
 test_that("smart_v2g validates soc_max and degradation_cost", {

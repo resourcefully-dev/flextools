@@ -2105,8 +2105,14 @@ schedule_sessions_v2g <- function(
         #   4. discharge below it, down to the minimum energy.
         # Stages 2 and 4 give up energy (`soc_max` towards `soc_final_min`),
         # so they go only as far as the import capacity needs (`power_cap`,
-        # see smart_v2g_window()). A session never discharges into another
-        # one that is still charging when postponing or curtailing suffices.
+        # see smart_v2g_window()). Where the setpoint goes below `power_cap`,
+        # the fleet plan discharges there to charge back later under the caps,
+        # so stage 3 runs first for that part of the setpoint: a session is
+        # never curtailed below its full target for a capacity another one's
+        # discharge makes room for. Down to `power_cap` the order stands: a
+        # session never discharges into another one that is still charging
+        # when postponing or curtailing suffices, as a cap that binds may not
+        # leave room to charge the discharge back.
         flex_idx <- sessions_timeslot$Flexible
         full_floor <- pmin(
           pmax(sessions_timeslot$FullPowerTimeslot, 0),
@@ -2130,8 +2136,19 @@ schedule_sessions_v2g <- function(
         }
         power <- levels[[1]]
         req <- flex_req
-        for (k in seq_along(levels)[-1]) {
+        # The levels in stage order: postpone, the discharge charged back for
+        # the part of the setpoint below `power_cap`, curtail, the rest of the
+        # discharge charged back, discharge below the full target
+        stages <- c(2, 4, 3, 4, 5)
+        for (i in seq_along(stages)) {
+          k <- stages[i]
           stage_req <- req
+          if (i == 2) {
+            stage_req <- min(
+              req,
+              round(power_cap - setpoint_power_timeslot, 2)
+            )
+          }
           if (k %in% c(3, 5)) {
             # Below the full target only down to the import capacity
             stage_req <- min(req, round(sum(power) - power_cap, 2))

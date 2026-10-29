@@ -326,3 +326,48 @@ test_that("the v2g energy reward does not pay for the discharge losses", {
   }
   expect_equal(discharged(80), discharged(100), tolerance = 0.05)
 })
+
+test_that("a v2g session is not cut for a cap another one's discharge makes room for", {
+  # The rebound case of the simulator: S1 (30 kWh, 17:00 to 07:00) and S2
+  # (20 kWh, 17:00 to 21:00), 11 kW each, under a 20 kW import cap with a
+  # 12 kW load until 21:00. S2 alone has 8 kW of room for 4 hours, so its
+  # 20 kWh fit. The grid setpoint discharges into the evening; S1's discharge
+  # makes room under the cap, so S2 must not be curtailed below its energy
+  # (1.18.0 gave it 14 kWh, leaving at 91.4 %).
+  dttm <- seq(as.POSIXct("2025-01-02 00:00", tz = "UTC"), by = "15 min", length.out = 96 * 3)
+  hour <- as.numeric(format(dttm, "%H"))
+  opt_data <- tibble(
+    datetime = dttm,
+    production = 0,
+    static = ifelse(hour %in% 17:20 & dttm < dttm[1] + 86400, 12, 2),
+    import_capacity = 20,
+    export_capacity = 20
+  )
+  start <- dttm[1] + 17 * 3600
+  sessions <- tibble(
+    Session = c("S1", "S2"),
+    Timecycle = "Workday",
+    Profile = "Fleet",
+    ConnectionStartDateTime = start,
+    ConnectionHours = c(14, 4),
+    Power = 11,
+    Energy = c(30, 20),
+    BatteryCapacity = 70
+  )
+  results <- suppressMessages(smart_v2g(
+    sessions,
+    opt_data,
+    opt_objective = "grid",
+    window_days = 1,
+    window_start_hour = 12,
+    soc_min = 20,
+    soc_max = 100,
+    soc_final_min = 80
+  ))
+  energy <- tapply(results$sessions$Energy, results$sessions$Session, sum)
+  expect_equal(as.numeric(energy[c("S1", "S2")]), c(30, 20), tolerance = 0.05)
+  site <- opt_data$static[match(results$demand$datetime, dttm)] +
+    results$demand$Fleet
+  expect_true(all(site <= 20 + 0.05))
+  expect_true(all(abs(results$sessions$Power) <= 11 + 1e-6))
+})

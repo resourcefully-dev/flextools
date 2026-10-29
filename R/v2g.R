@@ -2144,6 +2144,9 @@ schedule_sessions_v2g <- function(
           factor <- min(stage_req / sum(reduction), 1)
           # A stage given in full lands exactly on its level (no rounding
           # residue, which would split the session into more segments)
+          if (factor > 1 - 1e-9) {
+            factor <- 1
+          }
           power[flex_idx] <- if (factor == 1) {
             pmin(power, levels[[k]])[flex_idx]
           } else {
@@ -2151,7 +2154,9 @@ schedule_sessions_v2g <- function(
           }
           req <- req - factor * sum(reduction)
         }
-        sessions_timeslot$Power[flex_idx] <- power[flex_idx]
+        # Rounded so that no floating-point residue (which differs between
+        # platforms) splits a session into more segments
+        sessions_timeslot$Power[flex_idx] <- round(power[flex_idx], 8)
 
         # Clamp target power to respect `charging_power_min`.
         # Only needed when `MinPowerTimeslot <= 0` (discharging allowed),

@@ -789,8 +789,12 @@ test_that("soc_final_min at soc_max keeps the v2g results unchanged", {
     # vehicles arrive, so the cap is only approached where it is unreachable.
     # Re-captured on 1.18.0: the scheduler postpones charge before it
     # discharges, so fewer sessions discharge into others that still charge.
-    expect_equal(sum(v2g_max_1$demand$Worktime), 1021.03, tolerance = 1e-6)
-    expect_equal(sum(abs(v2g_max_1$demand$Worktime)), 1632.27, tolerance = 1e-6)
+    # The demand is rebuilt from the scheduled segments, each rounded to 2
+    # decimals, and one of them sits exactly on a tie (4.18 kW for 6.25 h,
+    # 26.125 kWh): it rounds to 26.13 on macOS and 26.12 on Linux, so the
+    # totals are held to 0.05 kWh.
+    expect_lt(abs(sum(v2g_max_1$demand$Worktime) - 1021.03), 0.05)
+    expect_lt(abs(sum(abs(v2g_max_1$demand$Worktime)) - 1632.27), 0.05)
     expect_equal(sum(v2g_max_1$setpoints$Worktime), 1020.89, tolerance = 1e-6)
 
     v2g_capacity <- smart_v2g(

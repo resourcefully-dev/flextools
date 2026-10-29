@@ -53,6 +53,10 @@
   reward. The fleet then discharged at full power where the price spread did
   not pay for the losses. The reward now counts the energy delivered, as the
   energy row does.
+* Fix: `smart_charging()` with `opt_objective = "none"` gave a NaN setpoint
+  to a profile with no grid capacity left in the window: none from the grid,
+  or all of it taken by the inflated setpoints of the profiles scheduled
+  before. Its setpoint is now zero (with `method = "none"`, its demand was NA).
 * The internal `headroom` of `get_flex_envelope()` and of the V2G and
   capacity window solvers is gone. The one-way paths are unchanged.
 

@@ -1,3 +1,58 @@
+# flextools 1.18.0
+
+* Breaking: `smart_v2g()` replaces the exact final State-of-Charge
+  (`soc_final`) with a minimum, `soc_final_min` (in %, default `soc_max`,
+  `soc_min <= soc_final_min <= soc_max`), and no longer charges ahead.
+  * A session's `Energy` is what it charges to reach `soc_max`. With a
+    `BatteryCapacity` column and no `StateOfCharge` column, each session
+    arrives at `soc_max - 100 * Energy / BatteryCapacity` (until now at 50 %
+    without `soc_final`). One that would arrive below 0 % is an error naming
+    it. A `StateOfCharge` column still sets the arrival.
+  * Every objective aims for `soc_max` at departure, and a session leaves
+    lower, down to `soc_final_min`, only where the grid capacities cannot fit
+    its full energy. It works as `energy_min` does: each session's minimum is
+    the lower of `energy_min` of its energy and what takes it to
+    `soc_final_min`. Without `BatteryCapacity` it applies to the battery
+    derived from the energy (a session arriving at 50 % with `soc_final_min =
+    80` must charge at least 60 % of its energy).
+  * Charging ahead above the departure level, and the scheduler's forced
+    discharge of it before departure, are gone. Nothing has to be given back
+    any more, so a session no longer discharges while the site exports, nor
+    in an evening peak on a day without an import breach, just to leave at
+    an exact level. Over a V06-like month (a midday export breach, an evening
+    import peak and 20 vehicles a weekday) with `soc_final_min = 80`, the
+    `"capacity"` fleet never discharges into export, discharges on days
+    without an import breach only to make room for charging in the export
+    breach, and every vehicle leaves at 80 % or more (99.9 % on average).
+  * `discharge_eff` and `cycle_cost` work as before: what a session
+    discharges, grossed up by `1 / discharge_eff`, is charged back before it
+    leaves, or it leaves lower but still at `soc_final_min` or above.
+* The V2G scheduler meets a setpoint below the sessions' power in stages:
+  first it postpones charge, then it curtails below the full energy, then it
+  discharges what the sessions can still charge back, and last it discharges
+  below their full energy. It curtails and discharges below the full energy
+  (towards `energy_min` and `soc_final_min`) only as far as the import
+  capacity needs. Elsewhere a setpoint below what the sessions can postpone
+  comes from planning the fleet as a whole, so they keep their energy.
+  Until now every flexible session was cut in proportion to its whole range,
+  so a session that had finished charging discharged into another one that
+  was still charging. The default V2G results change slightly (the
+  `energy_max = 1` totals of the tests: 1021.03 instead of 1020.98 kWh net,
+  1632.27 instead of 1633.94 kWh of absolute load).
+* When even the minimum energy does not fit under the grid capacities, the
+  V2G setpoint no longer delivers exactly that minimum. It relaxes the caps
+  as far as the minimum-energy profile needs, then adds as much energy on top
+  as fits with no more import than that. Only an import breach needs less
+  energy; an export breach needs more, and the minimum alone made it worse.
+* Fix: in the second pass of the V2G discharge losses (`"cost"` and combined
+  objectives with `discharge_eff < 1` and an energy range), the energy reward
+  counted the grid-side energy, so a discharge and its recharge earned
+  reward. The fleet then discharged at full power where the price spread did
+  not pay for the losses. The reward now counts the energy delivered, as the
+  energy row does.
+* The internal `headroom` of `get_flex_envelope()` and of the V2G and
+  capacity window solvers is gone. The one-way paths are unchanged.
+
 # flextools 1.17.1
 
 * The `"capacity"` objective of `smart_v2g()` and `optimize_demand()` no

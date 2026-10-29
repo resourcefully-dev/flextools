@@ -23,7 +23,6 @@ demand_combined_v2g_window(
   cumsum_min = NULL,
   LFmin = NULL,
   discharge_eff = 1,
-  headroom = NULL,
   discharge_cost = 0
 )
 }
@@ -76,9 +75,6 @@ optimized load. See \code{demand_grid_v2g_window()}.}
 Below 1, every kWh discharged must be charged back as \code{1 / discharge_eff}
 kWh, as the scheduler counts it, so a discharge pays only when the price
 spread covers the losses (see \code{solve_optimization_window_v2g()}).}
-
-\item{headroom}{numeric vector or \code{NULL}, how far \code{cumsum(O)} may run above
-\code{cumsum(LF)}. See \code{get_bounds_v2g()}.}
 
 \item{discharge_cost}{numeric, cost per kWh discharged to the grid
 (default 0), on top of the tie-break price.}

@@ -1,11 +1,10 @@
 library(dplyr)
 
-# Charging ahead (`soc_max`), the departure SoC (`soc_final`) and the battery
-# cycle cost of V2G, all in % as smart_v2g() takes them. One
-# vehicle with a 70 kWh battery, plugged in from 08:00 to 21:00, arriving at
-# 66% and leaving at 80% (9.8 kWh). The site exports PV above its export
-# capacity from 10:00 to 15:00 and imports above its import capacity from 17:00
-# to 21:00, right up to the departure.
+# The SoC ceiling (`soc_max`) and the battery cycle cost of V2G, in % as
+# smart_v2g() takes them. One vehicle with a 70 kWh battery, plugged in from
+# 08:00 to 21:00, arriving at 66% and leaving at 80% (9.8 kWh). The site
+# exports PV above its export capacity from 10:00 to 15:00 and imports above
+# its import capacity from 17:00 to 21:00, right up to the departure.
 
 ahead_dttm <- seq(
   as.POSIXct("2025-06-02 00:00", tz = "UTC"),
@@ -55,33 +54,19 @@ ahead_battery <- function(results) {
   0.66 * 70 + cumsum(results$demand$Fleet) * 15 / 60
 }
 
-test_that("with soc_max the v2g fleet charges ahead in the export and discharges in the peak", {
-  for (objective in c("capacity", "cost")) {
-    results <- run_ahead(objective, soc_max = 100)
-    battery <- ahead_battery(results)
-    fleet <- results$demand$Fleet
-
-    # Above its 80% departure level during the export, up to 100%
-    expect_gt(max(battery[ahead_pv]), 0.8 * 70 + 1, label = objective)
-    expect_true(all(battery <= 70 + 0.02), info = objective)
-    # Discharges in the import peak
-    expect_lt(sum(fleet[ahead_peak]) * 15 / 60, -1, label = objective)
-    # Never below the floor, and leaves at 80%: net energy = Energy
-    expect_true(all(battery >= 0.2 * 70 - 0.02), info = objective)
-    expect_equal(sum(fleet) * 15 / 60, 9.8, tolerance = 0.02, info = objective)
-    expect_equal(battery[length(battery)], 0.8 * 70, tolerance = 0.02)
-  }
-
-  # With soc_max at its departure level it never holds more than it leaves
-  # with, so it cannot discharge in a peak that lasts until it leaves. (The
-  # departure level of the adapted session: evsim rounds 9.8 kWh at 11 kW to
-  # 0.89 hours, 9.79 kWh.)
-  departure_soc <- 66 + 100 * 9.79 / 70
+test_that("a v2g session never holds more than it leaves with", {
+  # Nothing is charged ahead and given back: the battery never goes above its
+  # departure level (80%), so the session cannot discharge in a peak that
+  # lasts until it leaves, under any objective and whatever `soc_max`.
   for (objective in c("capacity", "cost", "grid")) {
-    results <- run_ahead(objective, soc_max = departure_soc)
-    battery <- ahead_battery(results)
-    expect_true(all(battery <= 0.8 * 70 + 0.02), info = objective)
-    expect_gte(sum(results$demand$Fleet[ahead_peak]), -0.01)
+    for (soc_max in c(85, 100)) {
+      results <- run_ahead(objective, soc_max = soc_max)
+      battery <- ahead_battery(results)
+      expect_true(all(battery <= 0.8 * 70 + 0.02), info = objective)
+      expect_true(all(battery >= 0.2 * 70 - 0.02), info = objective)
+      expect_gte(sum(results$demand$Fleet[ahead_peak]), -0.01)
+      expect_equal(sum(results$demand$Fleet) * 15 / 60, 9.8, tolerance = 0.02)
+    }
   }
 })
 
@@ -125,58 +110,18 @@ test_that("soc_max caps the departure level of the v2g sessions", {
   expect_error(run_ahead("grid", soc_max = 66), "at or above `soc_max`.*S1")
 })
 
-test_that("a session without BatteryCapacity has no headroom", {
-  # Its battery is derived from its energy, so it leaves full. The internal
-  # functions take the SoC as a fraction.
-  envelope <- get_flex_envelope(
-    evsim::adapt_charging_features(
-      mutate(select(ahead_session, -BatteryCapacity), StateOfCharge = 0.66),
-      time_resolution = 15
-    ),
-    dttm_seq = ahead_dttm,
-    profile = "Fleet",
-    soc_min = 0.2,
-    soc_max = 1
-  )
-  expect_true(all(envelope$headroom == 0))
-
-  # With it: (1 - 0.66) * 70 - 9.8 = 14 kWh, 56 kW over a 15-minute slot,
-  # from its arrival up to the slot before it leaves
-  envelope <- get_flex_envelope(
-    evsim::adapt_charging_features(
-      mutate(ahead_session, StateOfCharge = 0.66),
-      time_resolution = 15
-    ),
-    dttm_seq = ahead_dttm,
-    profile = "Fleet",
-    soc_min = 0.2,
-    soc_max = 1
-  )
-  connected <- which(envelope$headroom > 0)
-  expect_equal(unique(envelope$headroom[connected]), 56, tolerance = 0.1)
-  expect_equal(ahead_dttm[min(connected)], ahead_session$ConnectionStartDateTime)
-})
-
-test_that("the v2g scheduler gives back the charge ahead before departure", {
-  # A setpoint that always asks for more: the session charges up to soc_max
-  # and still leaves at its departure level. (Internal: SoC as a fraction.)
+test_that("the v2g scheduler never charges above the departure level", {
+  # A setpoint that always asks for more: the session charges its energy and
+  # stops, whatever `soc_max` (internal: SoC as a fraction).
   session <- ahead_session %>%
     mutate(StateOfCharge = 0.66) %>%
     evsim::adapt_charging_features(time_resolution = 15) %>%
     mutate(Responsive = TRUE)
   setpoint <- tibble(datetime = ahead_dttm, setpoint = 100)
-  for (soc_max in c(0.9, 1)) {
-    results <- schedule_sessions_v2g(
-      session,
-      setpoint,
-      soc_min = 0.2,
-      soc_max = soc_max
-    )
-    energy <- results$sessions$Energy
-    battery <- 0.66 * 70 + cumsum(energy)
-    expect_equal(max(battery), soc_max * 70, tolerance = 0.02)
-    expect_equal(battery[length(battery)], 0.8 * 70, tolerance = 0.02)
-  }
+  results <- schedule_sessions_v2g(session, setpoint, soc_min = 0.2)
+  battery <- 0.66 * 70 + cumsum(results$sessions$Energy)
+  expect_equal(max(battery), 0.8 * 70, tolerance = 0.02)
+  expect_equal(battery[length(battery)], 0.8 * 70, tolerance = 0.02)
 })
 
 # Plugged in all day at 50% of 70 kWh with 10 kWh to charge. Import costs
@@ -244,7 +189,7 @@ test_that("cycle_cost weighs on the cost side of a combined v2g objective", {
   expect_equal(cycle_discharged(0.1, 17.5), 0)
 })
 
-test_that("smart_v2g validates soc_min, soc_max and cycle_cost in %", {
+test_that("smart_v2g validates soc_min, soc_max, soc_final_min and cycle_cost in %", {
   expect_error(
     smart_v2g(
       ahead_session,
@@ -261,6 +206,15 @@ test_that("smart_v2g validates soc_min, soc_max and cycle_cost in %", {
   }
   expect_error(run_ahead("grid", soc_max = 101), "soc_max <= 100")
   expect_no_error(run_ahead("grid", soc_max = 90))
+  # soc_min <= soc_final_min <= soc_max, both ends included
+  for (soc_final_min in list(10, 95, NA_real_, c(80, 90), "80", NULL)) {
+    expect_error(
+      run_ahead("grid", soc_max = 90, soc_final_min = soc_final_min),
+      "`soc_final_min` must be a single number with soc_min \\(20\\) <= soc_final_min <= soc_max \\(90\\)"
+    )
+  }
+  expect_no_error(run_ahead("grid", soc_max = 90, soc_final_min = 20))
+  expect_no_error(run_ahead("grid", soc_max = 90, soc_final_min = 90))
   for (cycle_cost in list(-0.01, NA_real_, Inf, c(0, 1), "0.1")) {
     expect_error(
       run_ahead("cost", cycle_cost = cycle_cost),
@@ -280,61 +234,11 @@ test_that("smart_v2g validates soc_min, soc_max and cycle_cost in %", {
   )
 })
 
-test_that("soc_final sets the arrival State-of-Charge of the v2g sessions", {
-  session <- select(ahead_session, -StateOfCharge)
-  run_final <- function(soc_final, soc_max = 100, sessions = session) {
-    smart_v2g(
-      sessions,
-      ahead_opt_data,
-      opt_objective = "grid",
-      window_days = 1,
-      window_start_hour = 0,
-      soc_min = 20,
-      soc_max = soc_max,
-      soc_final = soc_final
-    )
-  }
-
-  # Leaving at 80 % with 9.8 kWh: arrives at 80 - 100 * 9.8 / 70 = 66 %
-  results <- suppressMessages(run_final(80))
-  expect_equal(unique(results$sessions$StateOfCharge), 66)
-  battery <- 0.66 * 70 + cumsum(results$demand$Fleet) * 15 / 60
-  expect_equal(battery[length(battery)], 0.8 * 70, tolerance = 0.02)
-
-  # Above soc_max it is lowered to soc_max: arrives at 75 - 14 = 61 %,
-  # still with its 9.8 kWh
-  expect_message(
-    results <- run_final(80, soc_max = 75),
-    "`soc_final` \\(80 %\\) is above `soc_max`.*\\(75 %\\)"
-  )
-  expect_equal(unique(results$sessions$StateOfCharge), 61)
-  expect_equal(sum(results$demand$Fleet) * 15 / 60, 9.8, tolerance = 0.02)
-
-  # Below soc_min, invalid, or not fitting below it: errors
-  expect_error(run_final(10), "`soc_final` cannot be below `soc_min`")
-  for (soc_final in list(101, NA_real_, c(80, 90), "80")) {
-    expect_error(run_final(soc_final), "`soc_final` must be")
-  }
-  expect_error(
-    run_final(50, sessions = bind_rows(
-      mutate(session, Session = "fits"),
-      mutate(session, Session = "too_big", Energy = 40)
-    )),
-    "does not fit below `soc_final`.*Sessions: too_big$"
-  )
-  # It needs BatteryCapacity, and replaces the StateOfCharge column
-  expect_error(
-    run_final(80, sessions = select(session, -BatteryCapacity)),
-    "needs a `BatteryCapacity` column"
-  )
-  expect_error(run_final(80, sessions = ahead_session), "not both")
-})
-
-test_that("v2g capacity solves a degenerate window with charging ahead quickly", {
-  # One window of a month-long V2G fleet (3 sessions, charging ahead up to
-  # 56 kW above the uncontrolled profile) with an export breach the fleet
-  # cannot remove. The squared-excess QP of 1.17.0 cycled on it in HiGHS
-  # without end.
+test_that("v2g capacity solves a degenerate window quickly", {
+  # One window of a month-long V2G fleet (3 sessions) with an export breach
+  # the fleet cannot remove. The squared-excess QP of 1.17.0 cycled on it in
+  # HiGHS without end (then with the sessions charging ahead, which they no
+  # longer do).
   w <- readRDS(test_path("v2g-capacity-degenerate-window.rds"))
   elapsed <- system.time(
     O <- suppressMessages(capacity_v2g_window(
@@ -346,8 +250,7 @@ test_that("v2g capacity solves a degenerate window with charging ahead quickly",
       LFmax = w$LFmax,
       import_capacity = w$import_capacity,
       export_capacity = w$export_capacity,
-      cumsum_min = w$cumsum_min,
-      headroom = w$headroom
+      cumsum_min = w$cumsum_min
     ))
   )[["elapsed"]]
   expect_lt(elapsed, 5)
@@ -357,14 +260,13 @@ test_that("v2g capacity solves a degenerate window with charging ahead quickly",
   export_excess <- pmax(-net - w$export_capacity, 0)
   export_excess_uncontrolled <- pmax(-net_uncontrolled - w$export_capacity, 0)
   # No discharge while exporting, and never more export above the cap than
-  # uncontrolled, but less in total: it charges ahead into the export
+  # uncontrolled
   expect_false(any(O < -0.01 & net < -0.01))
   expect_true(all(export_excess <= export_excess_uncontrolled + 0.01))
-  expect_lt(sum(export_excess), sum(export_excess_uncontrolled) - 100)
-  # Within the caps on import, the same energy, within the headroom and the
-  # departure deadlines
+  # Within the caps on import, the same energy, never ahead of the
+  # uncontrolled profile and within the departure deadlines
   expect_true(all(net <= w$import_capacity + 0.01))
   expect_equal(sum(O), sum(w$LF), tolerance = 0.01)
-  expect_true(all(cumsum(O) <= cumsum(w$LF) + w$headroom + 0.02))
+  expect_true(all(cumsum(O) <= cumsum(w$LF) + 0.02))
   expect_true(all(cumsum(O) >= pmin(w$cumsum_min, cumsum(w$LF)) - 0.02))
 })

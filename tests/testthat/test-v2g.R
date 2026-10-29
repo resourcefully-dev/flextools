@@ -778,8 +778,10 @@ test_that("energy_max = 1 keeps the v2g results unchanged", {
     # Totals as produced by flextools 1.9.0, before `energy_max` existed, and
     # re-captured on 1.13.0: the setpoint no longer discharges before the
     # vehicles arrive, so the cap is only approached where it is unreachable.
-    expect_equal(sum(v2g_max_1$demand$Worktime), 1020.98, tolerance = 1e-6)
-    expect_equal(sum(abs(v2g_max_1$demand$Worktime)), 1633.94, tolerance = 1e-6)
+    # Re-captured on 1.18.0: the scheduler postpones charge before it
+    # discharges, so fewer sessions discharge into others that still charge.
+    expect_equal(sum(v2g_max_1$demand$Worktime), 1021.03, tolerance = 1e-6)
+    expect_equal(sum(abs(v2g_max_1$demand$Worktime)), 1632.27, tolerance = 1e-6)
     expect_equal(sum(v2g_max_1$setpoints$Worktime), 1020.89, tolerance = 1e-6)
 
     v2g_capacity <- smart_v2g(

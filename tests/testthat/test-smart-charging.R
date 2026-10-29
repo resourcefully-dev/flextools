@@ -770,6 +770,43 @@ test_that("without optimization the capacity is only inflated as far as energy_m
   expect_gt(max(rowSums(sc_full$setpoints[-1])), 3 + 0.01)
 })
 
+test_that("without optimization a profile with no capacity gets a zero setpoint, not NaN", {
+  fleet <- synthetic_fleet(2)
+  for (method in c("curtail", "none")) {
+    sc <- suppressMessages(fleet_smart_charging(
+      fleet, fleet_opt_data(0),
+      opt_objective = "none", method = method
+    ))
+    expect_false(anyNA(sc$setpoints), label = method)
+    expect_false(anyNA(sc$demand), label = method)
+    expect_equal(sum(sc$setpoints$Home), 0, label = method)
+  }
+
+  # The capacity can also run out through `L_others`: the inflated setpoint of
+  # the profile scheduled first (10 sessions on a 3 kW grid) takes all of it,
+  # and the second profile is left with none.
+  work <- synthetic_fleet(1) %>%
+    mutate(
+      Session = paste0("W", Session),
+      Profile = "Work",
+      Power = 2,
+      ChargingHours = Energy / Power,
+      ChargingEndDateTime = ChargingStartDateTime +
+        lubridate::minutes(round(ChargingHours * 60)),
+      FlexibilityHours = ConnectionHours - ChargingHours
+    )
+  sc <- suppressMessages(smart_charging(
+    bind_rows(synthetic_fleet(10), work),
+    fleet_opt_data(3),
+    opt_objective = "none", method = "curtail",
+    window_days = 1, window_start_hour = 6,
+    responsive = list(Weekday = list(Home = 1, Work = 1)),
+    power_th = 0, charging_power_min = 0
+  ))
+  expect_false(anyNA(sc$setpoints))
+  expect_equal(sum(sc$setpoints$Work), 0)
+})
+
 # Window boundaries -------------------------------------------------------
 
 # A session that straddles the 06:00 window boundary the way the one that

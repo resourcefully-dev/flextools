@@ -1009,12 +1009,19 @@ get_setpoints <- function(
         # increase the capacity available by a factor - only as far as that
         # minimum requires. The scheduler stops every session at its
         # `energy_max` target, so this setpoint is a ceiling, not a target.
-        inc_capacity_factor <- max(
-          energy_min *
-            sum(profiles_demand[[profile]]) /
-            sum(capacity_available),
+        # With no capacity left (none from the grid, or all of it taken by
+        # the inflated setpoints of the profiles before, in `L_others`) there
+        # is nothing to scale: the setpoint stays at zero instead of NaN.
+        inc_capacity_factor <- if (sum(capacity_available) > 0) {
+          max(
+            energy_min *
+              sum(profiles_demand[[profile]]) /
+              sum(capacity_available),
+            1
+          )
+        } else {
           1
-        )
+        }
         setpoints[[profile]] <- capacity_available *
           inc_capacity_factor
       } else {

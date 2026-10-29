@@ -1,3 +1,15 @@
+# flextools 1.18.1
+
+* `smart_v2g()` no longer curtails a session below its full energy for an
+  import capacity that another session's discharge already makes room for.
+  Where the fleet setpoint goes below the import capacity, the scheduler now
+  first discharges what can still be charged back, and only then curtails
+  below the full target for what the capacity still needs. Down to the
+  capacity the order is unchanged. Two vehicles (30 kWh until 07:00 and
+  20 kWh until 21:00) under a 20 kW import cap with a 12 kW evening load
+  under `"grid"`: the second left with 14 of its 20 kWh (91.4 %) in 1.18.0
+  although the site never exceeded 13.6 kW; it now leaves with all 20 kWh.
+
 # flextools 1.18.0
 
 * Breaking: `smart_v2g()` replaces the exact final State-of-Charge

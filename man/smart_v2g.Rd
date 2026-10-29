@@ -13,8 +13,6 @@ smart_v2g(
   responsive = NULL,
   power_th = 0,
   charging_power_min = 0,
-  energy_min = 1,
-  energy_max = 1,
   discharge_eff = 1,
   include_log = FALSE,
   show_progress = FALSE,
@@ -93,21 +91,6 @@ uncontrolled, never discharges, and the setpoint carries its load as
 fixed. Up to version 1.12.0 a value below 1 was a share of the nominal
 power; it is now always kW.}
 
-\item{energy_min}{numeric, minimum allowed ratio (between 0 and 1) of required energy.
-Every session charges at least this share of the energy it requires, net of
-discharge (or less, down to what takes it to \code{soc_final_min}, when that is
-lower). The scheduler never discharges or curtails a session below it,
-and the setpoint optimization may drop energy down to it - and no further -
-when the grid capacity cannot fit \code{energy_max}. When even this minimum does
-not fit, the grid capacity is relaxed only as far as the minimum-energy
-profile needs.}
-
-\item{energy_max}{numeric, maximum allowed ratio (between 0 and 1) of required energy.
-Every session charges at most this share of the energy it requires, net of
-discharge (energy discharged, grossed up by \code{discharge_eff}, has to be
-charged back on top), and the setpoint optimization targets this share for
-the responsive sessions. Must be higher than 0 and at least \code{energy_min}.}
-
 \item{discharge_eff}{numeric, efficiency (0, 1] of a discharge, counted as
 the round trip grid -> battery -> grid. For every kWh a session discharges
 to the grid, its battery loses \code{1 / discharge_eff} kWh, which it charges
@@ -149,10 +132,11 @@ above \code{soc_max} is an error.}
 \item{soc_final_min}{numeric, minimum State-of-Charge every V2G session
 leaves with, in \% of its battery capacity (default \code{soc_max}, \verb{soc_min <= soc_final_min <= soc_max}). Every session aims for \code{soc_max} (all its
 \code{Energy}), and may leave lower, down to \code{soc_final_min}, only where the
-grid capacities cannot fit its full energy, as \code{energy_min} lets a
-session charge less (see Details). A session arriving above it may leave
-at its arrival level. With the default no session leaves below
-\code{soc_max}, and only \code{energy_min} lowers the energy.}
+grid capacities cannot fit its full energy (see Details). A session
+arriving above it may leave at its arrival level. With the default no
+session leaves below \code{soc_max}. Up to version 1.17.1 \code{smart_v2g()} also
+took \code{energy_min} and \code{energy_max}, the share of the energy every session
+charges at least and at most: \code{soc_final_min} and \code{soc_max} replace them.}
 
 \item{cycle_cost}{numeric, degradation cost of one full cycle of a V2G
 battery, in Euro per \code{BatteryCapacity} kWh discharged (NOT Euro/kWh), as
@@ -205,19 +189,18 @@ Like \code{SOCmin} and \code{SOCmax} of \code{add_battery_optimization()}, \code
 \code{soc_max} are the floor and the ceiling of the batteries (in \%), and
 \code{soc_final_min} is the least each one leaves with, within the two.
 
-Each session charges at most \code{energy_max} of its \code{Energy}, and at least the
-lower of \code{energy_min} of it and what takes it to \code{soc_final_min},
-\code{(soc_final_min - StateOfCharge) / 100 * BatteryCapacity} (nothing when it
-arrives above it), net of discharge. The setpoint aims for the maximum of
+Each session charges at most its \code{Energy} and at least what takes it to
+\code{soc_final_min}, \code{(soc_final_min - StateOfCharge) / 100 * BatteryCapacity}
+(nothing when it arrives above it), net of discharge. The setpoint aims for the maximum of
 every session and drops energy towards its minimum only where the grid
 capacities cannot fit the maximum, under every objective. The scheduler
 charges every session towards its maximum: it postpones charge and
 discharges what the session can charge back first, and curtails or
 discharges it below its maximum, never below its minimum, only as far as
 the import capacity needs. So nothing is ever given back: a session leaves
-at \code{StateOfCharge + energy_max * 100 * Energy / BatteryCapacity}
-(\code{StateOfCharge + energy_max * (100 - StateOfCharge)} without a
-\code{BatteryCapacity} column), or lower only when the grid capacities need it.
+at \code{StateOfCharge + 100 * Energy / BatteryCapacity} (\code{soc_max} without a
+\code{StateOfCharge} column, full without a \code{BatteryCapacity} column), or lower
+only when the grid capacities need it.
 
 The setpoint plans charge and discharge only while the responsive sessions
 are connected, within their nominal power in both directions (and

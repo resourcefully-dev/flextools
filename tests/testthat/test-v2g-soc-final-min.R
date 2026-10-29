@@ -114,9 +114,9 @@ test_that("soc_final_min applies to the battery derived from the energy", {
     select(-BatteryCapacity) %>%
     mutate(Energy = 20, StateOfCharge = 50, ConnectionHours = 4)
   sessions <- set_state_of_charge(mutate(car, StateOfCharge = 0.5))
-  expect_equal(v2g_energy_min_ratio(sessions, 1, 0.8), 0.6)
-  expect_equal(v2g_energy_min_ratio(sessions, 0.5, 0.8), 0.5)
-  expect_equal(v2g_energy_min_ratio(sessions, 0.9, NULL), 0.9)
+  expect_equal(v2g_energy_min_ratio(sessions, 0.8), 0.6)
+  expect_equal(v2g_energy_min_ratio(sessions, 0.4), 0)
+  expect_equal(v2g_energy_min_ratio(sessions, NULL), 1)
 
   # 1 kW under the import cap for 4 hours (4 kWh): it charges its 12 kWh
   # minimum, with the cap relaxed only for that minimum

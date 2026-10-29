@@ -268,14 +268,15 @@ test_that("smart_v2g keeps every session above its SoC floor and fills it by dep
   }
 })
 
-test_that("with energy_max below 1 a V2G session leaves below full", {
+test_that("with soc_max below 100 a V2G session leaves below full", {
+  # Arriving at 40 %, soc_max = 88 caps it at 80 % of its energy
   sessions_soc <- connected_sessions %>% mutate(StateOfCharge = 40)
-  v2g <- smart_v2g(
+  v2g <- suppressMessages(smart_v2g(
     sessions_soc, connected_opt_data,
     opt_objective = "grid",
     window_days = 1, window_start_hour = 0,
-    energy_min = 0.8, energy_max = 0.8
-  )
+    soc_max = 88
+  ))
   levels <- soc_levels(v2g, sessions_soc, connected_dttm)
   for (s in names(levels)) {
     final_soc <- levels[[s]]$level[length(connected_dttm)] / levels[[s]]$capacity

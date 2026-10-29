@@ -10,11 +10,14 @@
     it. A `StateOfCharge` column still sets the arrival.
   * Every objective aims for `soc_max` at departure, and a session leaves
     lower, down to `soc_final_min`, only where the grid capacities cannot fit
-    its full energy. It works as `energy_min` does: each session's minimum is
-    the lower of `energy_min` of its energy and what takes it to
-    `soc_final_min`. Without `BatteryCapacity` it applies to the battery
+    its full energy. Without `BatteryCapacity` it applies to the battery
     derived from the energy (a session arriving at 50 % with `soc_final_min =
     80` must charge at least 60 % of its energy).
+  * `smart_v2g()` no longer takes `energy_min` and `energy_max`: V2G is set
+    with the State-of-Charge only. `soc_final_min` replaces `energy_min` (with
+    the default 50 % arrival, `energy_min = 0.8` is `soc_final_min = 90`) and
+    `soc_max` replaces `energy_max` (`energy_max = 0.8` is `soc_max = 90`).
+    `smart_charging()` keeps both.
   * Charging ahead above the departure level, and the scheduler's forced
     discharge of it before departure, are gone. Nothing has to be given back
     any more, so a session no longer discharges while the site exports, nor
@@ -31,13 +34,13 @@
   first it postpones charge, then it curtails below the full energy, then it
   discharges what the sessions can still charge back, and last it discharges
   below their full energy. It curtails and discharges below the full energy
-  (towards `energy_min` and `soc_final_min`) only as far as the import
+  (towards `soc_final_min`) only as far as the import
   capacity needs. Elsewhere a setpoint below what the sessions can postpone
   comes from planning the fleet as a whole, so they keep their energy.
   Until now every flexible session was cut in proportion to its whole range,
   so a session that had finished charging discharged into another one that
   was still charging. The default V2G results change slightly (the
-  `energy_max = 1` totals of the tests: 1021.03 instead of 1020.98 kWh net,
+  default totals of the tests: 1021.03 instead of 1020.98 kWh net,
   1632.27 instead of 1633.94 kWh of absolute load).
 * When even the minimum energy does not fit under the grid capacities, the
   V2G setpoint no longer delivers exactly that minimum. It relaxes the caps
@@ -45,7 +48,7 @@
   as fits with no more import than that. Only an import breach needs less
   energy; an export breach needs more, and the minimum alone made it worse.
 * Fix: in the second pass of the V2G discharge losses (`"cost"` and combined
-  objectives with `discharge_eff < 1` and an energy range), the energy reward
+  objectives with `discharge_eff < 1` and a `soc_final_min` below `soc_max`), the energy reward
   counted the grid-side energy, so a discharge and its recharge earned
   reward. The fleet then discharged at full power where the price spread did
   not pay for the losses. The reward now counts the energy delivered, as the

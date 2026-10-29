@@ -10,8 +10,6 @@ get_setpoints_v2g(
   profiles_demand,
   opt_objective,
   lambda,
-  energy_min = 1,
-  energy_max = 1,
   soc_min = 0.2,
   discharge_eff = 1,
   soc_final_min = NULL,
@@ -19,10 +17,6 @@ get_setpoints_v2g(
 )
 }
 \arguments{
-\item{energy_min, energy_max}{numeric, minimum and maximum share (between 0
-and 1) of each profile's energy the setpoint must carry, net of discharge.
-See \code{\link[=smart_v2g]{smart_v2g()}}.}
-
 \item{soc_min}{numeric, SoC floor of the sessions, as a fraction (the
 \code{soc_min} of \code{\link[=smart_v2g]{smart_v2g()}} divided by 100).}
 
@@ -30,7 +24,7 @@ See \code{\link[=smart_v2g]{smart_v2g()}}.}
 by the cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 
 \item{soc_final_min}{numeric or \code{NULL}, minimum SoC the sessions leave
-with, as a fraction (\code{NULL}: none below \code{energy_min}). See \code{\link[=smart_v2g]{smart_v2g()}}
+with, as a fraction (\code{NULL}: all their energy). See \code{\link[=smart_v2g]{smart_v2g()}}
 and \code{v2g_energy_min_ratio()}.}
 
 \item{cycle_cost}{numeric, cost of one full battery cycle, counted by the

@@ -10,8 +10,7 @@ get_flex_envelope(
   profile,
   load_capacity = Inf,
   energy_min = 1,
-  soc_min = NULL,
-  soc_max = NULL
+  soc_min = NULL
 )
 }
 \arguments{
@@ -23,16 +22,14 @@ get_flex_envelope(
 
 \item{load_capacity}{numeric (vector), maximum flexible load in kW}
 
-\item{energy_min}{numeric, share of each session's energy owed at departure}
+\item{energy_min}{numeric, share of each session's energy owed at departure:
+one for all of them, or one per session (row of \code{sessions})}
 
 \item{soc_min}{numeric or \code{NULL}, SoC floor of the V2G sessions (fraction)}
-
-\item{soc_max}{numeric or \code{NULL}, SoC ceiling of the V2G sessions during
-their connection (fraction)}
 }
 \value{
-list with the numeric vectors \code{LFmax}, \code{owed}, \code{reserve} and
-\code{headroom}, each of \code{length(dttm_seq)}
+list with the numeric vectors \code{LFmax}, \code{owed} and \code{reserve}, each
+of \code{length(dttm_seq)}
 }
 \description{
 Shared by \code{get_setpoints()} and \code{get_setpoints_v2g()}, so the one-way and
@@ -45,7 +42,9 @@ their nominal \code{Power} over their connection (the demand they would produce
 charging at nominal power for the whole connection), capped by
 \code{load_capacity}. \code{Inf} when no session is given.
 \item \code{owed}: the cumulative energy owed to the sessions that have departed by
-the end of each slot, \code{energy_min * Energy} per session, in the units of
+the end of each slot, \code{energy_min * Energy} per session (\code{energy_min} may
+be one share per session, as the V2G minimum final SoC gives, see
+\code{v2g_energy_min_ratio()}), in the units of
 the setpoint (kW per slot, i.e. kWh divided by the slot length in hours).
 A session is due in the slot containing its departure, or its
 uncontrolled charging end when that is later (a session that cannot
@@ -56,12 +55,6 @@ sessions can still discharge at each slot, \code{(StateOfCharge - soc_min) * Bat
 the one it is due in, in the same units. It is negative for a session that
 arrives below the SoC floor, which has to charge up to the floor first.
 See \code{\link[=smart_v2g]{smart_v2g()}} for \code{BatteryCapacity}.
-\item \code{headroom} (only with \code{soc_max}, else zeros): how much more than its
-energy each connected V2G session may hold above its arrival level,
-\code{max((soc_max - StateOfCharge) * BatteryCapacity - Energy, 0)} per session
-(the room between its departure level and \code{soc_max}), over the same slots
-as \code{reserve}. A session whose battery is derived from its energy leaves
-full, so its headroom is 0.
 }
 }
 \keyword{internal}

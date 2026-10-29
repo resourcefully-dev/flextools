@@ -409,9 +409,6 @@ demand_select_window_solver <- function(solver_data) {
 # `LFmin` is the per-slot floor of the optimized load: 0 for demand, and below
 # 0 (discharge) for V2G, where capacity_v2g_window() passes the connected power
 # and `v2g_discharge_floor()`, so a discharge only ever cuts import.
-#
-# `headroom` (V2G with `soc_max`, see get_flex_envelope()) lets the cumulative
-# optimized load run above cumsum(LF) by that much: the fleet charges ahead.
 capacity_slice_problem <- function(
   G,
   LF,
@@ -423,8 +420,7 @@ capacity_slice_problem <- function(
   export_capacity,
   energy_lb = NULL,
   cumsum_min = NULL,
-  LFmin = 0,
-  headroom = NULL
+  LFmin = 0
 ) {
   time_slots <- length(LF)
   LFmin <- rep_len(as.numeric(LFmin), time_slots)
@@ -460,11 +456,6 @@ capacity_slice_problem <- function(
     A_cumsum_ub <- block(-cumsumMat, cumsumMat)
     lhs_cumsum_ub <- rep(-Inf, time_slots)
     rhs_cumsum_ub <- rep(0, time_slots)
-    # Charging ahead (V2G `soc_max`): cumsum(LF - slice + added) may run above
-    # cumsum(LF) by the headroom of the connected sessions.
-    if (!is.null(headroom)) {
-      rhs_cumsum_ub <- round(pmax(rep_len(as.numeric(headroom), time_slots), 0), 2)
-    }
     # Departure deadlines: cumsum(LF - slice + added) >= cumsum_min, capped at
     # cumsum(LF) as in get_bounds().
     if (!is.null(cumsum_min)) {
@@ -603,8 +594,7 @@ select_capacity_slice <- function(
   export_capacity,
   energy_lb = NULL,
   cumsum_min = NULL,
-  LFmin = 0,
-  headroom = NULL
+  LFmin = 0
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -626,8 +616,7 @@ select_capacity_slice <- function(
     export_capacity = export_capacity,
     energy_lb = energy_lb,
     cumsum_min = cumsum_min,
-    LFmin = LFmin,
-    headroom = headroom
+    LFmin = LFmin
   )
 
   solve <- function(L, lower, upper, A, lhs, rhs) {
@@ -824,8 +813,7 @@ capacity_window <- function(
   place_slice,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = 0,
-  headroom = NULL
+  LFmin = 0
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -875,8 +863,7 @@ capacity_window <- function(
     export_capacity = export_capacity,
     energy_lb = energy_lb,
     cumsum_min = cumsum_min,
-    LFmin = LFmin,
-    headroom = headroom
+    LFmin = LFmin
   )
 
   if (is.null(slice_solution)) {
@@ -945,10 +932,7 @@ capacity_window <- function(
       NULL
     } else {
       rep_len(as.numeric(cumsum_min), time_slots) - cumsum(fixed_load)
-    },
-    # cumsum(fixed_load + placed) <= cumsum(LF) + headroom is the same
-    # headroom above cumsum(moved_slice).
-    headroom = headroom
+    }
   )
 
   round(fixed_load + as.numeric(optimized_slice), 2)
@@ -999,8 +983,7 @@ demand_capacity_window <- function(
     import_capacity = import_capacity,
     export_capacity = export_capacity,
     place_slice = function(LF, time_horizon, LS, LFmax, import_capacity,
-                           export_capacity, energy_ratio, cumsum_min,
-                           headroom = NULL) {
+                           export_capacity, energy_ratio, cumsum_min) {
       demand_grid_window(
         G = G,
         LF = LF,

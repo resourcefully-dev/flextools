@@ -113,7 +113,7 @@ test_that("profile setpoints in opt_data are used directly in v2g", {
         opt_objective = "none",
         window_days = 1,
         window_start_hour = 0,
-        energy_min = 0
+        soc_final_min = 50
     )
 
     expect_equal(
@@ -123,7 +123,7 @@ test_that("profile setpoints in opt_data are used directly in v2g", {
     )
 })
 
-test_that("energy_min controls capacity compliance vs energy charged in v2g", {
+test_that("soc_final_min controls capacity compliance vs energy charged in v2g", {
     opt_data_capacity <- tibble(
         datetime = sessions_demand$datetime,
         production = 0,
@@ -136,8 +136,7 @@ test_that("energy_min controls capacity compliance vs energy charged in v2g", {
         opt_data_capacity,
         opt_objective = "none",
         window_days = 1,
-        window_start_hour = 0,
-        energy_min = 1
+        window_start_hour = 0
     )
 
     demand_full <- rowSums(
@@ -160,7 +159,7 @@ test_that("energy_min controls capacity compliance vs energy charged in v2g", {
         opt_objective = "none",
         window_days = 1,
         window_start_hour = 0,
-        energy_min = 0
+        soc_final_min = 50
     )
     # plot_smart_charging(v2g_min_energy, sessions, legend_width = 150)
 
@@ -194,7 +193,7 @@ test_that("power_th allows limited capacity exceedance in v2g", {
         window_days = 1,
         window_start_hour = 0,
         power_th = power_th,
-        energy_min = 0
+        soc_final_min = 50
     )
     # plot_smart_charging(v2g_threshold, sessions, legend_width = 150)
 
@@ -235,7 +234,7 @@ test_that("charging_power_min enforces minimum absolute power in v2g", {
         window_days = 1,
         window_start_hour = 0,
         charging_power_min = charging_power_min,
-        energy_min = 0
+        soc_final_min = 50
     )
     # plot_smart_charging(v2g_min_power, sessions_min_power, legend_width = 150)
 
@@ -552,7 +551,16 @@ test_that("combined v2g blends grid and cost, with the pure objectives at its en
 
 test_that("cost v2g with a ramping penalty and an energy range keeps its constraints", {
     case <- v2g_price_case()
-    for (args in list(list(lambda = 0.1), list(energy_min = 0.8))) {
+    min_share <- function(soc_final_min) {
+        if (is.null(soc_final_min)) {
+            return(1)
+        }
+        soc <- case$sessions$StateOfCharge
+        (soc_final_min - soc) / (100 - soc)
+    }
+    # soc_final_min = 94: S1 and S2 (arriving at 70 %) owe 80 % of their
+    # energy, S3 (60 %) 85 %
+    for (args in list(list(lambda = 0.1), list(soc_final_min = 94))) {
         results <- do.call(run_v2g_price_case, c(list(case, "cost"), args))
         fleet <- results$demand$Fleet
         net <- case$opt_data$static + fleet
@@ -567,7 +575,7 @@ test_that("cost v2g with a ramping penalty and an energy range keeps its constra
             summarise(Energy = sum(Energy))
         expect_true(all(
             delivered$Energy[match(case$sessions$Session, delivered$Session)] >=
-                (args$energy_min %||% 1) * case$sessions$Energy - 0.05
+                min_share(args$soc_final_min) * case$sessions$Energy - 0.05
         ))
     }
 })
@@ -695,19 +703,21 @@ test_that("cost and combined v2g approach a negative import capacity", {
     }
 })
 
-test_that("energy_max caps the energy charged in v2g, fleet and per session", {
+test_that("soc_max caps the energy charged in v2g, fleet and per session", {
+    # The sessions arrive at 50 % of a battery their energy fills: soc_max = 90
+    # caps them at 80 % of their energy (what energy_max = 0.8 did up to
+    # 1.17.1)
     required <- sum(sessions$Energy)
 
     for (objective in c("grid", "capacity")) {
-        v2g_results <- smart_v2g(
+        v2g_results <- suppressMessages(smart_v2g(
             sessions = sessions,
             opt_data,
             opt_objective = objective,
             window_days = 1,
             window_start_hour = 0,
-            energy_min = 0.8,
-            energy_max = 0.8
-        )
+            soc_max = 90
+        ))
 
         # The setpoint targets 80% of the responsive sessions' energy
         expect_equal(
@@ -736,17 +746,16 @@ test_that("energy_max caps the energy charged in v2g, fleet and per session", {
     }
 })
 
-test_that("energy_max stops a session at its share even after discharging", {
-    v2g_results <- smart_v2g(
+test_that("soc_max stops a session at its share even after discharging", {
+    v2g_results <- suppressMessages(smart_v2g(
         sessions = sessions,
         opt_data,
         opt_objective = "grid",
         window_days = 1,
         window_start_hour = 0,
-        energy_min = 0.8,
-        energy_max = 0.8,
+        soc_max = 90,
         discharge_eff = 0.9
-    )
+    ))
     # Discharging happened, so the losses were charged back on top of the 80%
     neg_idx <- which(opt_data$import_capacity < 0)
     expect_true(any(v2g_results$demand$Worktime[neg_idx] < 0))
@@ -757,7 +766,7 @@ test_that("energy_max stops a session at its share even after discharging", {
     expect_true(all(pct < 0.8 / 0.9 * 100 + 1))
 })
 
-test_that("energy_max = 1 keeps the v2g results unchanged", {
+test_that("soc_final_min at soc_max keeps the v2g results unchanged", {
     v2g_default <- smart_v2g(
         sessions = sessions,
         opt_data,
@@ -771,15 +780,21 @@ test_that("energy_max = 1 keeps the v2g results unchanged", {
         opt_objective = "grid",
         window_days = 1,
         window_start_hour = 0,
-        energy_max = 1
+        soc_final_min = 100
     )
     expect_equal(v2g_max_1, v2g_default)
 
     # Totals as produced by flextools 1.9.0, before `energy_max` existed, and
     # re-captured on 1.13.0: the setpoint no longer discharges before the
     # vehicles arrive, so the cap is only approached where it is unreachable.
-    expect_equal(sum(v2g_max_1$demand$Worktime), 1020.98, tolerance = 1e-6)
-    expect_equal(sum(abs(v2g_max_1$demand$Worktime)), 1633.94, tolerance = 1e-6)
+    # Re-captured on 1.18.0: the scheduler postpones charge before it
+    # discharges, so fewer sessions discharge into others that still charge.
+    # The demand is rebuilt from the scheduled segments, each rounded to 2
+    # decimals, and one of them sits exactly on a tie (4.18 kW for 6.25 h,
+    # 26.125 kWh): it rounds to 26.13 on macOS and 26.12 on Linux, so the
+    # totals are held to 0.05 kWh.
+    expect_lt(abs(sum(v2g_max_1$demand$Worktime) - 1021.03), 0.05)
+    expect_lt(abs(sum(abs(v2g_max_1$demand$Worktime)) - 1632.27), 0.05)
     expect_equal(sum(v2g_max_1$setpoints$Worktime), 1020.89, tolerance = 1e-6)
 
     v2g_capacity <- smart_v2g(
@@ -787,14 +802,13 @@ test_that("energy_max = 1 keeps the v2g results unchanged", {
         opt_data %>% mutate(import_capacity = round(sessions_demand$Worktime * 0.5, 2)),
         opt_objective = "capacity",
         window_days = 1,
-        window_start_hour = 0,
-        energy_max = 1
+        window_start_hour = 0
     )
     expect_equal(sum(v2g_capacity$demand$Worktime), 1020.86, tolerance = 1e-6)
     expect_equal(sum(v2g_capacity$setpoints$Worktime), 1020.88, tolerance = 1e-6)
 })
 
-test_that("the v2g setpoint drops energy down to energy_min before relaxing the grid capacity", {
+test_that("the v2g setpoint drops energy down to the minimum before relaxing the grid capacity", {
     # 10 kWh in the first slot, a 2 kW import cap and three slots: at most 6 kWh
     # fit under the cap.
     LF <- c(10, 0, 0)
@@ -838,7 +852,8 @@ test_that("the v2g setpoint drops energy down to energy_min before relaxing the 
     expect_equal(sum(O), 5, tolerance = 0.01)
 })
 
-test_that("smart_v2g validates energy_min and energy_max", {
+test_that("smart_v2g no longer takes energy_min and energy_max", {
+    # soc_final_min and soc_max replace them (1.18.0)
     run_v2g <- function(...) {
         smart_v2g(
             sessions = sessions,
@@ -849,19 +864,8 @@ test_that("smart_v2g validates energy_min and energy_max", {
             ...
         )
     }
-    expect_error(run_v2g(energy_min = 0, energy_max = 0), "energy_max")
-    expect_error(run_v2g(energy_min = 0, energy_max = 1.2), "energy_max")
-    expect_error(run_v2g(energy_min = 0, energy_max = -0.1), "energy_max")
-    expect_error(run_v2g(energy_min = 0, energy_max = "0.8"), "energy_max")
-    expect_error(run_v2g(energy_min = 0, energy_max = c(0.5, 0.8)), "energy_max")
-    expect_error(run_v2g(energy_min = 0, energy_max = NA_real_), "energy_max")
-    expect_error(run_v2g(energy_min = 1.5), "energy_min")
-    expect_error(
-        run_v2g(energy_min = 0.9, energy_max = 0.8),
-        "cannot be higher than `energy_max`"
-    )
-    # The default `energy_min = 1` is above any `energy_max` below 1
-    expect_error(run_v2g(energy_max = 0.8), "cannot be higher than `energy_max`")
+    expect_error(run_v2g(energy_min = 0.8), "unused argument")
+    expect_error(run_v2g(energy_max = 0.8), "unused argument")
 })
 
 test_that("v2g never discharges while the site exports, whatever the objective", {

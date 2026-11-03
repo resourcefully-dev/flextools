@@ -4,17 +4,21 @@
 \alias{stop_curtailed_sessions}
 \title{Stop curtailed sessions to meet the setpoint}
 \usage{
-stop_curtailed_sessions(sessions_timeslot, flex_req)
+stop_curtailed_sessions(sessions_timeslot, flex_req, cap_room = 0)
 }
 \arguments{
 \item{sessions_timeslot}{tibble, the sessions of the time slot after
 curtailing, with \code{Power} set for every session}
 
 \item{flex_req}{numeric, the flexibility still required in the slot (kW)}
+
+\item{cap_room}{numeric, how far above the setpoint the import capacity
+lets the slot stay (kW, default 0: down to the setpoint)}
 }
 \value{
 list with the updated \code{sessions} and the remaining \code{flex_req}
-(at most \code{SCHEDULE_FLEX_TOL_KW} unless no session could be stopped)
+(at most \code{cap_room + SCHEDULE_FLEX_TOL_KW} unless no session could be
+stopped)
 }
 \description{
 Used by \code{\link[=schedule_sessions]{schedule_sessions()}} with \code{method = "curtail"} and
@@ -23,14 +27,16 @@ to its \code{MinPowerTimeslot} and the slot is still above the setpoint. Session
 are stopped (power 0) one at a time, in the priority order of
 \code{method = "interrupt"} (most energy charged first, then the latest arrival,
 then the most connection hours left), until the slot is at or below the
-setpoint. Only sessions that \code{"interrupt"} calls flexible are stopped: they
+setpoint, or within the import capacity (\code{cap_room} above the setpoint)
+where that is higher. Only sessions that \code{"interrupt"} calls flexible are stopped: they
 still need energy and can charge their minimum energy at nominal power in
 the rest of their connection. A stopped session frees the power it charges
 at after curtailing, not its nominal power.
 }
 \details{
-The last stop may free more than the slot needs. That slack goes back to the
-sessions still curtailed, in proportion to what each one gave up, so the
-slot lands on the setpoint and no session charges between 0 and its minimum.
+The last stop may bring the slot below the setpoint. That slack goes back
+to the sessions still curtailed, in proportion to what each one gave up, so
+the slot lands on the setpoint and no session charges between 0 and its
+minimum. A slot left between the setpoint and the capacity stays there.
 }
 \keyword{internal}

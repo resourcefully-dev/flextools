@@ -12,6 +12,15 @@
   got 10 of their 33 kWh with an 11 kW peak in 1.19.0; they now get all
   33 kWh and never draw more than the 4 kW of room. A setpoint given
   directly to the scheduler (no capacity) keeps the 1.19.0 rule.
+* Fix: the same for `smart_charging(method = "curtail", allow_interruptions =
+  TRUE)`. Sessions still curtail as the setpoint asks, but stop only until
+  the slot is within the `import_capacity` of `opt_data` (or at or below the
+  setpoint where that is higher), and without an import capacity they do not
+  stop. The same two vans got all 33 kWh in 1.19.0 but were stopped all night
+  and peaked at 22 kW at 05:00, 18 kW above the room; they now charge one at
+  a time at 4 kW and never draw more than the room. `schedule_sessions()`
+  with a setpoint given directly keeps the 1.19.0 rule, unless the setpoint
+  has a `power_cap` column.
 
 # flextools 1.19.0
 

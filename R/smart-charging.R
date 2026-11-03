@@ -84,9 +84,15 @@
 #' session curtailed down to `charging_power_min` keeps charging at it however
 #' far the setpoint is below, so with a minimum above 0 it never pauses. With
 #' `TRUE`, a time slot first curtails every flexible session down to its
-#' minimum, as with `FALSE`, and when that is not enough it stops sessions
-#' (power 0) one at a time until the slot is at or below the setpoint. It
-#' stops them in the order of `method = "interrupt"` (most energy charged
+#' minimum, as with `FALSE`, and when that is not enough for the import
+#' capacity it stops sessions (power 0) one at a time until the slot is within
+#' the `import_capacity` of `opt_data` (with the `static` load, `production`
+#' and the other profiles as planned), or at or below the setpoint where that
+#' is higher. The curtailing follows the setpoint, the stops only the
+#' capacity: a "grid" setpoint that spreads a fleet over the night below one
+#' session's minimum would otherwise stop every session in every slot and push
+#' their charge to the end of the connections. Without an `import_capacity`
+#' (or `grid_capacity`) no session is stopped. It stops them in the order of `method = "interrupt"` (most energy charged
 #' first, then the latest arrival, then the most connection hours left), and
 #' only those that `"interrupt"` could stop: a session that could no longer
 #' charge its `energy_min` share at nominal power in the rest of its
@@ -94,8 +100,10 @@
 #' slot needs, the sessions still charging take it back, so every slot power
 #' is 0 or between `charging_power_min` and the nominal power, except in a
 #' session's last charging slot (the tail of its charge). An 11 kW session of
-#' 11 kWh with a minimum of 4 kW and a setpoint of 0 kW for four hours charges
-#' 0 kW there and 11 kW after, where with `FALSE` it charges 4 kW there.
+#' 11 kWh with a minimum of 4 kW and an import capacity of 0 kW for four hours
+#' charges 0 kW there and 11 kW after, where with `FALSE` it charges 4 kW
+#' there. With [schedule_sessions()] and a setpoint given directly, there is
+#' no capacity and the sessions stop down to the setpoint.
 #'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' Every session charges at least this share of the energy it requires. The
@@ -1256,6 +1264,9 @@ get_setpoints_parallel <- function(
 #' @param method character, scheduling method being `"none"`, `"postpone"`, `"curtail"` or `"interrupt"`.
 #' If `none`, the scheduling part is skipped and the sessions returned in the
 #' results will be identical to the original parameter.
+#' @param opt_data tibble, the window's optimization data (after
+#'   `check_optimization_data()`). Its `import_capacity` sets how far
+#'   `allow_interruptions` stops sessions. `NULL` for none.
 #' @param power_th numeric, power threshold (between 0 and 1) accepted from setpoint.
 #' For example, with `power_th = 0.1` and `setpoint = 100` for a certain time slot,
 #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
@@ -1287,7 +1298,8 @@ smart_charging_window <- function(
   energy_min = 1,
   energy_max = 1,
   include_log = FALSE,
-  allow_interruptions = FALSE
+  allow_interruptions = FALSE,
+  opt_data = NULL
 ) {
   if (nrow(setpoints) == 0) {
     return(list(
@@ -1340,6 +1352,20 @@ smart_charging_window <- function(
     datetime = dttm_seq,
     setpoint = setpoint_total - L_fixed_total
   )
+  # `power_cap` is the most the flexible load may draw under the import
+  # capacity with the rest of the site as the setpoint plans it, as in
+  # smart_v2g_window(). `allow_interruptions` stops sessions only down to it:
+  # a setpoint below it shapes the curtailing, not the stops.
+  if (!is.null(opt_data) && "import_capacity" %in% names(opt_data)) {
+    other_profiles <- setpoints %>%
+      select(-"datetime", -any_of(window_profiles)) %>%
+      rowSums()
+    if (length(other_profiles) == 0) {
+      other_profiles <- 0
+    }
+    setpoint_flex$power_cap <- opt_data$import_capacity - opt_data$static +
+      opt_data$production - L_fixed_total - other_profiles
+  }
 
   results_log <- character(0)
   if (nrow(sessions_window_flex) > 0) {
@@ -1437,7 +1463,8 @@ smart_charging_window_parallel <- function(
           energy_min = energy_min,
           energy_max = energy_max,
           include_log = include_log,
-          allow_interruptions = allow_interruptions
+          allow_interruptions = allow_interruptions,
+          opt_data = x$opt_data
         )
       }
     )
@@ -1457,7 +1484,8 @@ smart_charging_window_parallel <- function(
             energy_min = energy_min,
             energy_max = energy_max,
             include_log = include_log,
-            allow_interruptions = allow_interruptions
+            allow_interruptions = allow_interruptions,
+            opt_data = x$opt_data
           )
         },
         smart_charging_window = smart_charging_window,
@@ -1513,7 +1541,9 @@ SCHEDULE_OUTPUT_DIGITS <- 4L
 #' the default was 0.5 and a value below 1 was a share of the nominal power.
 #' @param allow_interruptions logical, whether `method = "curtail"` may stop
 #' sessions (default `FALSE`). See [smart_charging()]. Ignored by the other
-#' methods.
+#' methods. Sessions stop down to the setpoint, or down to its `power_cap`
+#' column (the import capacity left for these sessions) where it has one and
+#' that is higher.
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' A session is never curtailed, postponed or interrupted below this share of
 #' the energy it requires, whatever the setpoint says.
@@ -1948,7 +1978,25 @@ schedule_sessions <- function(
         # Interruptions: what curtailing down to `MinPowerTimeslot` cannot
         # give, stopping sessions does
         if (allow_interruptions && flex_req > SCHEDULE_FLEX_TOL_KW) {
-          stopped <- stop_curtailed_sessions(sessions_timeslot, flex_req)
+          # Down to the import capacity where the setpoint is below it
+          # Without a `power_cap` (a setpoint given directly), the setpoint
+          power_cap <- if ("power_cap" %in% names(setpoint)) {
+            setpoint$power_cap[setpoint$datetime == timeslot]
+          } else {
+            -Inf
+          }
+          if (length(power_cap) != 1 || is.na(power_cap)) {
+            power_cap <- -Inf
+          }
+          cap_room <- max(
+            power_cap - setpoint_power_timeslot * (1 + power_th),
+            0
+          )
+          stopped <- stop_curtailed_sessions(
+            sessions_timeslot,
+            flex_req,
+            cap_room
+          )
           sessions_timeslot <- stopped$sessions
           flex_provided <- flex_provided + flex_req - stopped$flex_req
           flex_req <- stopped$flex_req
@@ -2168,24 +2216,29 @@ schedule_sessions <- function(
 #' are stopped (power 0) one at a time, in the priority order of
 #' `method = "interrupt"` (most energy charged first, then the latest arrival,
 #' then the most connection hours left), until the slot is at or below the
-#' setpoint. Only sessions that `"interrupt"` calls flexible are stopped: they
+#' setpoint, or within the import capacity (`cap_room` above the setpoint)
+#' where that is higher. Only sessions that `"interrupt"` calls flexible are stopped: they
 #' still need energy and can charge their minimum energy at nominal power in
 #' the rest of their connection. A stopped session frees the power it charges
 #' at after curtailing, not its nominal power.
 #'
-#' The last stop may free more than the slot needs. That slack goes back to the
-#' sessions still curtailed, in proportion to what each one gave up, so the
-#' slot lands on the setpoint and no session charges between 0 and its minimum.
+#' The last stop may bring the slot below the setpoint. That slack goes back
+#' to the sessions still curtailed, in proportion to what each one gave up, so
+#' the slot lands on the setpoint and no session charges between 0 and its
+#' minimum. A slot left between the setpoint and the capacity stays there.
 #'
 #' @param sessions_timeslot tibble, the sessions of the time slot after
 #'   curtailing, with `Power` set for every session
 #' @param flex_req numeric, the flexibility still required in the slot (kW)
+#' @param cap_room numeric, how far above the setpoint the import capacity
+#'   lets the slot stay (kW, default 0: down to the setpoint)
 #'
 #' @return list with the updated `sessions` and the remaining `flex_req`
-#'   (at most `SCHEDULE_FLEX_TOL_KW` unless no session could be stopped)
+#'   (at most `cap_room + SCHEDULE_FLEX_TOL_KW` unless no session could be
+#'   stopped)
 #' @keywords internal
 #'
-stop_curtailed_sessions <- function(sessions_timeslot, flex_req) {
+stop_curtailed_sessions <- function(sessions_timeslot, flex_req, cap_room = 0) {
   stoppable <- which(
     (sessions_timeslot$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &
       (sessions_timeslot$MinEnergyToCharge <=
@@ -2199,7 +2252,7 @@ stop_curtailed_sessions <- function(sessions_timeslot, flex_req) {
   )]
 
   for (s in stoppable) {
-    if (flex_req <= SCHEDULE_FLEX_TOL_KW) break
+    if (flex_req - cap_room <= SCHEDULE_FLEX_TOL_KW) break
     flex_req <- flex_req - sessions_timeslot$Power[s]
     sessions_timeslot$Power[s] <- 0
     sessions_timeslot$Flexible[s] <- TRUE

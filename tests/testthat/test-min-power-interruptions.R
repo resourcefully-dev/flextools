@@ -174,9 +174,11 @@ test_that("the switch is ignored by the other methods", {
 })
 
 test_that("smart_charging passes the switch to the scheduler", {
+  # The stop goes down to the import capacity: 0 kW for four hours
   opt_data <- tibble(
     datetime = mp_dttm,
     production = 0,
+    import_capacity = c(rep(0, 16), rep(50, 16)),
     Worktime = c(rep(0, 16), rep(50, 16))
   )
   sc <- function(allow_interruptions) {
@@ -323,4 +325,60 @@ test_that("V2G stops sessions only down to the import capacity", {
     summarise(Energy = sum(Energy))
   expect_equal(delivered$Energy, c(22, 11), tolerance = 0.01)
   expect_true(all(res$demand$Vans + opt_data$static <= 14 + 1e-6))
+})
+
+test_that("curtail stops sessions only down to the import capacity", {
+  # The V2G fixture above through `method = "curtail"`. The "grid" setpoint
+  # spreads the 33 kWh at about 2.4 kW, below one van's minimum. Stopping
+  # down to it stopped both vans until they had to charge at full power at
+  # the end (a 22 kW peak at 05:00 in 1.19.0); down to the 4 kW of room one
+  # van charges at a time at 4 kW.
+  tz <- "Europe/Amsterdam"
+  dttm <- seq(
+    as.POSIXct("2025-01-13 00:00", tz = tz),
+    by = "15 min",
+    length.out = 2 * 96
+  )
+  vans <- tibble(
+    Session = c("S1", "S2"),
+    Timecycle = "Workday",
+    Profile = "Vans",
+    ConnectionStartDateTime = as.POSIXct(
+      c("2025-01-13 17:00", "2025-01-13 18:00"),
+      tz = tz
+    ),
+    ConnectionHours = c(14, 12),
+    Power = 11,
+    Energy = c(22, 11)
+  )
+  opt_data <- tibble(
+    datetime = dttm,
+    production = 0,
+    static = 10,
+    import_capacity = 14
+  )
+  res <- suppressWarnings(suppressMessages(smart_charging(
+    vans,
+    opt_data,
+    opt_objective = "grid",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 12,
+    charging_power_min = 4,
+    allow_interruptions = TRUE
+  )))
+
+  delivered <- res$sessions %>%
+    group_by(Session) %>%
+    summarise(Energy = sum(Energy))
+  expect_equal(delivered$Energy, c(22, 11), tolerance = 0.01)
+  expect_true(all(res$demand$Vans + opt_data$static <= 14 + 1e-6))
+  # No slot power between 0 and the minimum, but the tail of a charge
+  powers <- res$sessions %>%
+    evsim::get_demand(dttm_seq = dttm, by = "Session") %>%
+    select(-"datetime")
+  for (p in powers) {
+    p <- p[-max(which(p != 0))]
+    expect_false(any(p > 1e-6 & p < 4 - 1e-6))
+  }
 })

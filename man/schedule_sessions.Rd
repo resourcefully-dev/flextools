@@ -53,7 +53,9 @@ it requires. Must be higher than 0 and at least \code{energy_min}.}
 
 \item{allow_interruptions}{logical, whether \code{method = "curtail"} may stop
 sessions (default \code{FALSE}). See \code{\link[=smart_charging]{smart_charging()}}. Ignored by the other
-methods.}
+methods. Sessions stop down to the setpoint, or down to its \code{power_cap}
+column (the import capacity left for these sessions) where it has one and
+that is higher.}
 }
 \value{
 list of three elements: \code{sessions} (the schedule, one row per

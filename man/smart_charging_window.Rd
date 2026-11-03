@@ -13,7 +13,8 @@ smart_charging_window(
   charging_power_min = 0,
   energy_min = 1,
   energy_max = 1,
-  include_log = FALSE
+  include_log = FALSE,
+  allow_interruptions = FALSE
 )
 }
 \arguments{
@@ -39,6 +40,9 @@ then sessions' demand can reach a value of \code{110} without needing to schedul
 \item{energy_max}{numeric, maximum allowed ratio (between 0 and 1) of required energy.}
 
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
+
+\item{allow_interruptions}{logical, whether \code{method = "curtail"} may stop
+sessions. See \code{\link[=smart_charging]{smart_charging()}}.}
 }
 \description{
 Set setpoints for smart charging

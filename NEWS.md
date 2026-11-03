@@ -1,3 +1,30 @@
+# flextools 1.19.0
+
+* `smart_charging()` and `schedule_sessions()` take `allow_interruptions`
+  (default `FALSE`), read only with `method = "curtail"`. With `TRUE`, a time
+  slot first curtails every flexible session down to its minimum, as before,
+  and where that is not enough it stops sessions (0 kW) one at a time until
+  the slot is at or below the setpoint. It stops them in the priority order
+  of `method = "interrupt"`, and only those that `"interrupt"` could stop: a
+  session that could no longer charge its `energy_min` share at nominal power
+  in the rest of its connection keeps charging. A stopped session frees the
+  power it charges at after curtailing; when that is more than the slot
+  needs, the sessions still charging take the rest back. Every slot power is
+  then 0 or between `charging_power_min` and the nominal power, except in a
+  session's last charging slot. An 11 kW session of 11 kWh with
+  `charging_power_min = 4` and a setpoint of 0 kW for four hours charges 0 kW
+  there and 11 kW after, where it charged 4 kW throughout before. With
+  `FALSE`, or with `charging_power_min = 0`, the schedule is unchanged.
+* `smart_v2g()` no longer raises every charge below `charging_power_min` to
+  the minimum. Among the sessions of a slot that the setpoint leaves charging
+  between 0 and the minimum, it now stops them one at a time, most
+  flexibility left first, until the slot is at or below the setpoint, and
+  raises the rest to the minimum. A session that must charge in that slot to
+  leave at its full target stops only as far as the import capacity needs.
+  The same 11 kW session (50 kWh battery at 50 %) under a 2 kW setpoint now
+  charges 0 kW instead of 4 kW; up to 1.18.2 it reached 0 only where the
+  setpoint was 0 kW or less. Discharges below the minimum are unchanged.
+
 # flextools 1.18.2
 
 * Fix: `add_tank_optimization()` failed with "OSQP: maximum iterations

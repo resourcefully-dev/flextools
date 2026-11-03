@@ -24,7 +24,8 @@ tank_solve_window(
   Pb = 0,
   soft = FALSE,
   slack_import_max = 0,
-  slack_export_max = 0
+  slack_export_max = 0,
+  level_unit = NULL
 )
 }
 \arguments{
@@ -64,6 +65,11 @@ down to the inlet temperature, below the floor at a price}
 \item{slack_import_max, slack_export_max}{numeric vectors, how far each slot
 may miss its import / export capacity (kW), from
 \code{\link[=optimization_slack_ceiling]{optimization_slack_ceiling()}}; the capacities are hard where they are 0}
+
+\item{level_unit}{numeric, the kWh that one unit of the solver's level
+stands for. \code{NULL} (default) is \code{Smax} on OSQP, so the solver sees the
+level between 0 and 1 whatever the tank's size, and 1 (kWh) on HiGHS.
+1 is the formulation in kWh that OSQP used up to flextools 1.18.1.}
 }
 \value{
 list of the unrounded \code{power} and \code{backup} (kW) and the \code{status};

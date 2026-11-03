@@ -1,3 +1,36 @@
+# flextools 1.18.2
+
+* Fix: `add_tank_optimization()` failed with "OSQP: maximum iterations
+  reached" on small tanks on a day without heat demand, although the window
+  has a solution. A 50 L space-heating tank between 25 and 35 °C (0.58 kWh)
+  with a 4 kW compressor, PV, no heat demand and a COP swinging between 3 and
+  6 stalled on its window and on the soft retry, and with `on_failure =
+  "error"` stopped the run. With the level in kWh next to powers in kW, OSQP's
+  adaptive step size stalled on tanks under about 1 kWh. OSQP now solves the
+  level as a fraction of the top of the band, whatever the tank's size (the
+  balance, the bounds, the rounding room below the top and the price of going
+  below the floor scaled with it), and that window solves in about 5000
+  iterations. A window OSQP still stops on at its iteration limit is solved
+  once more with a fixed step size, before the soft retry and before it counts
+  as failed. The tolerances and the iteration limit are unchanged, and so are
+  `"cost"` windows, which HiGHS solves.
+* Windows that solved before give the same unrounded schedule within 1e-6 kW,
+  except where the earlier solve itself stopped further from the optimum: on
+  the soft floor (up to 1e-4 kW either way, 5e-6 kW apart) and on a 30 kWh
+  tank with a combined objective (1.7e-5 kW before, 1e-7 kW now). Where the
+  unrounded power lies exactly between two 0.01 kW steps, which happens on
+  fixtures with round numbers, a slot can round to the other step.
+* Fix: a window drained from the rounding room below the top of the band to
+  the inlet temperature failed the check of the soft floor, by half a
+  rounding step, and ran `flexible`.
+* Fix: where the compressor was at its cap (or off), the backup heater's
+  power was rounded on its own, with nothing to make up its rounding. A peak
+  that needs a backup power on a rounding tie in each slot (2.005 kW for 3
+  hours) could round down in every slot and leave the tank a whole step of
+  heat short, reported as unmet heat, depending on the last bits of the
+  solution. The backup heater now tracks the level there, as the compressor
+  does elsewhere, so the level stays within half a rounding step of the plan.
+
 # flextools 1.18.1
 
 * `smart_v2g()` no longer curtails a session below its full energy for an

@@ -1,34 +1,5 @@
 library(dplyr)
 
-# Fixtures follow the "flextools spec" of the FLEX+ thermal model plan
-# (Phase 2). No PV unless a test says otherwise, so the COP-0 rule and the
-# fallback are tested without surplus to absorb.
-
-tank_data <- function(
-  days = 1,
-  resolution = 60,
-  heat_demand = 1,
-  cop = 3,
-  flexible = 0.33,
-  static = 0,
-  production = 0,
-  cheap_hours = 0:5
-) {
-  n <- days * 24 * 60 / resolution
-  datetime <- as.POSIXct("2024-01-01", tz = "UTC") +
-    resolution * 60 * (seq_len(n) - 1)
-  tibble(
-    datetime = datetime,
-    production = rep_len(production, n),
-    static = rep_len(static, n),
-    heat_demand = rep_len(heat_demand, n),
-    cop = rep_len(cop, n),
-    flexible = rep_len(flexible, n),
-    price_imported = ifelse(lubridate::hour(datetime) %in% cheap_hours, 0.1, 0.3),
-    price_exported = 0
-  )
-}
-
 # Unrounded level path, start of each slot plus the end of the last one. It
 # stops at the inlet temperature (level 0).
 tank_path <- function(P, d, init, loss = 0, resolution = 60, backup = 0) {
@@ -490,14 +461,6 @@ test_that("`get_tank_level()` follows the balance and validates its inputs", {
 
 # Backup heater ----------------------------------------------------------------
 
-# Evening peak: 6 kW of heat for 3 hours against a 1 kW compressor at COP 3
-# (3 kW of heat) and a 3 kWh tank. The peak lacks 3 * 3 - 3 = 6 kWh of heat.
-peak_data <- function(...) {
-  heat_demand <- rep(1, 24)
-  heat_demand[18:20] <- 6
-  tank_data(heat_demand = heat_demand, ...)
-}
-
 test_that("the backup heater stays off while the compressor suffices", {
   production <- rep(0, 24)
   production[10:16] <- 5 # PV surplus the backup heater could soak up
@@ -567,6 +530,39 @@ test_that("heat is left unmet only beyond the compressor, the backup and the tan
         tolerance = 1e-9
       )
     }
+  }
+})
+
+test_that("the backup heater makes up the rounding where the compressor is at its cap", {
+  # The tank holds at the rounding room below its top (2.985 kWh), so the
+  # peak (6 kW of heat against a 1 kW compressor at COP 3) needs exactly
+  # 2.005 kW from the backup heater in each of its three slots, with the
+  # compressor at its cap. Rounded on its own, each 2.005 goes to 2.00 or 2.01
+  # on the last bits of the solution; all three down left the tank a whole
+  # rounding step (0.015 kWh) short, reported as unmet heat.
+  d <- peak_data()
+  P <- c(rep(1 / 3, 17), rep(1, 3), rep(0.58208333333333, 4))
+  for (noise in list(c(-1, -1, -1), c(1, 1, 1), c(-1, 1, -1), c(1, -1, 1))) {
+    B <- c(rep(0, 17), 2.005 + noise * 1e-12, rep(0, 4))
+    target <- tank_level_path(P, d$heat_demand, d$cop, 3, 1, 1, backup = B)[-1]
+    rounded <- tank_round_power(
+      target, d$heat_demand, d$cop, 3, 1, 1, Pc = 1,
+      backup = B, Pb = 3, power = P, Smax = 3
+    )
+    expect_equal(rounded$power[18:20], rep(1, 3))
+    path <- tank_level_path(
+      rounded$power, d$heat_demand, d$cop, 3, 1, 1, backup = rounded$backup
+    )[-1]
+    # Within half a rounding step of heat: the compressor's at COP 3, 0.015
+    # kWh, which the level brings into the peak (it was 0.03 kWh)
+    expect_lte(max(abs(path[18:20] - target[18:20])), 0.005 * 3 + 1e-9)
+    expect_equal(
+      get_tank_unmet_heat(
+        rounded$power, d$heat_demand, d$cop, init = 3, Tcap = 3, SOCmin = 0,
+        backup = rounded$backup
+      ),
+      rep(0, 24)
+    )
   }
 })
 
@@ -757,4 +753,133 @@ test_that("`on_failure` turns a solver failure into an error", {
     add_tank_optimization(d, "cost", Tcap = 3, Pc = 3, on_failure = "stop"),
     "on_failure"
   )
+})
+
+
+# Small tanks ------------------------------------------------------------------
+
+test_that("a small tank on a day without demand solves", {
+  # With the level in kWh next to powers in kW, OSQP stalled at its iteration
+  # limit on this 0.58 kWh tank, on the window and on its soft retry, though
+  # the window has a solution (flextools 1.18.1: "the solver failed on the
+  # window starting at 2025-05-28 00:00:00 CEST (OSQP: maximum iterations
+  # reached)"). With the level scaled to the band, the first solve converges.
+  d <- small_tank_day()
+  real_solve <- solve_osqp
+  solves <- 0
+  local_mocked_bindings(solve_osqp = function(...) {
+    solves <<- solves + 1
+    real_solve(...)
+  })
+  P <- do.call(add_tank_optimization, c(list(d, "grid", Tcap = 0.58), small_tank_args))
+  expect_equal(solves, 1)
+
+  expect_length(P, 96)
+  expect_gte(min(P), 0)
+  expect_lte(max(P), 4)
+  expect_equal(attr(P, "unmet_heat_kw"), rep(0, 96))
+  level <- tank_path(P, d, init = 0.58, loss = 0.5, resolution = 15)
+  expect_lte(max(level), 0.58 + 1e-9)
+  expect_gte(min(level), 0)
+  # The heat pump makes up the standing loss, in the PV surplus
+  expect_gt(sum(P), 0)
+  surplus <- d$production > d$static
+  expect_gt(sum(P[surplus]), sum(P[!surplus]))
+})
+
+test_that("a window OSQP stalls on is solved again with a fixed step size", {
+  d <- small_tank_day()
+  real_solve <- solve_osqp
+  calls <- list()
+  local_mocked_bindings(solve_osqp = function(P, q, A, lb, ub, adaptive_rho = TRUE) {
+    calls[[length(calls) + 1]] <<- adaptive_rho
+    if (adaptive_rho) {
+      return(list(result = list(status_message = "maximum iterations reached"), x = NULL))
+    }
+    real_solve(P, q, A, lb, ub, adaptive_rho = adaptive_rho)
+  })
+  P <- do.call(add_tank_optimization, c(list(d, "grid", Tcap = 0.58), small_tank_args))
+  expect_equal(calls, list(TRUE, FALSE))
+  expect_equal(attr(P, "unmet_heat_kw"), rep(0, 96))
+
+  # Any other failure is not retried
+  calls <- list()
+  local_mocked_bindings(solve_osqp = function(P, q, A, lb, ub, adaptive_rho = TRUE) {
+    calls[[length(calls) + 1]] <<- adaptive_rho
+    list(result = list(status_message = "primal infeasible"), x = NULL)
+  })
+  expect_error(
+    do.call(add_tank_optimization, c(list(d, "grid", Tcap = 0.58), small_tank_args)),
+    "OSQP: primal infeasible"
+  )
+  # The window, then its soft retry, each solved once
+  expect_equal(calls, list(TRUE, TRUE))
+})
+
+test_that("the scaled level gives the schedule the level in kWh gave", {
+  # Every window of the pinned runs, solved with the level scaled to the band
+  # and in kWh as up to flextools 1.18.1 (`level_unit = 1`), unrounded
+  real_window <- tank_solve_window
+  windows <- list()
+  local_mocked_bindings(tank_solve_window = function(...) {
+    windows[[length(windows) + 1]] <<- list(...)
+    real_window(...)
+  })
+  cases <- tank_golden_cases()
+  for (key in names(cases)) {
+    n_before <- length(windows)
+    run_tank_case(cases[[key]])
+    names(windows)[seq(n_before + 1, length(windows))] <-
+      paste(key, seq_len(length(windows) - n_before))
+  }
+
+  compared <- 0
+  for (key in names(windows)) {
+    args <- windows[[key]]
+    old <- do.call(real_window, c(args, list(level_unit = 1)))
+    new <- do.call(real_window, args)
+    if (is.null(old$power)) {
+      # A window with no schedule in the band, solved again with the soft floor
+      expect_null(new$power, label = key)
+      next
+    }
+    # OSQP stops within 1e-6 of the optimum, but not every solve gets there:
+    # with the level in kWh, the combined objective on the 30 kWh tank stopped
+    # 1.7e-5 kW off it (the scaled level, 1e-7), and on the soft floor, whose
+    # price dwarfs the grid term, both stop up to 1e-4 kW off it.
+    tol <- if (isTRUE(args$soft)) {
+      1e-5
+    } else if (startsWith(key, "evening_w05_30")) {
+      2e-5
+    } else {
+      1e-6
+    }
+    diff <- max(abs(c(new$power - old$power, new$backup - old$backup)))
+    expect_lt(diff, tol, label = paste(key, "power difference"))
+    compared <- compared + 1
+  }
+  expect_gte(compared, length(cases))
+})
+
+test_that("runs that solved before the level was scaled are unchanged", {
+  # Pinned from flextools 1.18.1. Rounding to 2 decimals tracks the
+  # unrounded level, and on these fixtures with round numbers some slots land
+  # exactly half a step from both neighbours: there a difference of 1e-15 kW
+  # in the solution (see above) moves the slot by one step.
+  golden <- readRDS(test_path("golden-tank-schedules.rds"))
+  cases <- tank_golden_cases()
+  expect_setequal(names(golden), names(cases))
+  ties <- c("evening_w05_3", "evening_ramp", "peak_backup_grid", "peak_backup_w05")
+  for (key in names(cases)) {
+    P <- run_tank_case(cases[[key]])
+    if (key %in% ties) {
+      for (part in list(NULL, "backup_kw", "unmet_heat_kw")) {
+        x <- if (is.null(part)) as.numeric(P) else attr(P, part)
+        y <- if (is.null(part)) as.numeric(golden[[key]]) else attr(golden[[key]], part)
+        expect_lte(max(abs(x - y)), 0.01 + 1e-9, label = paste(key, part))
+      }
+    } else {
+      expect_equal(P, golden[[key]], tolerance = 1e-6, label = key)
+    }
+  }
 })

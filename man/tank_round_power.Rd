@@ -54,8 +54,9 @@ Rounding each slot on its own drifts the level: a third of a kW rounds to
 COP. Instead each slot takes the 2-decimal power that brings the level
 closest to the level the unrounded solution reaches at the end of that slot,
 so the rounded level never strays further from it than half a rounding step
-of heat, and never goes above the top of the band. The backup heater is rounded on its own and the compressor makes up
-its rounding; where the COP is 0 the backup heater tracks the level in the
-compressor's place.
+of heat, and never goes above the top of the band. The backup heater is
+rounded on its own and the compressor makes up its rounding; where the COP
+is 0, or the compressor is at its cap or off and cannot make it up, the
+backup heater tracks the level in the compressor's place.
 }
 \keyword{internal}

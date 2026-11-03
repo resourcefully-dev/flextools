@@ -23,6 +23,13 @@
 * Fix: a window drained from the rounding room below the top of the band to
   the inlet temperature failed the check of the soft floor, by half a
   rounding step, and ran `flexible`.
+* Fix: where the compressor was at its cap (or off), the backup heater's
+  power was rounded on its own, with nothing to make up its rounding. A peak
+  that needs a backup power on a rounding tie in each slot (2.005 kW for 3
+  hours) could round down in every slot and leave the tank a whole step of
+  heat short, reported as unmet heat, depending on the last bits of the
+  solution. The backup heater now tracks the level there, as the compressor
+  does elsewhere, so the level stays within half a rounding step of the plan.
 
 # flextools 1.18.1
 

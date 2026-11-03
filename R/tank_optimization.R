@@ -75,9 +75,10 @@ tank_level_path <- function(
 #' COP. Instead each slot takes the 2-decimal power that brings the level
 #' closest to the level the unrounded solution reaches at the end of that slot,
 #' so the rounded level never strays further from it than half a rounding step
-#' of heat, and never goes above the top of the band. The backup heater is rounded on its own and the compressor makes up
-#' its rounding; where the COP is 0 the backup heater tracks the level in the
-#' compressor's place.
+#' of heat, and never goes above the top of the band. The backup heater is
+#' rounded on its own and the compressor makes up its rounding; where the COP
+#' is 0, or the compressor is at its cap or off and cannot make it up, the
+#' backup heater tracks the level in the compressor's place.
 #'
 #' @inheritParams tank_level_path
 #' @param target numeric vector, level at the end of each slot under the
@@ -123,6 +124,21 @@ tank_round_power <- function(
         p <- min(p, power[t] + 0.01)
       }
       out[t] <- min(max(round(p, 2), 0), p_max)
+      # At its cap (or off) the compressor cannot make up the backup heater's
+      # rounding, so the backup heater tracks the level instead: rounded on
+      # its own, a backup power on a rounding tie in every slot of a peak
+      # drifted a whole step of heat away
+      short <- need - cop[t] * out[t] * dt
+      if (
+        b_max > 0 &&
+          ((out[t] >= p_max && short > 0) || (out[t] <= 0 && short < 0))
+      ) {
+        b <- backup[t] + short / dt
+        if (empty) {
+          b <- min(b, b_raw[t] + 0.01)
+        }
+        backup[t] <- min(max(round(b, 2), 0), b_max)
+      }
     } else if (b_max > 0) {
       b <- backup[t] + need / dt
       if (empty) {

@@ -533,6 +533,39 @@ test_that("heat is left unmet only beyond the compressor, the backup and the tan
   }
 })
 
+test_that("the backup heater makes up the rounding where the compressor is at its cap", {
+  # The tank holds at the rounding room below its top (2.985 kWh), so the
+  # peak (6 kW of heat against a 1 kW compressor at COP 3) needs exactly
+  # 2.005 kW from the backup heater in each of its three slots, with the
+  # compressor at its cap. Rounded on its own, each 2.005 goes to 2.00 or 2.01
+  # on the last bits of the solution; all three down left the tank a whole
+  # rounding step (0.015 kWh) short, reported as unmet heat.
+  d <- peak_data()
+  P <- c(rep(1 / 3, 17), rep(1, 3), rep(0.58208333333333, 4))
+  for (noise in list(c(-1, -1, -1), c(1, 1, 1), c(-1, 1, -1), c(1, -1, 1))) {
+    B <- c(rep(0, 17), 2.005 + noise * 1e-12, rep(0, 4))
+    target <- tank_level_path(P, d$heat_demand, d$cop, 3, 1, 1, backup = B)[-1]
+    rounded <- tank_round_power(
+      target, d$heat_demand, d$cop, 3, 1, 1, Pc = 1,
+      backup = B, Pb = 3, power = P, Smax = 3
+    )
+    expect_equal(rounded$power[18:20], rep(1, 3))
+    path <- tank_level_path(
+      rounded$power, d$heat_demand, d$cop, 3, 1, 1, backup = rounded$backup
+    )[-1]
+    # Within half a rounding step of heat: the compressor's at COP 3, 0.015
+    # kWh, which the level brings into the peak (it was 0.03 kWh)
+    expect_lte(max(abs(path[18:20] - target[18:20])), 0.005 * 3 + 1e-9)
+    expect_equal(
+      get_tank_unmet_heat(
+        rounded$power, d$heat_demand, d$cop, init = 3, Tcap = 3, SOCmin = 0,
+        backup = rounded$backup
+      ),
+      rep(0, 24)
+    )
+  }
+})
+
 test_that("the backup heater runs where the COP is 0, the compressor does not", {
   cop <- rep(3, 24)
   cop[11:15] <- 0

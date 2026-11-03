@@ -431,7 +431,19 @@ optimization_highs_options <- function(
 }
 
 
-solve_osqp <- function(P, q, A, lb, ub) {
+# `adaptive_rho = FALSE` fixes OSQP's step size `rho` at its initial value
+# instead of adapting it as the iterations go
+solve_osqp <- function(P, q, A, lb, ub, adaptive_rho = TRUE) {
+  settings <- list(
+    verbose = FALSE,
+    eps_abs = 1e-6,
+    eps_rel = 1e-6,
+    polishing = TRUE,
+    max_iter = 100000L
+  )
+  if (!adaptive_rho) {
+    settings$adaptive_rho <- 0L
+  }
   osqp_result <- tryCatch(
     {
       solver <- osqp::osqp(
@@ -440,13 +452,7 @@ solve_osqp <- function(P, q, A, lb, ub) {
         A = A,
         l = lb,
         u = ub,
-        osqp::osqpSettings(
-          verbose = FALSE,
-          eps_abs = 1e-6,
-          eps_rel = 1e-6,
-          polishing = TRUE,
-          max_iter = 100000L
-        )
+        do.call(osqp::osqpSettings, settings)
       )
       solver@Solve()
     },

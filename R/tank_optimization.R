@@ -307,6 +307,10 @@ tank_failure <- function(status) {
 #' @param slack_import_max,slack_export_max numeric vectors, how far each slot
 #'   may miss its import / export capacity (kW), from
 #'   [optimization_slack_ceiling()]; the capacities are hard where they are 0
+#' @param level_unit numeric, the kWh that one unit of the solver's level
+#'   stands for. `NULL` (default) is `Smax` on OSQP, so the solver sees the
+#'   level between 0 and 1 whatever the tank's size, and 1 (kWh) on HiGHS.
+#'   1 is the formulation in kWh that OSQP used up to flextools 1.18.1.
 #'
 #' @return list of the unrounded `power` and `backup` (kW) and the `status`;
 #'   when the window has no solution, `power` is `NULL` and `status` says why
@@ -333,7 +337,8 @@ tank_solve_window <- function(
   Pb = 0,
   soft = FALSE,
   slack_import_max = 0,
-  slack_export_max = 0
+  slack_export_max = 0,
+  level_unit = NULL
 ) {
   n <- length(G)
   import_capacity <- as.numeric(rep_len(import_capacity, n))
@@ -419,6 +424,21 @@ tank_solve_window <- function(
     lb_S[n] <- S_end
   }
 
+  # The level enters the solver in units of `level_unit` kWh. On OSQP that is
+  # the top of the band: with the level in kWh next to powers in kW, a tank
+  # of under about 1 kWh made OSQP's adaptive step size stall at its
+  # iteration limit (with no demand to draw the tank and a COP that moves the
+  # rounding room slot by slot), on windows that have a solution. Scaled, the
+  # level is between 0 and 1 for any tank. Every row and bound on the level
+  # (`S`), its depth below the floor (`D`) and the missed end condition (`R`)
+  # is in that unit, and so is the price of `D` and `R`. The heat (`P`, `B`,
+  # `U`) stays in kW. The power is the solution; the level in kWh follows
+  # from it on the exact dynamics below. HiGHS keeps kWh.
+  use_highs <- identical(objective, "cost") && lambda == 0
+  if (is.null(level_unit)) {
+    level_unit <- if (use_highs) 1 else Smax
+  }
+
   with_flows <- !identical(objective, "grid")
   idx_P <- seq_len(n)
   idx_S <- n + seq_len(n)
@@ -453,7 +473,7 @@ tank_solve_window <- function(
   }
 
   # Dynamics: S_t - k * S_{t-1} - dt * (cop_t * P_t + B_t + U_t) = -Q_t * dt
-  # (+ k * S0 at t = 1)
+  # (+ k * S0 at t = 1), divided by `level_unit`
   A_dyn <- Matrix::sparseMatrix(
     i = c(
       seq_len(n),
@@ -465,19 +485,20 @@ tank_solve_window <- function(
     j = c(idx_S, idx_P, idx_S[seq_len(n - 1)], idx_B, idx_U),
     x = c(
       rep(1, n),
-      -cop * dt,
+      -cop * dt / level_unit,
       rep(-k, n - 1),
-      if (with_backup) rep(-dt, n),
-      if (soft) rep(-dt, n)
+      if (with_backup) rep(-dt / level_unit, n),
+      if (soft) rep(-dt / level_unit, n)
     ),
     dims = c(n, nv)
   )
   rhs_dyn <- -Q * dt
   rhs_dyn[1] <- rhs_dyn[1] + k * S0
+  rhs_dyn <- rhs_dyn / level_unit
 
   A <- rbind(Matrix::Diagonal(nv), A_dyn)
-  lower <- c(lb_P, lb_S)
-  upper <- c(ub_P, ub_S)
+  lower <- c(lb_P, lb_S / level_unit)
+  upper <- c(ub_P, ub_S / level_unit)
   if (with_backup) {
     lower <- c(lower, rep(0, n))
     upper <- c(upper, ub_B)
@@ -486,7 +507,12 @@ tank_solve_window <- function(
     # U: no slot needs more than its demand plus refilling the whole band.
     # D: at most the floor. R: at most the end level.
     lower <- c(lower, rep(0, n), rep(0, n), 0)
-    upper <- c(upper, Q + Smax / dt, rep(Smin, n), S_end)
+    upper <- c(
+      upper,
+      Q + Smax / dt,
+      rep(Smin, n) / level_unit,
+      S_end / level_unit
+    )
   }
   if (soft_caps) {
     lower <- c(lower, rep(0, 2 * n))
@@ -572,7 +598,7 @@ tank_solve_window <- function(
       dims = c(n + 2, nv)
     )
     A <- rbind(A, A_soft)
-    lower <- c(lower, rep(Smin, n), S_end, 0)
+    lower <- c(lower, rep(Smin, n) / level_unit, S_end / level_unit, 0)
     upper <- c(upper, rep(Inf, n), Inf, sum(U_max) + 1e-6)
   }
 
@@ -603,12 +629,12 @@ tank_solve_window <- function(
   }
   c_B <- if (with_backup) 2 * heat_price else 0
   c_U <- 0
-  c_D <- if (soft) 20 * heat_price / dt else 0
+  c_D <- if (soft) 20 * heat_price / dt * level_unit else 0
   c_S <- if (soft_caps) 10 * heat_price else 0
 
   lambdaMat <- if (lambda > 0) get_lambda_matrix(n) else NULL
 
-  if (identical(objective, "cost") && lambda == 0) {
+  if (use_highs) {
     # Pure LP on HiGHS
     lin <- numeric(nv)
     lin[idx_B] <- c_B
@@ -668,8 +694,24 @@ tank_solve_window <- function(
     q[idx_U] <- c_U
     q[c(idx_D, idx_R)] <- c_D
     q[c(idx_si, idx_se)] <- c_S
-    obj_scale <- max(max(abs(P_quad)), max(abs(q)), 1e-6)
+    # The objective is normalised as with the level in kWh, so the price of
+    # `D` and `R` per unit of `level_unit` does not set it
+    q_kwh <- q
+    q_kwh[c(idx_D, idx_R)] <- q_kwh[c(idx_D, idx_R)] / level_unit
+    obj_scale <- max(max(abs(P_quad)), max(abs(q_kwh)), 1e-6)
     sol <- solve_osqp(P_quad / obj_scale, q / obj_scale, A, lower, upper)
+    if (
+      is.null(sol$x) &&
+        identical(sol$result$status_message, "maximum iterations reached")
+    ) {
+      # A safety net for a window the scaled level still stalls on: OSQP's
+      # adaptive step size is what stalled, so solve it once more with a
+      # fixed one before the window counts as failed.
+      sol <- solve_osqp(
+        P_quad / obj_scale, q / obj_scale, A, lower, upper,
+        adaptive_rho = FALSE
+      )
+    }
     if (is.null(sol$x)) {
       return(tank_failure(paste0("OSQP: ", sol$result$status_message)))
     }
@@ -688,11 +730,15 @@ tank_solve_window <- function(
   # so check the power it returns against the band once more on the exact
   # dynamics before trusting it.
   # The level stops at the inlet temperature: the heat `U` the solver lets in
-  # there is demand the tank does not serve
+  # there is demand the tank does not serve. On the path it stops there once
+  # it would go below by more than half a rounding step, and is kept as
+  # rounding within that, so a soft floor has no lower bound left to check: a
+  # tank drained from the rounding room below its top lands exactly half a
+  # step below 0.
   level <- tank_level_path(P, Q, cop, S0, k, dt, backup = B)[-1]
   tol <- 1e-3
   if (
-    any(level < (if (soft) 0 else Smin) - tol) ||
+    (!soft && any(level < Smin - tol)) ||
       any(level > Smax + tol) ||
       (!soft && level[n] < S_end - tol)
   ) {

@@ -18,7 +18,8 @@ smart_charging(
   energy_max = 1,
   include_log = FALSE,
   show_progress = FALSE,
-  lambda = 0
+  lambda = 0,
+  allow_interruptions = FALSE
 )
 }
 \arguments{
@@ -110,6 +111,24 @@ Lower it to save energy or cost. Must be higher than 0 and at least \code{energy
 \item{show_progress}{logical, whether to output the progress bar in the console}
 
 \item{lambda}{numeric, penalty on change for the flexible load.}
+
+\item{allow_interruptions}{logical, whether \code{method = "curtail"} may stop
+sessions (default \code{FALSE}, ignored by the other methods). With \code{FALSE}, a
+session curtailed down to \code{charging_power_min} keeps charging at it however
+far the setpoint is below, so with a minimum above 0 it never pauses. With
+\code{TRUE}, a time slot first curtails every flexible session down to its
+minimum, as with \code{FALSE}, and when that is not enough it stops sessions
+(power 0) one at a time until the slot is at or below the setpoint. It
+stops them in the order of \code{method = "interrupt"} (most energy charged
+first, then the latest arrival, then the most connection hours left), and
+only those that \code{"interrupt"} could stop: a session that could no longer
+charge its \code{energy_min} share at nominal power in the rest of its
+connection is never stopped. When the last stop frees more power than the
+slot needs, the sessions still charging take it back, so every slot power
+is 0 or between \code{charging_power_min} and the nominal power, except in a
+session's last charging slot (the tail of its charge). An 11 kW session of
+11 kWh with a minimum of 4 kW and a setpoint of 0 kW for four hours charges
+0 kW there and 11 kW after, where with \code{FALSE} it charges 4 kW there.}
 }
 \value{
 a list with three elements:

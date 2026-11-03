@@ -83,6 +83,14 @@ charging and for discharging alike: a responsive session charges at
 (e.g. "discharge only from 4 kW upwards"), or does nothing. When the SoC
 floor or the energy deadline would only allow a smaller discharge (say
 -2 kW against a 4 kW minimum), the session does not discharge in that slot.
+When the setpoint leaves sessions a charge below the minimum, the slot is
+decided for the fleet: those sessions stop (0 kW) one at a time, most
+flexibility left first, until the slot is at or below the setpoint, and
+the rest charge at the minimum. A session that must charge in the slot to
+leave at its full target stops only as far as the import capacity needs.
+An 11 kW session with a 4 kW minimum and a setpoint of 2 kW charges 0 kW
+(up to 1.18.x it charged 4 kW, and reached 0 only where the setpoint was
+0 kW or less).
 The one exception is a session's last charging slot, where it may charge
 less than the minimum because it only needs that much to finish (the tail
 of its charge). A session whose nominal \code{Power} is below

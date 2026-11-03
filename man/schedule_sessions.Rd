@@ -13,7 +13,8 @@ schedule_sessions(
   energy_min = 1,
   energy_max = 1,
   include_log = FALSE,
-  show_progress = TRUE
+  show_progress = TRUE,
+  allow_interruptions = FALSE
 )
 }
 \arguments{
@@ -49,6 +50,10 @@ it requires. Must be higher than 0 and at least \code{energy_min}.}
 \item{include_log}{logical, whether to output the algorithm messages for every user profile and time-slot}
 
 \item{show_progress}{logical, whether to output the progress bar in the console}
+
+\item{allow_interruptions}{logical, whether \code{method = "curtail"} may stop
+sessions (default \code{FALSE}). See \code{\link[=smart_charging]{smart_charging()}}. Ignored by the other
+methods.}
 }
 \value{
 list of three elements: \code{sessions} (the schedule, one row per

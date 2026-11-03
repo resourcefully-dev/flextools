@@ -79,6 +79,24 @@
 #' Up to version 1.12.0 a value below 1 was a share of the nominal power; it is
 #' now always kW, so `charging_power_min = 0.5` means 0.5 kW.
 #'
+#' @param allow_interruptions logical, whether `method = "curtail"` may stop
+#' sessions (default `FALSE`, ignored by the other methods). With `FALSE`, a
+#' session curtailed down to `charging_power_min` keeps charging at it however
+#' far the setpoint is below, so with a minimum above 0 it never pauses. With
+#' `TRUE`, a time slot first curtails every flexible session down to its
+#' minimum, as with `FALSE`, and when that is not enough it stops sessions
+#' (power 0) one at a time until the slot is at or below the setpoint. It
+#' stops them in the order of `method = "interrupt"` (most energy charged
+#' first, then the latest arrival, then the most connection hours left), and
+#' only those that `"interrupt"` could stop: a session that could no longer
+#' charge its `energy_min` share at nominal power in the rest of its
+#' connection is never stopped. When the last stop frees more power than the
+#' slot needs, the sessions still charging take it back, so every slot power
+#' is 0 or between `charging_power_min` and the nominal power, except in a
+#' session's last charging slot (the tail of its charge). An 11 kW session of
+#' 11 kWh with a minimum of 4 kW and a setpoint of 0 kW for four hours charges
+#' 0 kW there and 11 kW after, where with `FALSE` it charges 4 kW there.
+#'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' Every session charges at least this share of the energy it requires. The
 #' scheduler never curtails, postpones or interrupts a session below it, and the
@@ -213,7 +231,8 @@ smart_charging <- function(
   energy_max = 1,
   include_log = FALSE,
   show_progress = FALSE,
-  lambda = 0
+  lambda = 0,
+  allow_interruptions = FALSE
 ) {
   if (show_progress) {
     cli::cli_h1("Set up")
@@ -273,6 +292,7 @@ smart_charging <- function(
 
   check_energy_ratios(energy_min, energy_max)
   check_charging_power_min(charging_power_min)
+  check_allow_interruptions(allow_interruptions)
 
   if (is.null(responsive)) {
     responsive <- map(
@@ -404,7 +424,8 @@ smart_charging <- function(
       charging_power_min,
       energy_min,
       energy_max,
-      include_log
+      include_log,
+      allow_interruptions
     )
   }
 
@@ -659,6 +680,26 @@ check_charging_power_min <- function(charging_power_min) {
       charging_power_min < 0
   ) {
     stop("Error: `charging_power_min` must be a single number of at least 0 (kW)")
+  }
+  invisible(TRUE)
+}
+
+#' Validate the interruptions switch
+#'
+#' Shared by [smart_charging()] and [schedule_sessions()].
+#'
+#' @param allow_interruptions logical, a single `TRUE` or `FALSE`.
+#'
+#' @return `TRUE`, invisibly. Stops with a clear message otherwise.
+#' @keywords internal
+#'
+check_allow_interruptions <- function(allow_interruptions) {
+  if (
+    !is.logical(allow_interruptions) ||
+      length(allow_interruptions) != 1 ||
+      is.na(allow_interruptions)
+  ) {
+    stop("Error: `allow_interruptions` must be a single TRUE or FALSE")
   }
   invisible(TRUE)
 }
@@ -1220,6 +1261,8 @@ get_setpoints_parallel <- function(
 #' then sessions' demand can reach a value of `110` without needing to schedule sessions.
 #' @param charging_power_min numeric, minimum charging power in kW. See
 #'   [smart_charging()].
+#' @param allow_interruptions logical, whether `method = "curtail"` may stop
+#'   sessions. See [smart_charging()].
 #'
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' @param energy_max numeric, maximum allowed ratio (between 0 and 1) of required energy.
@@ -1243,7 +1286,8 @@ smart_charging_window <- function(
   charging_power_min = 0,
   energy_min = 1,
   energy_max = 1,
-  include_log = FALSE
+  include_log = FALSE,
+  allow_interruptions = FALSE
 ) {
   if (nrow(setpoints) == 0) {
     return(list(
@@ -1308,7 +1352,8 @@ smart_charging_window <- function(
       energy_min = energy_min,
       energy_max = energy_max,
       include_log = include_log,
-      show_progress = FALSE
+      show_progress = FALSE,
+      allow_interruptions = allow_interruptions
     )
     sessions_window_flex_final <- results$sessions
     scheduled_demand <- results$demand
@@ -1371,7 +1416,8 @@ smart_charging_window_parallel <- function(
   charging_power_min,
   energy_min,
   energy_max,
-  include_log
+  include_log,
+  allow_interruptions = FALSE
 ) {
   if (
     !requireNamespace("mirai", quietly = TRUE) ||
@@ -1390,7 +1436,8 @@ smart_charging_window_parallel <- function(
           charging_power_min = charging_power_min,
           energy_min = energy_min,
           energy_max = energy_max,
-          include_log = include_log
+          include_log = include_log,
+          allow_interruptions = allow_interruptions
         )
       }
     )
@@ -1409,7 +1456,8 @@ smart_charging_window_parallel <- function(
             charging_power_min = charging_power_min,
             energy_min = energy_min,
             energy_max = energy_max,
-            include_log = include_log
+            include_log = include_log,
+            allow_interruptions = allow_interruptions
           )
         },
         smart_charging_window = smart_charging_window,
@@ -1418,7 +1466,8 @@ smart_charging_window_parallel <- function(
         charging_power_min = charging_power_min,
         energy_min = energy_min,
         energy_max = energy_max,
-        include_log = include_log
+        include_log = include_log,
+        allow_interruptions = allow_interruptions
       )
     )
   }
@@ -1462,6 +1511,9 @@ SCHEDULE_OUTPUT_DIGITS <- 4L
 #' last charging slot, where it charges only what it still needs. A session
 #' whose nominal `Power` is below it is never curtailed. Up to version 1.12.0
 #' the default was 0.5 and a value below 1 was a share of the nominal power.
+#' @param allow_interruptions logical, whether `method = "curtail"` may stop
+#' sessions (default `FALSE`). See [smart_charging()]. Ignored by the other
+#' methods.
 #' @param energy_min numeric, minimum allowed ratio (between 0 and 1) of required energy.
 #' A session is never curtailed, postponed or interrupted below this share of
 #' the energy it requires, whatever the setpoint says.
@@ -1492,7 +1544,8 @@ schedule_sessions <- function(
   energy_min = 1,
   energy_max = 1,
   include_log = FALSE,
-  show_progress = TRUE
+  show_progress = TRUE,
+  allow_interruptions = FALSE
 ) {
   if (show_progress) {
     cli::cli_h1("Scheduling charging sessions")
@@ -1532,6 +1585,11 @@ schedule_sessions <- function(
   }
   check_energy_ratios(energy_min, energy_max)
   check_charging_power_min(charging_power_min)
+  check_allow_interruptions(allow_interruptions)
+  # Without a minimum, curtailing already goes down to 0: nothing to stop
+  allow_interruptions <- allow_interruptions &&
+    method == "curtail" &&
+    charging_power_min > 0
 
   resolution <- get_time_resolution(setpoint$datetime, units = "mins")
   dttm_tz <- tz(setpoint$datetime)
@@ -1887,6 +1945,15 @@ schedule_sessions <- function(
         sessions_timeslot$Power[!sessions_timeslot$Exploited] <-
           sessions_timeslot$PowerTimeslot[!sessions_timeslot$Exploited]
 
+        # Interruptions: what curtailing down to `MinPowerTimeslot` cannot
+        # give, stopping sessions does
+        if (allow_interruptions && flex_req > SCHEDULE_FLEX_TOL_KW) {
+          stopped <- stop_curtailed_sessions(sessions_timeslot, flex_req)
+          sessions_timeslot <- stopped$sessions
+          flex_provided <- flex_provided + flex_req - stopped$flex_req
+          flex_req <- stopped$flex_req
+        }
+
         if (include_log) {
           if (flex_req > SCHEDULE_FLEX_TOL_KW) {
             log_message <- paste0(
@@ -2090,6 +2157,70 @@ schedule_sessions <- function(
       log = log
     )
   )
+}
+
+
+#' Stop curtailed sessions to meet the setpoint
+#'
+#' Used by [schedule_sessions()] with `method = "curtail"` and
+#' `allow_interruptions = TRUE`, once every flexible session is curtailed down
+#' to its `MinPowerTimeslot` and the slot is still above the setpoint. Sessions
+#' are stopped (power 0) one at a time, in the priority order of
+#' `method = "interrupt"` (most energy charged first, then the latest arrival,
+#' then the most connection hours left), until the slot is at or below the
+#' setpoint. Only sessions that `"interrupt"` calls flexible are stopped: they
+#' still need energy and can charge their minimum energy at nominal power in
+#' the rest of their connection. A stopped session frees the power it charges
+#' at after curtailing, not its nominal power.
+#'
+#' The last stop may free more than the slot needs. That slack goes back to the
+#' sessions still curtailed, in proportion to what each one gave up, so the
+#' slot lands on the setpoint and no session charges between 0 and its minimum.
+#'
+#' @param sessions_timeslot tibble, the sessions of the time slot after
+#'   curtailing, with `Power` set for every session
+#' @param flex_req numeric, the flexibility still required in the slot (kW)
+#'
+#' @return list with the updated `sessions` and the remaining `flex_req`
+#'   (at most `SCHEDULE_FLEX_TOL_KW` unless no session could be stopped)
+#' @keywords internal
+#'
+stop_curtailed_sessions <- function(sessions_timeslot, flex_req) {
+  stoppable <- which(
+    (sessions_timeslot$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &
+      (sessions_timeslot$MinEnergyToCharge <=
+        sessions_timeslot$PossibleEnergyRest) &
+      (sessions_timeslot$Power > 0)
+  )
+  stoppable <- stoppable[order(
+    -sessions_timeslot$EnergyCharged[stoppable],
+    -as.numeric(sessions_timeslot$ConnectionStartDateTime[stoppable]),
+    -sessions_timeslot$ConnectionHoursLeft[stoppable]
+  )]
+
+  for (s in stoppable) {
+    if (flex_req <= SCHEDULE_FLEX_TOL_KW) break
+    flex_req <- flex_req - sessions_timeslot$Power[s]
+    sessions_timeslot$Power[s] <- 0
+    sessions_timeslot$Flexible[s] <- TRUE
+    sessions_timeslot$Exploited[s] <- TRUE
+  }
+
+  if (flex_req < -SCHEDULE_FLEX_TOL_KW) {
+    headroom <- ifelse(
+      sessions_timeslot$Exploited & sessions_timeslot$Power > 0,
+      pmax(sessions_timeslot$PowerTimeslot - sessions_timeslot$Power, 0),
+      0
+    )
+    if (sum(headroom) > 0) {
+      raise_factor <- min(-flex_req / sum(headroom), 1)
+      sessions_timeslot$Power <- sessions_timeslot$Power +
+        headroom * raise_factor
+      flex_req <- flex_req + sum(headroom) * raise_factor
+    }
+  }
+
+  list(sessions = sessions_timeslot, flex_req = flex_req)
 }
 
 

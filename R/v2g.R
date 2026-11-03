@@ -28,6 +28,14 @@
 #'   (e.g. "discharge only from 4 kW upwards"), or does nothing. When the SoC
 #'   floor or the energy deadline would only allow a smaller discharge (say
 #'   -2 kW against a 4 kW minimum), the session does not discharge in that slot.
+#'   When the setpoint leaves sessions a charge below the minimum, the slot is
+#'   decided for the fleet: those sessions stop (0 kW) one at a time, most
+#'   flexibility left first, until the slot is at or below the setpoint, and
+#'   the rest charge at the minimum. A session that must charge in the slot to
+#'   leave at its full target stops only as far as the import capacity needs.
+#'   An 11 kW session with a 4 kW minimum and a setpoint of 2 kW charges 0 kW
+#'   (up to 1.18.x it charged 4 kW, and reached 0 only where the setpoint was
+#'   0 kW or less).
 #'   The one exception is a session's last charging slot, where it may charge
 #'   less than the minimum because it only needs that much to finish (the tail
 #'   of its charge). A session whose nominal `Power` is below
@@ -2181,25 +2189,25 @@ schedule_sessions_v2g <- function(
         # powers inside (-charging_power_min, +charging_power_min).
         # Allowed zones: [-PowerNominal, -charging_power_min], 0 and
         # [charging_power_min, PowerNominal].
-        #  - A charge inside (0, min) goes up to the minimum, or to
-        #    `PowerTimeslot` when the session needs less than the minimum to
-        #    finish (the tail of its charge, which may be below the minimum).
         #  - A discharge inside (-min, 0) goes down to -min when the SoC floor
         #    and the energy deadline (`MinPowerTimeslot`) allow it, else to 0:
         #    a session never discharges below the minimum.
+        #  - A charge inside (0, min) goes to 0 or up to the minimum (or to
+        #    `PowerTimeslot` when the session needs less than the minimum to
+        #    finish, the tail of its charge), decided for the fleet: these
+        #    sessions stop one at a time until the slot is at or below the
+        #    setpoint, and the rest go up. Up to 1.18.x they all went up, so
+        #    a session reached 0 only where the setpoint asked for 0 or less.
+        #    They stop most flexibility left first (the most energy they could
+        #    still charge at nominal power after this slot beyond what they
+        #    need, `PossibleEnergyRest - EnergyToCharge`): the session that can
+        #    best catch up later gives up the slot, and one that must charge
+        #    now to leave at its full target is the last to stop. Such a
+        #    session (`FullPowerTimeslot > 0`) gives up energy by stopping, so
+        #    it stops only as far as the import capacity needs (`power_cap`),
+        #    like the curtail stage above.
         if (charging_power_min > 0) {
           idx_exploited <- sessions_timeslot$Exploited
-
-          idx_pos <- idx_exploited &
-            sessions_timeslot$MinPowerTimeslot <= 0 &
-            sessions_timeslot$Power > 0 &
-            sessions_timeslot$Power < sessions_timeslot$ChargingPowerMin
-          if (any(idx_pos)) {
-            sessions_timeslot$Power[idx_pos] <- pmin(
-              sessions_timeslot$ChargingPowerMin[idx_pos],
-              sessions_timeslot$PowerTimeslot[idx_pos]
-            )
-          }
 
           idx_neg <- idx_exploited &
             sessions_timeslot$MinPowerTimeslot <= 0 &
@@ -2212,6 +2220,40 @@ schedule_sessions_v2g <- function(
               -sessions_timeslot$ChargingPowerMin[idx_neg],
               0
             )
+          }
+
+          idx_pos <- idx_exploited &
+            sessions_timeslot$MinPowerTimeslot <= 0 &
+            sessions_timeslot$Power > 0 &
+            sessions_timeslot$Power < sessions_timeslot$ChargingPowerMin
+          if (any(idx_pos)) {
+            sessions_timeslot$Power[idx_pos] <- pmin(
+              sessions_timeslot$ChargingPowerMin[idx_pos],
+              sessions_timeslot$PowerTimeslot[idx_pos]
+            )
+            # The slot's total with the sessions not exploited at
+            # `PowerTimeslot` (their `Power` is set below)
+            slot_power <- sum(ifelse(
+              idx_exploited,
+              sessions_timeslot$Power,
+              sessions_timeslot$PowerTimeslot
+            ))
+            pos <- which(idx_pos)
+            pos <- pos[order(
+              -(sessions_timeslot$PossibleEnergyRest[pos] -
+                sessions_timeslot$EnergyToCharge[pos]),
+              -sessions_timeslot$ConnectionHoursLeft[pos]
+            )]
+            for (s in pos) {
+              stop_target <- if (sessions_timeslot$FullPowerTimeslot[s] > 0) {
+                max(setpoint_power_timeslot, power_cap)
+              } else {
+                setpoint_power_timeslot
+              }
+              if (round(slot_power - stop_target, 2) <= 0) next
+              slot_power <- slot_power - sessions_timeslot$Power[s]
+              sessions_timeslot$Power[s] <- 0
+            }
           }
         }
 

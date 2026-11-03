@@ -272,3 +272,55 @@ test_that("a V2G slot with several sessions below the minimum stays at or below 
     tolerance = 0.01
   )
 })
+
+test_that("V2G stops sessions only down to the import capacity", {
+  # Two vans overnight under a flat 10 kW load and a 14 kW import capacity:
+  # 4 kW of room. The "grid" setpoint spreads their 33 kWh at about 2.4 kW,
+  # below one van's 4 kW minimum in every slot. Stopping down to the setpoint
+  # stopped both everywhere (10 kWh in 1.19.0); down to the capacity one van
+  # charges at 4 kW at a time and both get their energy.
+  tz <- "Europe/Amsterdam"
+  dttm <- seq(
+    as.POSIXct("2025-01-13 00:00", tz = tz),
+    by = "15 min",
+    length.out = 2 * 96
+  )
+  vans <- tibble(
+    Session = c("S1", "S2"),
+    Timecycle = "Workday",
+    Profile = "Vans",
+    ConnectionStartDateTime = as.POSIXct(
+      c("2025-01-13 17:00", "2025-01-13 18:00"),
+      tz = tz
+    ),
+    ConnectionHours = c(14, 12),
+    Power = 11,
+    Energy = c(22, 11),
+    BatteryCapacity = 70
+  )
+  opt_data <- tibble(
+    datetime = dttm,
+    production = 0,
+    static = 10,
+    import_capacity = 14
+  )
+  res <- suppressWarnings(suppressMessages(smart_v2g(
+    vans,
+    opt_data,
+    opt_objective = "grid",
+    window_days = 1,
+    window_start_hour = 12,
+    charging_power_min = 4,
+    discharge_eff = 0.9,
+    soc_min = 20,
+    soc_max = 100,
+    soc_final_min = 80,
+    cycle_cost = 0
+  )))
+
+  delivered <- res$sessions %>%
+    group_by(Session) %>%
+    summarise(Energy = sum(Energy))
+  expect_equal(delivered$Energy, c(22, 11), tolerance = 0.01)
+  expect_true(all(res$demand$Vans + opt_data$static <= 14 + 1e-6))
+})

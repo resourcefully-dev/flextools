@@ -14,7 +14,8 @@ smart_charging_window(
   energy_min = 1,
   energy_max = 1,
   include_log = FALSE,
-  allow_interruptions = FALSE
+  allow_interruptions = FALSE,
+  opt_data = NULL
 )
 }
 \arguments{
@@ -43,6 +44,10 @@ then sessions' demand can reach a value of \code{110} without needing to schedul
 
 \item{allow_interruptions}{logical, whether \code{method = "curtail"} may stop
 sessions. See \code{\link[=smart_charging]{smart_charging()}}.}
+
+\item{opt_data}{tibble, the window's optimization data (after
+\code{check_optimization_data()}). Its \code{import_capacity} sets how far
+\code{allow_interruptions} stops sessions. \code{NULL} for none.}
 }
 \description{
 Set setpoints for smart charging

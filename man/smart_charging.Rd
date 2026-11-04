@@ -117,9 +117,15 @@ sessions (default \code{FALSE}, ignored by the other methods). With \code{FALSE}
 session curtailed down to \code{charging_power_min} keeps charging at it however
 far the setpoint is below, so with a minimum above 0 it never pauses. With
 \code{TRUE}, a time slot first curtails every flexible session down to its
-minimum, as with \code{FALSE}, and when that is not enough it stops sessions
-(power 0) one at a time until the slot is at or below the setpoint. It
-stops them in the order of \code{method = "interrupt"} (most energy charged
+minimum, as with \code{FALSE}, and when that is not enough for the import
+capacity it stops sessions (power 0) one at a time until the slot is within
+the \code{import_capacity} of \code{opt_data} (with the \code{static} load, \code{production}
+and the other profiles as planned), or at or below the setpoint where that
+is higher. The curtailing follows the setpoint, the stops only the
+capacity: a "grid" setpoint that spreads a fleet over the night below one
+session's minimum would otherwise stop every session in every slot and push
+their charge to the end of the connections. Without an \code{import_capacity}
+(or \code{grid_capacity}) no session is stopped. It stops them in the order of \code{method = "interrupt"} (most energy charged
 first, then the latest arrival, then the most connection hours left), and
 only those that \code{"interrupt"} could stop: a session that could no longer
 charge its \code{energy_min} share at nominal power in the rest of its
@@ -127,8 +133,10 @@ connection is never stopped. When the last stop frees more power than the
 slot needs, the sessions still charging take it back, so every slot power
 is 0 or between \code{charging_power_min} and the nominal power, except in a
 session's last charging slot (the tail of its charge). An 11 kW session of
-11 kWh with a minimum of 4 kW and a setpoint of 0 kW for four hours charges
-0 kW there and 11 kW after, where with \code{FALSE} it charges 4 kW there.}
+11 kWh with a minimum of 4 kW and an import capacity of 0 kW for four hours
+charges 0 kW there and 11 kW after, where with \code{FALSE} it charges 4 kW
+there. With \code{\link[=schedule_sessions]{schedule_sessions()}} and a setpoint given directly, there is
+no capacity and the sessions stop down to the setpoint.}
 }
 \value{
 a list with three elements:

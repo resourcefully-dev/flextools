@@ -1,3 +1,27 @@
+# flextools 1.19.1
+
+* Fix: under a `charging_power_min` above 0, `smart_v2g()` stopped sessions
+  in a slot until it was at or below the setpoint, also where the setpoint
+  was below the import capacity. A "grid" setpoint that spreads a small
+  fleet over the night sits below one session's minimum, so every session
+  stopped in every slot and they left at `soc_final_min` with energy the
+  capacity had room for. Sessions now stop only until the slot is within the
+  `import_capacity` (or at or below the setpoint where that is higher). Two
+  11 kW vans of 22 and 11 kWh overnight with a 4 kW minimum, 70 kWh
+  batteries, `soc_final_min = 80` and 4 kW of room under the import capacity
+  got 10 of their 33 kWh with an 11 kW peak in 1.19.0; they now get all
+  33 kWh and never draw more than the 4 kW of room. A setpoint given
+  directly to the scheduler (no capacity) keeps the 1.19.0 rule.
+* Fix: the same for `smart_charging(method = "curtail", allow_interruptions =
+  TRUE)`. Sessions still curtail as the setpoint asks, but stop only until
+  the slot is within the `import_capacity` of `opt_data` (or at or below the
+  setpoint where that is higher), and without an import capacity they do not
+  stop. The same two vans got all 33 kWh in 1.19.0 but were stopped all night
+  and peaked at 22 kW at 05:00, 18 kW above the room; they now charge one at
+  a time at 4 kW and never draw more than the room. `schedule_sessions()`
+  with a setpoint given directly keeps the 1.19.0 rule, unless the setpoint
+  has a `power_cap` column.
+
 # flextools 1.19.0
 
 * `smart_charging()` and `schedule_sessions()` take `allow_interruptions`

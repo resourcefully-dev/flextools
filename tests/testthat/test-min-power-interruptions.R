@@ -431,3 +431,89 @@ test_that("curtail stops sessions only down to the import capacity", {
     expect_false(any(p > 1e-6 & p < 4 - 1e-6))
   }
 })
+
+test_that("V2G discharges at the minimum only where the plan or the capacity asks for it", {
+  # One car, 21 kWh on a 70 kWh battery (arrives at 70 %), 08:00 to 18:00,
+  # next to 11 kW of fixed load until 16:00 under a 13 kW import capacity:
+  # 2 kW of room until 16:00, below the 4 kW minimum, and 13 kW after. The
+  # "grid" setpoint discharges 0.1 kW until 16:00 to flatten the site. Raised
+  # to the 4 kW minimum because the soc_final_min deadline allowed it, that
+  # was 23 kWh of discharge the 13 kW cap had no room to charge back: in
+  # 1.19.2 the car charged 11 kW from 15:00 on top of the fixed load (22 kW)
+  # to leave at 80 %. It now waits until 16:00 and leaves with all 21 kWh.
+  tz <- "Europe/Amsterdam"
+  dttm <- seq(
+    as.POSIXct("2025-03-12 00:00", tz = tz),
+    by = "15 min",
+    length.out = 2 * 96
+  )
+  hour <- as.numeric(format(dttm, "%H")) + as.numeric(format(dttm, "%M")) / 60
+  static <- ifelse(as.Date(dttm, tz = tz) == as.Date("2025-03-12") &
+    hour >= 8 & hour < 16, 11, 0)
+  opt_data <- tibble(
+    datetime = dttm,
+    production = 0,
+    static = static,
+    import_capacity = 13,
+    export_capacity = 13
+  )
+  car <- tibble(
+    Session = "S1",
+    Timecycle = "Workday",
+    Profile = "Car",
+    ConnectionStartDateTime = as.POSIXct("2025-03-12 08:00", tz = tz),
+    ConnectionHours = 10,
+    Power = 11,
+    Energy = 21,
+    BatteryCapacity = 70
+  )
+  res <- suppressWarnings(suppressMessages(smart_v2g(
+    car,
+    opt_data,
+    opt_objective = "grid",
+    window_days = 1,
+    window_start_hour = 7,
+    charging_power_min = 4,
+    discharge_eff = 0.9,
+    soc_min = 20,
+    soc_max = 100,
+    soc_final_min = 80
+  )))
+
+  expect_true(any(res$setpoints$Car < -0.05))
+  expect_true(all(res$demand$Car >= 0))
+  expect_true(all(res$demand$Car + static <= 13 + 1e-6))
+  expect_equal(sum(res$sessions$Energy), 21, tolerance = 0.01)
+})
+
+test_that("V2G discharges a small setpoint at the minimum for the capacity", {
+  # The same discharge below the minimum, now needed: a -2 kW setpoint (given
+  # directly, so it is the cap) still takes the session to -4 kW, and with a
+  # `power_cap` the slot needs, the session discharges at the minimum too.
+  setpoint <- mp_setpoint(-2)
+  res <- schedule_sessions_v2g(
+    mp_v2g_session("S1"),
+    setpoint,
+    charging_power_min = 4,
+    soc_min = 0.2
+  )
+  expect_equal(mp_slot_powers(res$sessions)$S1[1], -4)
+
+  res_cap <- schedule_sessions_v2g(
+    mp_v2g_session("S1"),
+    mutate(setpoint, power_cap = setpoint),
+    charging_power_min = 4,
+    soc_min = 0.2
+  )
+  expect_equal(mp_slot_powers(res_cap$sessions)$S1[1], -4)
+
+  # With room under the cap, a setpoint below one minimum of discharge is
+  # not rounded up to it.
+  res_room <- schedule_sessions_v2g(
+    mp_v2g_session("S1"),
+    mutate(setpoint, power_cap = 5),
+    charging_power_min = 4,
+    soc_min = 0.2
+  )
+  expect_equal(mp_slot_powers(res_room$sessions)$S1[1], 0)
+})

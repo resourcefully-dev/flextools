@@ -1,3 +1,29 @@
+# flextools 1.19.3
+
+* Fix: `smart_v2g()` discharged into export with several user profiles under
+  the `"grid"`, `"capacity"` and combined objectives. The setpoint plans the
+  profiles one after the other, and the discharge floor (discharge only to
+  cut import) counted the uncontrolled charge of the profiles not planned
+  yet. A profile discharged to cut that import, the other profile then moved
+  its charge away, and the fleet discharged into a slot where the site
+  exported. The floor now counts only the load that is decided: the rest of
+  the site, the profiles already planned and the non-responsive sessions of
+  the others. Two cars of two profiles next to a site exporting 3.9 kW at
+  09:00 discharged 7.1 kW there (3.55 kW each); they now discharge 0.
+* Fix: under a `charging_power_min` above 0, `smart_v2g()` raised every
+  discharge below the minimum to the minimum wherever the session's
+  `soc_final_min` deadline allowed it, ignoring both the setpoint and the
+  import capacity. A car of 21 kWh on a 70 kWh battery, 08:00 to 18:00,
+  next to 11 kW of fixed load until 16:00 under a 13 kW import capacity and
+  a 4 kW minimum: the "grid" setpoint asked -0.1 kW until 16:00, the car
+  discharged 4 kW from 08:00 to 13:45 (23 kWh), had no room to charge it
+  back, and broke the capacity from 15:00 (22 kW) to leave at 80 %. Such a
+  discharge is now decided for the fleet, like a charge below the minimum:
+  sessions discharge at the minimum one at a time only while the slot is
+  above the import capacity, or while the setpoint still asks for a whole
+  minimum that the session can charge back to its full target. The car now
+  waits until 16:00 and leaves with all 21 kWh within the capacity.
+
 # flextools 1.19.2
 
 * Fix: `smart_charging()` split a session that crosses an optimization window

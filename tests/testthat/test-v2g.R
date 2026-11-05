@@ -962,6 +962,78 @@ test_that("v2g never discharges while the site exports, whatever the objective",
 })
 
 
+test_that("v2g never discharges into export to cut another profile's uncontrolled charge", {
+  # Two profiles under an import capacity that never binds and a 20 kW export
+  # capacity that the noon PV breaches. At 09:00 a little PV makes the site
+  # export 3.9 kW. The profiles are planned one after the other: Visit, the
+  # more flexible, went first and saw Worktime still charging uncontrolled
+  # at 11 kW from 09:00, so its floor let it discharge 7.1 kW there "to cut
+  # import". Worktime then moved that charge to the noon export, and in
+  # 1.19.2 the fleet discharged 7.1 kW into the 3.9 kW export (FLEX+ V07).
+  tz <- "Europe/Amsterdam"
+  dttm <- seq(
+    as.POSIXct("2025-03-17 00:00", tz = tz),
+    by = "15 min",
+    length.out = 2 * 96
+  )
+  hour <- as.numeric(format(dttm, "%H")) + as.numeric(format(dttm, "%M")) / 60
+  first_day <- as.Date(dttm, tz = tz) == as.Date("2025-03-17")
+  opt_data_two <- tibble(
+    datetime = dttm,
+    production = ifelse(
+      first_day & hour >= 11 & hour < 14,
+      60,
+      ifelse(first_day & hour == 9, 13.9, 0)
+    ),
+    static = 10,
+    import_capacity = 200,
+    export_capacity = 20
+  )
+  vehicle <- function(id, profile, start, hours, energy) {
+    tibble(
+      Session = id,
+      Timecycle = "Monday",
+      Profile = profile,
+      ConnectionStartDateTime = as.POSIXct(paste("2025-03-17", start), tz = tz),
+      ConnectionHours = hours,
+      Power = 11,
+      Energy = energy,
+      BatteryCapacity = 70
+    )
+  }
+  sessions_two <- bind_rows(
+    vehicle("V1", "Visit", "08:00", 8, 10),
+    vehicle("W1", "Worktime", "09:00", 6, 11)
+  )
+  base <- opt_data_two$static - opt_data_two$production
+  exporting <- base < 0
+
+  for (objective in list("capacity", "grid")) {
+    for (power_min in c(0, 4)) {
+      res <- suppressWarnings(suppressMessages(smart_v2g(
+        sessions_two,
+        opt_data_two,
+        opt_objective = objective,
+        window_days = 1,
+        window_start_hour = 6,
+        charging_power_min = power_min,
+        discharge_eff = 0.9,
+        soc_min = 20,
+        soc_max = 100,
+        soc_final_min = 80
+      )))
+      info <- paste(objective, power_min)
+      fleet_setpoint <- res$setpoints$Visit + res$setpoints$Worktime
+      fleet <- res$demand$Visit + res$demand$Worktime
+      expect_true(all(fleet_setpoint[exporting] >= -0.05), info = info)
+      expect_true(all(fleet[exporting] >= -0.05), info = info)
+      # Nor does it discharge the site into export where it imported
+      expect_true(all(base[!exporting] + fleet[!exporting] >= -0.05), info = info)
+    }
+  }
+})
+
+
 # Capacity objective: change only what a breach needs ---------------------
 
 test_that("v2g capacity leaves the evening alone and absorbs the midday export", {

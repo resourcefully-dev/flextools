@@ -28,6 +28,14 @@
 #'   (e.g. "discharge only from 4 kW upwards"), or does nothing. When the SoC
 #'   floor or the energy deadline would only allow a smaller discharge (say
 #'   -2 kW against a 4 kW minimum), the session does not discharge in that slot.
+#'   When the setpoint leaves sessions a discharge below the minimum, the slot
+#'   is decided for the fleet too: those sessions discharge at the minimum one
+#'   at a time, most flexibility left first, only while the slot is above the
+#'   `import_capacity` (or the setpoint given directly), or while the setpoint
+#'   still asks for a whole minimum of discharge that the session can charge
+#'   back to its full target. Otherwise they wait (0 kW). Up to 1.19.2 a
+#'   -0.1 kW "grid" setpoint discharged at the minimum whenever the session's
+#'   `soc_final_min` deadline allowed it.
 #'   When the setpoint leaves sessions a charge below the minimum, the slot is
 #'   decided for the fleet: those sessions stop (0 kW) one at a time, most
 #'   flexibility left first, and the rest charge at the minimum. They stop
@@ -155,6 +163,14 @@
 #'   breach, or to make room, while the site imports, for the energy it then
 #'   charges back in an export breach. The rest of the fleet is not
 #'   discharged to flatten slots within the caps.
+#'
+#' With several user profiles, the setpoint plans them one after the other,
+#' each with the others as fixed load. "Only to cut import" counts the load
+#' that is decided: the rest of the site, the profiles already planned and the
+#' non-responsive sessions of the others, never the uncontrolled charge of a
+#' profile not planned yet, which its own plan may move. Up to 1.19.2 a
+#' profile discharged to cut the import of another one's uncontrolled charge,
+#' and when that one moved its charge the fleet discharged into export.
 #'
 #' Under `"cost"` and combined objectives the setpoint counts the discharge
 #' losses (`discharge_eff`): every discharged kWh is charged back as
@@ -500,6 +516,22 @@ get_setpoints_v2g <- function(
   opt_profiles <- get_opt_profiles(sessions_window)
   setpoints <- profiles_demand
 
+  # The profiles are planned one after the other, each with the others as
+  # fixed load, and a profile not planned yet still carries its uncontrolled
+  # load, which its plan may move away. The discharge floor counts only the
+  # load that is decided: the profiles already planned, and the non-responsive
+  # sessions of the rest. Otherwise one profile discharges to cut the import of
+  # another one's uncontrolled charge, which that one then moves, and the
+  # fleet discharges into a slot where the site exports.
+  decided_load <- setpoints
+  for (profile in setdiff(opt_profiles, colnames(opt_data))) {
+    decided_load[[profile]] <- profile_non_responsive_load(
+      sessions_window,
+      profile,
+      dttm_seq
+    )
+  }
+
   for (profile in opt_profiles) {
     if (profile %in% colnames(opt_data)) {
       setpoints[[profile]] <- opt_data[[profile]]
@@ -507,19 +539,11 @@ get_setpoints_v2g <- function(
       sessions_window_prof_flex <- sessions_window %>%
         dplyr::filter(.data$Profile == profile & .data$Responsive)
 
-      non_responsive_sessions <- sessions_window %>%
-        dplyr::filter(
-          .data$Profile == profile &
-            (!.data$Responsive | is.na(.data$Responsive))
-        )
-
-      if (nrow(non_responsive_sessions) > 0) {
-        L_fixed_prof <- non_responsive_sessions %>%
-          evsim::get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
-          dplyr::pull(!!rlang::sym(profile))
-      } else {
-        L_fixed_prof <- rep(0, length(dttm_seq))
-      }
+      L_fixed_prof <- profile_non_responsive_load(
+        sessions_window,
+        profile,
+        dttm_seq
+      )
 
       # The optimization flexible load is the load of the responsive sessions
       LF <- setpoints[[profile]] - L_fixed_prof
@@ -534,6 +558,14 @@ get_setpoints_v2g <- function(
         L_others <- rep(0, length(dttm_seq))
       }
       LS <- L_fixed + L_others + L_fixed_prof
+      # The load the discharge floor counts (see `decided_load` above)
+      L_others_decided <- decided_load %>%
+        dplyr::select(-any_of(c(profile, "datetime"))) %>%
+        rowSums()
+      if (length(L_others_decided) == 0) {
+        L_others_decided <- rep(0, length(dttm_seq))
+      }
+      LS_decided <- L_fixed + L_others_decided + L_fixed_prof
 
       # sessions_window_prof_flex$ConnectionEndDateTime[
       #   (sessions_window_prof_flex$ConnectionEndDateTime >=
@@ -592,7 +624,7 @@ get_setpoints_v2g <- function(
         # capacity) discharge only to cut import (see v2g_discharge_floor()).
         discharge_floor <- v2g_discharge_floor(
           G = opt_data$production[opt_idxs],
-          LS = LS[opt_idxs],
+          LS = LS_decided[opt_idxs],
           import_capacity = opt_data$import_capacity[opt_idxs]
         )
 
@@ -646,7 +678,12 @@ get_setpoints_v2g <- function(
             export_capacity = opt_data$export_capacity[opt_idxs],
             lambda = lambda,
             energy_ratio = energy_ratio,
-            cumsum_min = cumsum_min
+            cumsum_min = cumsum_min,
+            discharge_floor = v2g_discharge_floor(
+              round(opt_data$production[opt_idxs], 2),
+              round(LS_decided[opt_idxs], 2),
+              opt_data$import_capacity[opt_idxs]
+            )
           )
         } else if (is.numeric(opt_objective)) {
           O <- demand_combined_v2g_window(
@@ -693,6 +730,7 @@ get_setpoints_v2g <- function(
         ))
       }
     }
+    decided_load[[profile]] <- setpoints[[profile]]
   }
 
   return(setpoints)
@@ -936,6 +974,9 @@ smart_v2g_window_parallel <- function(
 #' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
 #'   load's energy the optimized load must carry. See
 #'   `demand_capacity_window()`.
+#' @param discharge_floor numeric vector or `NULL` (default), the
+#'   `v2g_discharge_floor()` of the slots. `get_setpoints_v2g()` passes it
+#'   counting only the load that is decided; `NULL` computes it from `LS`.
 #'
 #' @keywords internal
 #'
@@ -950,15 +991,18 @@ capacity_v2g_window <- function(
   export_capacity,
   lambda = 0,
   energy_ratio = c(1, 1),
-  cumsum_min = NULL
+  cumsum_min = NULL,
+  discharge_floor = NULL
 ) {
   time_slots <- length(LF)
   LFmax <- as.numeric(rep_len(LFmax, time_slots))
-  discharge_floor <- v2g_discharge_floor(
-    round(as.numeric(G), 2),
-    round(as.numeric(LS), 2),
-    import_capacity
-  )
+  if (is.null(discharge_floor)) {
+    discharge_floor <- v2g_discharge_floor(
+      round(as.numeric(G), 2),
+      round(as.numeric(LS), 2),
+      import_capacity
+    )
+  }
 
   capacity_window(
     G = G,
@@ -1724,6 +1768,30 @@ v2g_discharge_floor <- function(G, LS, import_capacity) {
 }
 
 
+#' Load of a profile's non-responsive sessions
+#'
+#' @param sessions_window tibble, the sessions of the window, with `Responsive`.
+#' @param profile character, the user profile.
+#' @param dttm_seq datetime vector of the window.
+#'
+#' @return numeric vector, kW per slot (0 without such sessions).
+#' @keywords internal
+#'
+profile_non_responsive_load <- function(sessions_window, profile, dttm_seq) {
+  non_responsive_sessions <- sessions_window %>%
+    dplyr::filter(
+      .data$Profile == profile &
+        (!.data$Responsive | is.na(.data$Responsive))
+    )
+  if (nrow(non_responsive_sessions) == 0) {
+    return(rep(0, length(dttm_seq)))
+  }
+  non_responsive_sessions %>%
+    evsim::get_demand(dttm_seq = dttm_seq, by = "Profile") %>%
+    dplyr::pull(!!rlang::sym(profile))
+}
+
+
 get_bounds_v2g <- function(
   time_slots,
   G,
@@ -2192,9 +2260,19 @@ schedule_sessions_v2g <- function(
         # powers inside (-charging_power_min, +charging_power_min).
         # Allowed zones: [-PowerNominal, -charging_power_min], 0 and
         # [charging_power_min, PowerNominal].
-        #  - A discharge inside (-min, 0) goes down to -min when the SoC floor
-        #    and the energy deadline (`MinPowerTimeslot`) allow it, else to 0:
-        #    a session never discharges below the minimum.
+        #  - A discharge inside (-min, 0) goes to 0 or down to -min, decided
+        #    for the fleet: these sessions start at 0 and, most flexibility
+        #    left first, discharge at the minimum one at a time while the slot
+        #    is above the import capacity (`power_cap`, or the setpoint
+        #    without one), or while the setpoint still asks for a whole
+        #    minimum of discharge and the session can charge it back to its
+        #    full target (`FullPowerTimeslot`). Only the SoC floor and the
+        #    `soc_final_min` deadline (`MinPowerTimeslot`) bound a discharge
+        #    for the capacity. Up to 1.19.2 every such discharge went to -min
+        #    whenever the deadline allowed it: a "grid" setpoint of -0.1 kW
+        #    discharged 4 kW all morning, which the import capacity had no
+        #    room to charge back, and the session then broke the capacity to
+        #    leave at `soc_final_min`.
         #  - A charge inside (0, min) goes to 0 or up to the minimum (or to
         #    `PowerTimeslot` when the session needs less than the minimum to
         #    finish, the tail of its charge), decided for the fleet: these
@@ -2229,12 +2307,37 @@ schedule_sessions_v2g <- function(
             sessions_timeslot$Power < 0 &
             sessions_timeslot$Power > -sessions_timeslot$ChargingPowerMin
           if (any(idx_neg)) {
-            sessions_timeslot$Power[idx_neg] <- ifelse(
-              sessions_timeslot$MinPowerTimeslot[idx_neg] <=
-                -sessions_timeslot$ChargingPowerMin[idx_neg],
-              -sessions_timeslot$ChargingPowerMin[idx_neg],
-              0
+            sessions_timeslot$Power[idx_neg] <- 0
+            slot_power <- sum(ifelse(
+              idx_exploited,
+              sessions_timeslot$Power,
+              sessions_timeslot$PowerTimeslot
+            ))
+            neg <- which(
+              idx_neg &
+                sessions_timeslot$MinPowerTimeslot <=
+                  -sessions_timeslot$ChargingPowerMin
             )
+            neg <- neg[order(
+              -(sessions_timeslot$PossibleEnergyRest[neg] -
+                sessions_timeslot$EnergyToCharge[neg]),
+              -sessions_timeslot$ConnectionHoursLeft[neg]
+            )]
+            cap_target <- if (is.finite(power_cap)) {
+              power_cap
+            } else {
+              setpoint_power_timeslot
+            }
+            for (s in neg) {
+              p_min <- sessions_timeslot$ChargingPowerMin[s]
+              for_cap <- round(slot_power - cap_target, 2) > 0
+              for_plan <- sessions_timeslot$FullPowerTimeslot[s] <= -p_min &&
+                round(slot_power - p_min - setpoint_power_timeslot, 2) >= 0
+              if (for_cap || for_plan) {
+                sessions_timeslot$Power[s] <- -p_min
+                slot_power <- slot_power - p_min
+              }
+            }
           }
 
           idx_pos <- idx_exploited &

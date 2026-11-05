@@ -83,6 +83,14 @@ charging and for discharging alike: a responsive session charges at
 (e.g. "discharge only from 4 kW upwards"), or does nothing. When the SoC
 floor or the energy deadline would only allow a smaller discharge (say
 -2 kW against a 4 kW minimum), the session does not discharge in that slot.
+When the setpoint leaves sessions a discharge below the minimum, the slot
+is decided for the fleet too: those sessions discharge at the minimum one
+at a time, most flexibility left first, only while the slot is above the
+\code{import_capacity} (or the setpoint given directly), or while the setpoint
+still asks for a whole minimum of discharge that the session can charge
+back to its full target. Otherwise they wait (0 kW). Up to 1.19.2 a
+-0.1 kW "grid" setpoint discharged at the minimum whenever the session's
+\code{soc_final_min} deadline allowed it.
 When the setpoint leaves sessions a charge below the minimum, the slot is
 decided for the fleet: those sessions stop (0 kW) one at a time, most
 flexibility left first, and the rest charge at the minimum. They stop
@@ -242,6 +250,14 @@ breach, or to make room, while the site imports, for the energy it then
 charges back in an export breach. The rest of the fleet is not
 discharged to flatten slots within the caps.
 }
+
+With several user profiles, the setpoint plans them one after the other,
+each with the others as fixed load. "Only to cut import" counts the load
+that is decided: the rest of the site, the profiles already planned and the
+non-responsive sessions of the others, never the uncontrolled charge of a
+profile not planned yet, which its own plan may move. Up to 1.19.2 a
+profile discharged to cut the import of another one's uncontrolled charge,
+and when that one moved its charge the fleet discharged into export.
 
 Under \code{"cost"} and combined objectives the setpoint counts the discharge
 losses (\code{discharge_eff}): every discharged kWh is charged back as

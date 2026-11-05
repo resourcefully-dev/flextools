@@ -363,7 +363,8 @@ smart_charging <- function(
   sessions <- split_sessions_at_windows(
     sessions,
     window_boundaries,
-    time_resolution
+    time_resolution,
+    charging_power_min
   )
 
   # Get user profiles demand
@@ -556,16 +557,31 @@ smart_charging <- function(
 #' long therefore moves whole into the next window. The charging features of
 #' every part are recomputed with [evsim::adapt_charging_features()].
 #'
+#' A session whose nominal `Power` is below `charging_power_min` is never
+#' responsive and charges as uncontrolled, so its parts follow that charge
+#' instead: each part gets what nominal charging from arrival delivers in its
+#' window, and none is folded. Proportional shares would move energy past the
+#' boundary that the uncontrolled charge never had there: a 3.7 kW session of
+#' 22 kWh from 17:00 to 07:00 split at 06:00 would charge 1.57 kWh at 06:00
+#' instead of finishing at 22:57.
+#'
 #' @param sessions tibble, sessions as returned by
 #'   [evsim::adapt_charging_features()]
 #' @param boundaries POSIXct vector, window start instants (and the end of the
 #'   last window); only boundaries strictly inside a connection split it
 #' @param time_resolution numeric, minutes
+#' @param charging_power_min numeric, minimum charging power in kW (default
+#'   0). Sessions below it are split as uncontrolled.
 #'
 #' @return the sessions tibble with a `Part` column, possibly more rows
 #' @keywords internal
 #'
-split_sessions_at_windows <- function(sessions, boundaries, time_resolution) {
+split_sessions_at_windows <- function(
+  sessions,
+  boundaries,
+  time_resolution,
+  charging_power_min = 0
+) {
   if (!("Part" %in% names(sessions))) {
     sessions$Part <- 1L
   }
@@ -592,13 +608,22 @@ split_sessions_at_windows <- function(sessions, boundaries, time_resolution) {
     starts <- cuts[-length(cuts)]
     ends <- cuts[-1]
     hours <- as.numeric(ends - starts, units = "hours")
-    energy <- session$Energy * hours / sum(hours)
+    uncontrolled <- session$Power < charging_power_min
+    if (uncontrolled) {
+      # What nominal charging from arrival has delivered by each part's end;
+      # the last part keeps what the connection is too short for
+      charged <- pmin(session$Power * cumsum(hours), session$Energy)
+      charged[length(charged)] <- session$Energy
+      energy <- diff(c(0, charged))
+    } else {
+      energy <- session$Energy * hours / sum(hours)
+    }
 
     # Fold every part that cannot fill one slot at nominal power into its
     # longest neighbour: the neighbour keeps its own interval and gains the
     # energy, the sliver's connection time is dropped.
     one_slot_energy <- session$Power * one_slot_hours
-    repeat {
+    while (!uncontrolled) {
       tiny <- which(energy < one_slot_energy)
       if (length(tiny) == 0 || length(hours) == 1) {
         break
@@ -1995,7 +2020,8 @@ schedule_sessions <- function(
           stopped <- stop_curtailed_sessions(
             sessions_timeslot,
             flex_req,
-            cap_room
+            cap_room,
+            charging_power_min
           )
           sessions_timeslot <- stopped$sessions
           flex_provided <- flex_provided + flex_req - stopped$flex_req
@@ -2219,8 +2245,10 @@ schedule_sessions <- function(
 #' setpoint, or within the import capacity (`cap_room` above the setpoint)
 #' where that is higher. Only sessions that `"interrupt"` calls flexible are stopped: they
 #' still need energy and can charge their minimum energy at nominal power in
-#' the rest of their connection. A stopped session frees the power it charges
-#' at after curtailing, not its nominal power.
+#' the rest of their connection. A session whose nominal power is below
+#' `charging_power_min` is never stopped: it is not flexible and charges as
+#' uncontrolled. A stopped session frees the power it charges at after
+#' curtailing, not its nominal power.
 #'
 #' The last stop may bring the slot below the setpoint. That slack goes back
 #' to the sessions still curtailed, in proportion to what each one gave up, so
@@ -2232,18 +2260,25 @@ schedule_sessions <- function(
 #' @param flex_req numeric, the flexibility still required in the slot (kW)
 #' @param cap_room numeric, how far above the setpoint the import capacity
 #'   lets the slot stay (kW, default 0: down to the setpoint)
+#' @param charging_power_min numeric, minimum charging power in kW (default 0)
 #'
 #' @return list with the updated `sessions` and the remaining `flex_req`
 #'   (at most `cap_room + SCHEDULE_FLEX_TOL_KW` unless no session could be
 #'   stopped)
 #' @keywords internal
 #'
-stop_curtailed_sessions <- function(sessions_timeslot, flex_req, cap_room = 0) {
+stop_curtailed_sessions <- function(
+  sessions_timeslot,
+  flex_req,
+  cap_room = 0,
+  charging_power_min = 0
+) {
   stoppable <- which(
     (sessions_timeslot$EnergyToCharge > SCHEDULE_MIN_ENERGY_KWH) &
       (sessions_timeslot$MinEnergyToCharge <=
         sessions_timeslot$PossibleEnergyRest) &
-      (sessions_timeslot$Power > 0)
+      (sessions_timeslot$Power > 0) &
+      (sessions_timeslot$PowerNominal >= charging_power_min)
   )
   stoppable <- stoppable[order(
     -sessions_timeslot$EnergyCharged[stoppable],

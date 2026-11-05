@@ -197,6 +197,55 @@ test_that("smart_charging passes the switch to the scheduler", {
   expect_equal(sc(FALSE)$demand$Worktime[1:12], c(rep(4, 11), 0))
 })
 
+test_that("curtail never stops a session whose power is below the minimum", {
+  # A 3.7 kW session against a 4 kW minimum is not flexible: it charges as
+  # uncontrolled however far the setpoint is below. The 11 kW one stops.
+  sessions <- bind_rows(
+    mp_session("Low", power = 3.7, energy = 7.4),
+    mp_session("F")
+  )
+  res <- schedule_sessions(
+    sessions,
+    mp_setpoint(0),
+    method = "curtail",
+    charging_power_min = 4,
+    allow_interruptions = TRUE,
+    show_progress = FALSE
+  )
+  powers <- mp_slot_powers(res$sessions)
+  expect_equal(powers$Low[1:9], c(rep(3.7, 8), 0))
+  expect_equal(powers$F[1:16], rep(0, 16))
+})
+
+test_that("sessions below the minimum charge as uncontrolled across a window boundary", {
+  # Two 3.7 kW vans plugged in 17:00 to 07:00 against a 4 kW minimum and a
+  # 4 kW import capacity, with the window starting at 06:00. Not flexible, they
+  # charge from arrival; the boundary must not carry energy of the 22 kWh van
+  # to 06:00.
+  start <- as.POSIXct("2025-03-12 17:00", tz = "UTC")
+  dttm <- seq(as.POSIXct("2025-03-12 06:00", tz = "UTC"), by = "15 min", length.out = 96 * 2)
+  sessions <- bind_rows(
+    mp_session("V1", start = start, hours = 14, power = 3.7, energy = 22),
+    mp_session("V2", start = start, hours = 14, power = 3.7, energy = 11)
+  ) %>%
+    mutate(Profile = "Van")
+  opt_data <- tibble(datetime = dttm, production = 0, import_capacity = 4)
+  res <- smart_charging(
+    sessions,
+    opt_data,
+    opt_objective = "grid",
+    method = "curtail",
+    window_days = 1,
+    window_start_hour = 6,
+    charging_power_min = 4,
+    allow_interruptions = TRUE
+  )
+  uncontrolled <- sessions %>%
+    evsim::adapt_charging_features(time_resolution = 15) %>%
+    evsim::get_demand(dttm_seq = dttm)
+  expect_equal(res$demand$Van, uncontrolled$Van)
+})
+
 test_that("allow_interruptions must be a single TRUE or FALSE", {
   for (bad in list(NA, "yes", 1, c(TRUE, FALSE), logical(0), NULL)) {
     expect_error(

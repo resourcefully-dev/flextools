@@ -4,7 +4,12 @@
 \alias{split_sessions_at_windows}
 \title{Split sessions at the optimization window boundaries}
 \usage{
-split_sessions_at_windows(sessions, boundaries, time_resolution)
+split_sessions_at_windows(
+  sessions,
+  boundaries,
+  time_resolution,
+  charging_power_min = 0
+)
 }
 \arguments{
 \item{sessions}{tibble, sessions as returned by
@@ -14,6 +19,9 @@ split_sessions_at_windows(sessions, boundaries, time_resolution)
 last window); only boundaries strictly inside a connection split it}
 
 \item{time_resolution}{numeric, minutes}
+
+\item{charging_power_min}{numeric, minimum charging power in kW (default
+0). Sessions below it are split as uncontrolled.}
 }
 \value{
 the sessions tibble with a \code{Part} column, possibly more rows
@@ -42,5 +50,13 @@ drops the sliver of connection time, which is what the scheduler could do
 with it anyway. A session that arrives shortly before a boundary and stays
 long therefore moves whole into the next window. The charging features of
 every part are recomputed with \code{\link[evsim:adapt_charging_features]{evsim::adapt_charging_features()}}.
+
+A session whose nominal \code{Power} is below \code{charging_power_min} is never
+responsive and charges as uncontrolled, so its parts follow that charge
+instead: each part gets what nominal charging from arrival delivers in its
+window, and none is folded. Proportional shares would move energy past the
+boundary that the uncontrolled charge never had there: a 3.7 kW session of
+22 kWh from 17:00 to 07:00 split at 06:00 would charge 1.57 kWh at 06:00
+instead of finishing at 22:57.
 }
 \keyword{internal}

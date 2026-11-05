@@ -1,3 +1,19 @@
+# flextools 1.19.2
+
+* Fix: `smart_charging()` split a session that crosses an optimization window
+  boundary by connection time also where its nominal `Power` is below
+  `charging_power_min`. Such a session is never responsive and should charge
+  as uncontrolled, but the share of the next window charged there at its
+  start. Two 3.7 kW vans of 22 and 11 kWh plugged in from 17:00 to 07:00 with
+  a 4 kW minimum and the window starting at 06:00: the 22 kWh van ended with
+  0.32 kW at 22:30 and charged its last 1.57 kWh at 06:00 instead of
+  finishing at 22:57. A session below the minimum is now split as it charges
+  uncontrolled, and the schedule equals the uncontrolled one.
+* Fix: `schedule_sessions(method = "curtail", allow_interruptions = TRUE)`
+  stopped sessions whose nominal power is below `charging_power_min`. They
+  are not flexible and now always charge as uncontrolled. Through
+  `smart_charging()` such sessions were already never responsive.
+
 # flextools 1.19.1
 
 * Fix: under a `charging_power_min` above 0, `smart_v2g()` stopped sessions

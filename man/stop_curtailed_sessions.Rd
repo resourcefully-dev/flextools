@@ -4,7 +4,12 @@
 \alias{stop_curtailed_sessions}
 \title{Stop curtailed sessions to meet the setpoint}
 \usage{
-stop_curtailed_sessions(sessions_timeslot, flex_req, cap_room = 0)
+stop_curtailed_sessions(
+  sessions_timeslot,
+  flex_req,
+  cap_room = 0,
+  charging_power_min = 0
+)
 }
 \arguments{
 \item{sessions_timeslot}{tibble, the sessions of the time slot after
@@ -14,6 +19,8 @@ curtailing, with \code{Power} set for every session}
 
 \item{cap_room}{numeric, how far above the setpoint the import capacity
 lets the slot stay (kW, default 0: down to the setpoint)}
+
+\item{charging_power_min}{numeric, minimum charging power in kW (default 0)}
 }
 \value{
 list with the updated \code{sessions} and the remaining \code{flex_req}
@@ -30,8 +37,10 @@ then the most connection hours left), until the slot is at or below the
 setpoint, or within the import capacity (\code{cap_room} above the setpoint)
 where that is higher. Only sessions that \code{"interrupt"} calls flexible are stopped: they
 still need energy and can charge their minimum energy at nominal power in
-the rest of their connection. A stopped session frees the power it charges
-at after curtailing, not its nominal power.
+the rest of their connection. A session whose nominal power is below
+\code{charging_power_min} is never stopped: it is not flexible and charges as
+uncontrolled. A stopped session frees the power it charges at after
+curtailing, not its nominal power.
 }
 \details{
 The last stop may bring the slot below the setpoint. That slack goes back

@@ -105,3 +105,41 @@ tank_golden_cases <- function() {
 run_tank_case <- function(case) {
   suppressMessages(do.call(add_tank_optimization, c(list(case[[1]]), case[[2]])))
 }
+
+
+# Two winter days of a heat pump the size of a FLEX+ hospital's, 15-minute
+# slots from 06:00: 1550 kW of heat at a COP of 2.2, then from 06:00 on the
+# second day 1900 kW until 14:00 and 1000 kW at a COP of 2.8 after, next to
+# a static load of 165 to 205 kW. `flexible` runs the compressor at its cap
+# from the start of each hour until it has made the hour's heat.
+hospital_tank_days <- function() {
+  h <- rep(0:47, each = 4)
+  heat_demand <- ifelse(h < 24, 1550, ifelse(h < 32, 1900, 1000))
+  cop <- ifelse(h < 32, 2.2, 2.8)
+  slot <- rep(0:3, 48)
+  tibble(
+    datetime = as.POSIXct("2025-01-04 06:00", tz = "Europe/Amsterdam") +
+      900 * (seq_along(h) - 1),
+    production = 0,
+    static = 185 + 20 * sin(2 * pi * h / 24),
+    heat_demand = heat_demand,
+    cop = cop,
+    flexible = round(pmin(pmax(4 * heat_demand / cop - 1000 * slot, 0), 1000), 2),
+    import_capacity = 1553,
+    export_capacity = 1553,
+    price_imported = 0.25,
+    price_exported = 0.05
+  )
+}
+
+hospital_tank_args <- list(
+  "grid",
+  Tcap = 1312.1947222222223,
+  Pc = 1000,
+  Pb = 500,
+  SOCmin = 0,
+  SOCmax = 100,
+  window_start_hour = 6,
+  loss = 0.5,
+  on_failure = "error"
+)

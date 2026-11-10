@@ -816,6 +816,40 @@ test_that("a window OSQP stalls on is solved again with a fixed step size", {
   expect_equal(calls, list(TRUE, TRUE))
 })
 
+test_that("the band check on a large tank scales with the tank", {
+  # Synthetic days at a FLEX+ hospital's size: a 1312 kWh tank, a 1000 kW
+  # compressor and a 500 kW backup heater. OSQP stops at a relative
+  # accuracy, so on the second window the exact level of its solution ends
+  # 0.085 kWh above the top (the hospital's own run: 0.078 kWh), and the
+  # band check, at 0.001 kWh, failed it. The soft retry then stalled, as on
+  # the hospital's run (flextools 1.19.3: "the solver failed on the window
+  # starting at 2025-01-05 06:00:00 CET (OSQP: maximum iterations
+  # reached)"). The check allows 1e-4 of the top, 0.13 kWh here, and every
+  # window solves on its hard band.
+  d <- hospital_tank_days()
+  real_window <- tank_solve_window
+  soft <- logical(0)
+  local_mocked_bindings(tank_solve_window = function(...) {
+    soft <<- c(soft, isTRUE(list(...)$soft))
+    real_window(...)
+  })
+  P <- do.call(add_tank_optimization, c(list(d), hospital_tank_args))
+  expect_false(any(soft))
+
+  Tcap <- hospital_tank_args$Tcap
+  expect_length(P, nrow(d))
+  expect_gte(min(P), 0)
+  expect_lte(max(P), hospital_tank_args$Pc)
+  level <- tank_path(
+    P, d,
+    init = Tcap,
+    loss = 0.5,
+    resolution = 15,
+    backup = attr(P, "backup_kw")
+  )
+  expect_lte(max(level), Tcap + 1e-4 * Tcap)
+})
+
 test_that("the scaled level gives the schedule the level in kWh gave", {
   # Every window of the pinned runs, solved with the level scaled to the band
   # and in kWh as up to flextools 1.18.1 (`level_unit = 1`), unrounded

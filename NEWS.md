@@ -1,3 +1,16 @@
+# flextools 1.19.4
+
+* Fix: `add_tank_optimization()` failed on large tanks with "the solver
+  failed on the window starting at ...", although the window has a solution.
+  OSQP stops at a relative accuracy, on a level scaled to the top of the
+  band, so how far the exact level of its solution may miss the band grows
+  with the tank. The check of that level allowed only 0.001 kWh. A hospital
+  tank of 1312 kWh with a 1000 kW compressor and a 500 kW backup heater
+  ended a window 0.078 kWh above its top, and the soft retry of the window
+  then stalled ("OSQP: maximum iterations reached"). The check now allows
+  1e-4 of the top (0.01 % SOC, the smallest step of the SOC that flextools
+  reports), and at least 0.001 kWh as before, so small tanks are unchanged.
+
 # flextools 1.19.3
 
 * Fix: `smart_v2g()` discharged into export with several user profiles under

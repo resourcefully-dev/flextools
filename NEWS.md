@@ -1,3 +1,17 @@
+# flextools 1.19.5
+
+* Fix: `add_tank_optimization()` failed on heat pumps of a few MW with "the
+  solver failed on the window starting at ..." ("OSQP: maximum iterations
+  reached" or "OSQP: primal infeasible"), although the window has a
+  solution. OSQP saw the level scaled to the band but the powers in kW, so
+  the same site at twice the size was a different problem to it: the
+  hospital of 1.19.4 solved, the same hospital at twice its size (a 2 MW
+  heat pump and a 2624 kWh tank) did not. OSQP now solves the powers in
+  units of the compressor cap (or of the power that fills the band in one
+  slot, when smaller), so a site of any size is the same problem. The
+  pinned tank runs are unchanged, and all of them, scaled up a thousand
+  times, now solve.
+
 # flextools 1.19.4
 
 * Fix: `add_tank_optimization()` failed on large tanks with "the solver

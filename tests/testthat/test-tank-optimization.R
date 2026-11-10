@@ -850,9 +850,53 @@ test_that("the band check on a large tank scales with the tank", {
   expect_lte(max(level), Tcap + 1e-4 * Tcap)
 })
 
+test_that("a heat pump of several MW is the same problem as a smaller one", {
+  # With the level scaled and the powers in kW, OSQP failed on the hospital
+  # at twice its size, a 2 MW heat pump with a 2624 kWh tank (flextools
+  # 1.19.4: "the solver failed on the window starting at 2025-01-05 06:00:00
+  # CET (OSQP: maximum iterations reached)"), and at ten times its size on
+  # the first window ("OSQP: primal infeasible"). With the powers in units
+  # of the compressor cap, every size solves on its hard band to the same
+  # schedule, up to the rounding of the power.
+  real_window <- tank_solve_window
+  soft <- logical(0)
+  local_mocked_bindings(tank_solve_window = function(...) {
+    soft <<- c(soft, isTRUE(list(...)$soft))
+    real_window(...)
+  })
+  scaled_run <- function(s) {
+    d <- hospital_tank_days()
+    for (col in c("static", "heat_demand", "flexible", "import_capacity", "export_capacity")) {
+      d[[col]] <- s * d[[col]]
+    }
+    args <- hospital_tank_args
+    for (arg in c("Tcap", "Pc", "Pb")) {
+      args[[arg]] <- s * args[[arg]]
+    }
+    P <- do.call(add_tank_optimization, c(list(d), args))
+    level <- tank_path(
+      P, d,
+      init = args$Tcap,
+      loss = 0.5,
+      resolution = 15,
+      backup = attr(P, "backup_kw")
+    )
+    expect_lte(max(level), args$Tcap * (1 + 1e-4))
+    expect_lte(max(P), args$Pc)
+    P
+  }
+  P1 <- scaled_run(1)
+  for (s in c(2, 10)) {
+    P <- scaled_run(s)
+    expect_lte(max(abs(as.numeric(P) / s - as.numeric(P1))), 0.01 + 1e-9, label = paste("x", s))
+  }
+  expect_false(any(soft))
+})
+
 test_that("the scaled level gives the schedule the level in kWh gave", {
   # Every window of the pinned runs, solved with the level scaled to the band
-  # and in kWh as up to flextools 1.18.1 (`level_unit = 1`), unrounded
+  # and in kWh, with the power in kW, as up to flextools 1.18.1 (`level_unit =
+  # 1`, `power_unit = 1`), unrounded
   real_window <- tank_solve_window
   windows <- list()
   local_mocked_bindings(tank_solve_window = function(...) {
@@ -870,7 +914,7 @@ test_that("the scaled level gives the schedule the level in kWh gave", {
   compared <- 0
   for (key in names(windows)) {
     args <- windows[[key]]
-    old <- do.call(real_window, c(args, list(level_unit = 1)))
+    old <- do.call(real_window, c(args, list(level_unit = 1, power_unit = 1)))
     new <- do.call(real_window, args)
     if (is.null(old$power)) {
       # A window with no schedule in the band, solved again with the soft floor

@@ -327,6 +327,12 @@ tank_failure <- function(status) {
 #'   stands for. `NULL` (default) is `Smax` on OSQP, so the solver sees the
 #'   level between 0 and 1 whatever the tank's size, and 1 (kWh) on HiGHS.
 #'   1 is the formulation in kWh that OSQP used up to flextools 1.18.1.
+#' @param power_unit numeric, the kW that one unit of the solver's power
+#'   stands for, and the kW of one unit of its rows in kW. `NULL` (default)
+#'   is `Pc` on OSQP, or the power that fills the band in one slot (`Smax /
+#'   dt`) when smaller, so the solver sees the compressor on the same scale
+#'   whatever the heat pump's size, and 1 (kW) on HiGHS. 1 is the formulation
+#'   in kW that OSQP used up to flextools 1.19.4.
 #'
 #' @return list of the unrounded `power` and `backup` (kW) and the `status`;
 #'   when the window has no solution, `power` is `NULL` and `status` says why
@@ -354,7 +360,8 @@ tank_solve_window <- function(
   soft = FALSE,
   slack_import_max = 0,
   slack_export_max = 0,
-  level_unit = NULL
+  level_unit = NULL,
+  power_unit = NULL
 ) {
   n <- length(G)
   import_capacity <- as.numeric(rep_len(import_capacity, n))
@@ -448,11 +455,23 @@ tank_solve_window <- function(
   # level is between 0 and 1 for any tank. Every row and bound on the level
   # (`S`), its depth below the floor (`D`) and the missed end condition (`R`)
   # is in that unit, and so is the price of `D` and `R`. The heat (`P`, `B`,
-  # `U`) stays in kW. The power is the solution; the level in kWh follows
-  # from it on the exact dynamics below. HiGHS keeps kWh.
+  # `U`) is in `power_unit` (below). The power is the solution; the level in
+  # kWh follows from it on the exact dynamics below. HiGHS keeps kWh.
   use_highs <- identical(objective, "cost") && lambda == 0
   if (is.null(level_unit)) {
     level_unit <- if (use_highs) 1 else Smax
+  }
+  # The powers enter OSQP in units of `power_unit` kW, and so do the rows in
+  # kW. With the level scaled and the powers in kW, OSQP failed on a 2 MW
+  # heat pump with a 2624 kWh tank ("maximum iterations reached", and
+  # "primal infeasible" larger), on windows that have a solution: the problem
+  # it solved was not the same at every size. Scaled by the compressor cap
+  # too, a site twice the size is the same problem. Where the cap is more
+  # than the power that fills the band in one slot, the unit is that power:
+  # by the cap, the 0.58 kWh tank of a 4 kW heat pump stalled OSQP's
+  # adaptive step size again.
+  if (is.null(power_unit)) {
+    power_unit <- if (use_highs) 1 else min(Pc, Smax / dt)
   }
 
   with_flows <- !identical(objective, "grid")
@@ -710,11 +729,31 @@ tank_solve_window <- function(
     q[idx_U] <- c_U
     q[c(idx_D, idx_R)] <- c_D
     q[c(idx_si, idx_se)] <- c_S
-    # The objective is normalised as with the level in kWh, so the price of
-    # `D` and `R` per unit of `level_unit` does not set it
-    q_kwh <- q
-    q_kwh[c(idx_D, idx_R)] <- q_kwh[c(idx_D, idx_R)] / level_unit
-    obj_scale <- max(max(abs(P_quad)), max(abs(q_kwh)), 1e-6)
+
+    # Every power in units of `power_unit`: its column, its bound and the
+    # rows in kW (the balance, the capacities and the cap on `U`) are divided
+    # by it. The level's rows (dynamics, floor, end) are in `level_unit`.
+    col_unit <- rep(1, nv)
+    col_unit[c(idx_P, idx_B, idx_U, idx_si, idx_se, idx_I, idx_E)] <- power_unit
+    row_unit <- c(
+      col_unit,
+      rep(1, n),
+      if (with_flows) rep(power_unit, n),
+      if (soft_caps) rep(power_unit, 2 * n) else if (with_backup) rep(power_unit, n),
+      if (soft) c(rep(1, n + 1), power_unit)
+    )
+    A <- Matrix::Diagonal(x = 1 / row_unit) %*% A %*% Matrix::Diagonal(x = col_unit)
+    lower <- lower / row_unit
+    upper <- upper / row_unit
+    P_quad <- Matrix::Diagonal(x = col_unit) %*% P_quad %*% Matrix::Diagonal(x = col_unit)
+    q <- q * col_unit
+
+    # The objective is normalised as with the level in units of
+    # `power_unit` kWh, so the price of `D` and `R` per unit of `level_unit`
+    # does not set it
+    q_ref <- q
+    q_ref[c(idx_D, idx_R)] <- q_ref[c(idx_D, idx_R)] / level_unit * power_unit
+    obj_scale <- max(max(abs(P_quad)), max(abs(q_ref)), 1e-6)
     sol <- solve_osqp(P_quad / obj_scale, q / obj_scale, A, lower, upper)
     if (
       is.null(sol$x) &&
@@ -731,7 +770,7 @@ tank_solve_window <- function(
     if (is.null(sol$x)) {
       return(tank_failure(paste0("OSQP: ", sol$result$status_message)))
     }
-    x <- as.numeric(sol$x)
+    x <- as.numeric(sol$x) * col_unit
   }
 
   if (with_backup || soft_caps) {

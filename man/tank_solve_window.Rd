@@ -25,7 +25,8 @@ tank_solve_window(
   soft = FALSE,
   slack_import_max = 0,
   slack_export_max = 0,
-  level_unit = NULL
+  level_unit = NULL,
+  power_unit = NULL
 )
 }
 \arguments{
@@ -70,6 +71,12 @@ may miss its import / export capacity (kW), from
 stands for. \code{NULL} (default) is \code{Smax} on OSQP, so the solver sees the
 level between 0 and 1 whatever the tank's size, and 1 (kWh) on HiGHS.
 1 is the formulation in kWh that OSQP used up to flextools 1.18.1.}
+
+\item{power_unit}{numeric, the kW that one unit of the solver's power
+stands for, and the kW of one unit of its rows in kW. \code{NULL} (default)
+is \code{Pc} on OSQP, or the power that fills the band in one slot (\code{Smax / dt}) when smaller, so the solver sees the compressor on the same scale
+whatever the heat pump's size, and 1 (kW) on HiGHS. 1 is the formulation
+in kW that OSQP used up to flextools 1.19.4.}
 }
 \value{
 list of the unrounded \code{power} and \code{backup} (kW) and the \code{status};

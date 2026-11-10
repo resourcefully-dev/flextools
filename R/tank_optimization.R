@@ -751,8 +751,11 @@ tank_solve_window <- function(
   # rounding within that, so a soft floor has no lower bound left to check: a
   # tank drained from the rounding room below its top lands exactly half a
   # step below 0.
+  # OSQP's accuracy is relative on rows scaled by `Smax`, so its overshoot
+  # grows with the tank: the check allows 1e-4 of the top (0.01 % SOC, the
+  # smallest step of the reported SOC) and at least 0.001 kWh.
   level <- tank_level_path(P, Q, cop, S0, k, dt, backup = B)[-1]
-  tol <- 1e-3
+  tol <- max(1e-3, 1e-4 * Smax)
   if (
     (!soft && any(level < Smin - tol)) ||
       any(level > Smax + tol) ||

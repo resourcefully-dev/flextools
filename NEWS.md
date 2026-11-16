@@ -1,3 +1,35 @@
+# flextools 1.21.0
+
+* `add_tank_optimization()` takes `Hcap` and `Hloss` (default `NULL`, both
+  or neither): the house a space-heating tank heats, as a second, lossy store
+  behind the tank (a "virtual RC battery"). `Hcap` is the heat its interior
+  holds between its setpoint and the top of its comfort band (kWh), `Hloss`
+  the share of that heat it loses per hour (%). The tank passes heat `F >= 0`
+  to the house, whose level `R` serves the demand:
+  `S[t] = k * S[t-1] + (cop * P + B + H - F) * dt` and
+  `R[t] = kh * R[t-1] + (F - Q) * dt`, with `kh = (1 - Hloss/100)^dt`,
+  `0 <= R <= Hcap` (the floor at the setpoint hard) and no cap on `F`. The
+  end-of-window rule is on `S + R`, soft as before. The house starts the run
+  at its setpoint and carries across windows like the tank; the tank's band,
+  its soft floor, `Pb`, `Pg` and their order are unchanged, and demand
+  neither store can serve is unmet heat. Two attributes come back with a
+  house: `house_heat_kw` (`F`, the tank's demand: pass it as the
+  `heat_demand` of `get_tank_level()` and `get_tank_unmet_heat()`) and
+  `house_level_kwh` (`R` at the start of each slot). The house's losses
+  follow exactly from `house_heat_kw`. A 2 kWh tank with a 2 kW compressor
+  (COP 3) and 2 kW of heat all day, at 1 EUR/kWh from 17:00 to 21:00 and
+  0.2 otherwise: a 30 kWh house losing 3 %/h is heated to 6.4 kWh before the
+  peak, the compressor stays off through it, and the day costs 3.24 EUR
+  instead of 4.80. One of `Hcap` and `Hloss` without the other, `Hcap` at or
+  below 0 or `Hloss` outside [0, 100) is an error naming it. Without them the
+  results are those of 1.20.0, with no new attribute.
+
+* The thermal optimization article explains how to use `add_tank_optimization()`
+  for cooling, by reading every quantity as cold instead of heat: the cooling
+  demand as `heat_demand`, the chiller's EER as `cop`, and a house pre-cooled
+  below its setpoint as the house store. A chiller without a buffer runs
+  with a very small tank.
+
 # flextools 1.20.0
 
 * `add_tank_optimization()` takes `Pg` (default `NULL`), the rating of a gas

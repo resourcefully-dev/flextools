@@ -150,6 +150,48 @@ The gas backup, `Pg`, adds heat to the tank like the backup heater, but its heat
 
 It pays $2h$ per kW of heat, the backup heater's price without its electricity. So it ranks like the backup heater: it only runs for the heat the compressor cannot deliver (at $P_c$, at a COP of 0, or held back by an import capacity), before a grid capacity is missed and before the tank cools below its floor, and never to absorb a PV surplus or a cheap hour. The gas itself is not priced: its cost is not weighed against electricity, and is left to the report of the results. An import capacity that holds back the compressor and the backup heater does not hold back the gas backup.
 
+## House behind the tank
+
+A space-heating tank can carry the building it heats as a second store, `Hcap` and `Hloss` (both or neither): a "virtual RC battery". Heat the interior above its setpoint and it gets warmer, and that heat slowly leaks away. Two decision variables join the problem:
+
+- $F_t \ge 0$ : Heat the tank passes to the house (kW thermal). It has no cap of its own
+- $R_t$ : Level of the house at the end of slot $t$ (kWh thermal), the heat its interior holds above its setpoint: 0 at the setpoint, $H_{cap}$ at the top of its comfort band
+
+and the heat demand $Q_t$ becomes the house's. With $l_h$ the loss of the house (% per hour), `Hloss`:
+
+$$
+S_t = S_{t-1} \left(1 - \frac{l}{100}\right)^{\Delta t} + \left(COP_t \cdot P_t + B_t + H_t - F_t\right) \Delta t, \qquad
+R_t = R_{t-1} \left(1 - \frac{l_h}{100}\right)^{\Delta t} + \left(F_t - Q_t\right) \Delta t
+$$
+
+$$
+0 \le R_t \le H_{cap}, \qquad S_T + R_T \ge S_0 + R_0
+$$
+
+The floor of the house at its setpoint is hard: the demand is always served from the house, or through it from the tank, and the heat the tank cannot give is unmet heat as without a house. The end condition is on the heat in both stores, soft as the tank's. Everything else (the band of the tank, its soft floor, the backups and their order) is unchanged. The house starts the run at its setpoint, and its level carries from one window to the next like the tank's.
+
+Nothing orders the two stores: the losses do. The schedule holds heat in the tank wherever the tank loses less, and heats the house ahead of the demand when that costs less than the heat it will lose by then, for example before a price peak. For a building with interior heat capacity $C$ (J/K), heat loss coefficient $K$ (W/K) and a comfort band $\Delta T$ (K), $H_{cap} = C \Delta T / 3.6 \cdot 10^{6}$ and, with the time constant $\tau = C / K / 3600$ hours, $l_h = 100 \left(1 - e^{-1/\tau}\right)$.
+
+## Cooling
+
+Nothing in the model is particular to heat: each store holds energy above a reference, and each loses a share of it per hour. A chiller with a chilled-water buffer, cooling a house, is the same problem read as cold:
+
+| Heating | Cooling |
+|---|---|
+| `heat_demand` $Q_t$: heat the house needs | Heat the house gains (sun, people, outdoor air), which the chiller has to remove |
+| `cop` | EER of the chiller |
+| $S_t$: heat in the tank above the inlet temperature | Cold in the buffer below its return temperature |
+| $R_t$: heat in the house above its setpoint | Cold in the house below its setpoint: how far it is pre-cooled |
+| $R_t \ge 0$ | The house is never warmer than its setpoint |
+| `Hcap` | How far below the setpoint the house may be pre-cooled, as above with $\Delta T$ below it |
+| `unmet_heat_kw` | Cooling that could not be delivered |
+
+So the house is pre-cooled ahead of a price peak, for example on PV power at midday ahead of the evening peak. A chiller without a buffer runs with a very small tank (`Tcap = 0.05`, say). Some parts of the model have no counterpart:
+
+- Neither backup (`Pb`, `Pg`) has a cooling counterpart: leave both out.
+- Only the sensible part of the cooling demand can be stored in the building. Dehumidification (the latent part) has to be served when it comes, so it is best left out of $Q_t$ and added to the static load.
+- The house's loss is a fixed share per hour. With the sun and the outdoor air behind most of the drift back to the setpoint, it is rougher for cooling than for heating.
+
 ## Soft comfort floor
 
 Without a soft floor, a window where the compressor and the backup heater cannot keep the tank above $SOC_{min}$ (a cold spell, a compressor too small for the peak, a COP of 0 during a long defrost) would have no solution at all. A real tank, in that case, keeps giving heat: its water gets colder than the comfort temperature, down to the temperature of the inlet water, and from there it gives no more. The optimization does the same. When a window has no solution that holds the floor, it is solved again with:
@@ -197,8 +239,10 @@ It costs $10h$ per kW in the objective, between the backup heater and going belo
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
 | `gas_backup_kw` | Only with `Pg > 0`: heat of the gas backup $H_t$ (kW thermal, not electricity) |
 | `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal): the heat that would have been required in each slot to keep the tank at least at its comfort floor. Positive while the temperature falls below the floor, 0 while it warms back up |
+| `house_heat_kw` | Only with a house: heat the tank passes to the house $F_t$ (kW thermal), the tank's demand |
+| `house_level_kwh` | Only with a house: level of the house $R$ at the start of each slot (kWh thermal above its setpoint) |
 
-The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater (or the gas backup, `attr(P, "gas_backup_kw")`, as its `backup`), stopping at the inlet temperature. `get_tank_unmet_heat()` computes the unmet heat of any schedule, with the same definition: for example, of the static schedule `flexible`, to compare it with the optimized one.
+The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater (or the gas backup, `attr(P, "gas_backup_kw")`, as its `backup`), stopping at the inlet temperature. `get_tank_unmet_heat()` computes the unmet heat of any schedule, with the same definition: for example, of the static schedule `flexible`, to compare it with the optimized one. With a house, both take `attr(P, "house_heat_kw")` as the tank's `heat_demand`, and the house's level follows from it exactly, so its losses are $\left(1 - (1 - l_h/100)^{\Delta t}\right)$ times the sum of `attr(P, "house_level_kwh")` before rounding.
 
 OSQP sees the level as a fraction of the top of the band, so a small tank is solved as easily as a large one, and a window it still stops on at its iteration limit is solved once more with a fixed step size. A window the solver fails on even then (a numerical failure, since every window has a solution) runs the static schedule, with a message. With `on_failure = "error"`, it stops with an error naming the window and the solver status instead.
 

@@ -30,9 +30,9 @@ kWh)}
 \item{time_resolution}{numeric, time resolution of the time-series (in
 minutes)}
 
-\item{backup}{numeric, backup heater power (kW electric = kW thermal):
-\code{attr(result, "backup_kw")} of \code{\link[=add_tank_optimization]{add_tank_optimization()}}, or 0 without a
-backup heater}
+\item{backup}{numeric, backup heat (kW thermal): \code{attr(result, "backup_kw")} of \code{\link[=add_tank_optimization]{add_tank_optimization()}} (a resistive heater, kW
+electric = kW thermal), or its \code{attr(result, "gas_backup_kw")} with a gas
+backup, or 0 without a backup}
 }
 \value{
 numeric vector of the level (kWh), rounded to 2 decimals

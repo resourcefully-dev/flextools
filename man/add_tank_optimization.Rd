@@ -18,6 +18,7 @@ add_tank_optimization(
   lambda = 0,
   loss = 0,
   Pb = NULL,
+  Pg = NULL,
   on_failure = c("flexible", "error")
 )
 }
@@ -74,6 +75,12 @@ in \code{\link[=get_storage_losses]{get_storage_losses()}}.}
 is also its kW thermal, >= 0). \code{NULL} (default) or 0 means no backup
 heater.}
 
+\item{Pg}{numeric, rating of the gas backup, such as the boiler of a hybrid
+heat pump (kW thermal, >= 0). Its heat is not electric load: it is in the
+tank's balance only. \code{NULL} (default) or 0 means no gas backup, and the
+result is the one without the argument. \code{Pb} and \code{Pg} cannot both be
+above 0.}
+
 \item{on_failure}{character, what a window the solver fails on does:
 \code{"flexible"} (default) runs the \code{flexible} schedule there, as described in
 \emph{Soft grid capacities}, with a message; \code{"error"} stops with an error
@@ -87,7 +94,10 @@ tank above \code{SOCmax}. Attributes:
 \itemize{
 \item \code{backup_kw}: numeric vector, one value per row, rounded to 2 decimals: the
 backup heater's power (kW electric = kW thermal); 0 outside optimised
-windows and everywhere without a backup heater.
+windows and everywhere without a backup heater (also with a gas backup).
+\item \code{gas_backup_kw}: only with \code{Pg > 0}. Numeric vector, one value per row,
+rounded to 2 decimals: the gas backup's heat (kW thermal, not
+electricity); 0 outside optimised windows.
 \item \code{unmet_heat_kw}: numeric vector, one value per row, rounded to 2 decimals:
 the unmet heat (kW thermal, not electricity): the heat that would have
 been required in that slot to keep the tank at least at its comfort floor
@@ -97,30 +107,38 @@ the floor, or rises back towards it. It is a report, not part of the
 balance.
 }
 
-The heat pump's electric load is the power plus \code{attr(, "backup_kw")}.
+The heat pump's electric load is the power plus \code{attr(, "backup_kw")}. Its
+heat is \code{cop} times the power, plus \code{attr(, "backup_kw")} and
+\code{attr(, "gas_backup_kw")}: pass their sum as the \code{backup} of
+\code{\link[=get_tank_level]{get_tank_level()}} and \code{\link[=get_tank_unmet_heat]{get_tank_unmet_heat()}}.
 }
 \description{
 Optimises the electric power of a heat pump's compressor that charges one
-thermal tank, which the heat demand discharges, with an optional resistive
-backup heater next to it. It mirrors \code{\link[=add_battery_optimization]{add_battery_optimization()}}: the same
-\code{opt_data} conventions, objectives (except \code{"capacity"}), optimization
-windows and solvers, with the tank in place of the battery. The compressor's
+thermal tank, which the heat demand discharges, with an optional backup
+next to it: a resistive heater or a gas boiler. It mirrors
+\code{\link[=add_battery_optimization]{add_battery_optimization()}}: the same \code{opt_data} conventions, objectives
+(except \code{"capacity"}), optimization windows and solvers, with the tank in
+place of the battery. The compressor's
 heat is \code{cop * P}, so there is no conversion efficiency: the COP is the
 conversion. The backup heater turns \code{B} kW of electricity into \code{B} kW of heat.
+The gas backup (a hybrid heat pump's boiler) adds \code{H} kW of heat that is not
+electricity.
 }
 \details{
 Per slot of \code{dt} hours, with \code{S} the level in kWh thermal above the inlet
 water temperature (level 0, \code{SOC = 0}) and \code{k = (1 - loss/100)^dt}:
 \itemize{
-\item \code{S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] - heat_demand[t]) * dt}
+\item \code{S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + H[t] - heat_demand[t]) * dt}
 \item \verb{Tcap * SOCmin/100 <= S[t] <= Tcap * SOCmax/100}
 \item \verb{0 <= P[t] <= Pc}, and \code{P[t] = 0} where \code{cop[t] = 0}
 \item \verb{0 <= B[t] <= Pb}, also where \code{cop[t] = 0}
+\item \verb{0 <= H[t] <= Pg}, also where \code{cop[t] = 0}
 \item every window ends at least as full as it started.
 }
 
-\code{B} (the backup heater) is a variable only with \code{Pb > 0}. The comfort floor
-\code{SOCmin} is \strong{soft}: when the compressor and the backup heater cannot hold
+\code{B} (the backup heater) is a variable only with \code{Pb > 0}, and \code{H} (the gas
+backup) only with \code{Pg > 0}; a tank has one backup at most. The comfort floor
+\code{SOCmin} is \strong{soft}: when the compressor and the backup cannot hold
 it, the tank keeps giving heat below it, cooling down to the inlet
 temperature (level 0) at most, as a real tank would. The \strong{unmet heat} is
 the heat that would have been required to keep the tank at least at its
@@ -140,7 +158,7 @@ both optimised like any other window (the leading one from \code{SOCini}, both
 with the end-of-window rule at their last slot). Only the first
 \code{flex_window_hours} of every window are optimised, so with
 \code{flex_window_hours = 24 * window_days} every slot is optimised. The slots
-past \code{flex_window_hours} run the \code{flexible} schedule, without backup heater.
+past \code{flex_window_hours} run the \code{flexible} schedule, without backup.
 }
 \section{Compressor first, backup heater second, unmet heat last}{
 
@@ -166,6 +184,15 @@ The backup heater pays \code{2 * h} per kW on top of its electricity, so it only
 runs for heat the compressor cannot deliver (it never absorbs a PV surplus
 the compressor could).
 
+The gas backup pays the same \code{2 * h} per kW of heat, at the same rank: only
+for heat the compressor cannot deliver, before a missed grid capacity and
+before the comfort floor. Its heat is not electricity: it is not part of the
+net flow that any objective sees, nor of the grid capacities and their
+slack, and \code{h} does not count it. The gas it burns is not priced (its cost
+is not weighed against electricity), so it never runs where the compressor
+could heat instead within the grid capacities, however expensive the
+electricity.
+
 When a window has no schedule that holds the band within the grid
 capacities, it is solved again with a soft floor: the level may go down to
 0, and every kWh below \code{SOCmin} costs \code{20 * h / dt} per slot, more than
@@ -187,11 +214,11 @@ how far the site already misses the capacity without optimisation (see
 \code{optimization_slack_ceiling()}): for import, with the heat pump running
 \code{flexible}; for export, with the heat pump off, since a full tank cannot
 absorb a surplus. It costs \code{10 * h} per kW (electric), between the backup
-heater and the comfort floor: the solver uses the compressor and the backup
-heater to their limits before it misses a capacity, and misses an import
-capacity before it lets the tank cool below its floor. The heat pump off
-with the tank cooling always fits these bounds, so \strong{every window has a
-schedule}.
+and the comfort floor: the solver uses the compressor and the backup to
+their limits before it misses a capacity, and misses an import capacity
+before it lets the tank cool below its floor. The gas backup is not bound
+by the capacities at all. The heat pump off with the tank cooling always
+fits these bounds, so \strong{every window has a schedule}.
 A capacity left missed is reported with a message; compare the net flow
 \code{static + P + attr(, "backup_kw") - production} with the capacities to find
 where.

@@ -16,7 +16,7 @@ Function `add_tank_optimization()` optimizes a **heat pump that charges one ther
 * Minimize the energy cost, with `opt_objective = "cost"` (LP, [HiGHS](https://highs.dev/), or QP when `lambda > 0`)
 * Minimize a weighted combination of net power and cost, with a numeric `opt_objective` between `0` and `1` (QP)
 
-The tank plays the role of the battery: it stores heat, so the compressor can run when electricity is cheap or locally produced, and the tank delivers the heat later. On top of the compressor, the heat pump can have a **resistive backup heater**, and the comfort floor of the tank is **soft**: when neither the compressor nor the backup heater can keep the tank above it, the tank keeps giving heat below its comfort temperature, down to the temperature of the inlet water, and the optimization reports that heat as **unmet heat** instead of failing. In this article, we'll cover the tank model, the backup heater and the soft comfort floor, followed by a worked example.
+The tank plays the role of the battery: it stores heat, so the compressor can run when electricity is cheap or locally produced, and the tank delivers the heat later. On top of the compressor, the heat pump can have a **resistive backup heater** (or, for a hybrid heat pump, a **gas backup**), and the comfort floor of the tank is **soft**: when neither the compressor nor the backup heater can keep the tank above it, the tank keeps giving heat below its comfort temperature, down to the temperature of the inlet water, and the optimization reports that heat as **unmet heat** instead of failing. In this article, we'll cover the tank model, the backup heater and the soft comfort floor, followed by a worked example.
 
 
 # Tank model
@@ -25,6 +25,7 @@ The decision variables of every optimization window, with $T$ time slots of $\De
 
 - $P_t$ : Electric power of the compressor (kW)
 - $B_t$ : Power of the backup heater (kW). It is resistive, so its electric power is also its heat ($COP = 1$). Only a variable when the heat pump has a backup heater (`Pb > 0`)
+- $H_t$ : Heat of the gas backup (kW thermal), such as the boiler of a hybrid heat pump. Only a variable when the heat pump has one (`Pg > 0`); see [Gas backup](#gas-backup)
 - $S_t$ : Level of the tank at the end of slot $t$ (kWh thermal): the heat it holds above the **inlet temperature**, the temperature of the cold water that refills it. At $S_t = 0$ the tank is at the inlet temperature and gives no more heat
 
 And the parameters:
@@ -34,6 +35,7 @@ And the parameters:
 - $T_{cap}$ : Tank capacity (kWh thermal), `Tcap`: the heat between the inlet temperature and the top of the tank
 - $P_c$ : Maximum electric power of the compressor, `Pc`
 - $P_b$ : Rating of the backup heater, `Pb` (`NULL` or `0` without one)
+- $P_g$ : Rating of the gas backup (kW thermal), `Pg` (`NULL` or `0` without one). A tank has one backup at most: `Pb` and `Pg` cannot both be above 0
 - $SOC_{min}$ : Comfort floor of the tank (%), the lowest level that still delivers heat at the comfort temperature
 - $SOC_{max}$ : Top of the tank (%)
 - $l$ : Standing loss of the tank (% per hour), `loss`
@@ -42,7 +44,7 @@ And the parameters:
 The level of the tank follows the heat balance:
 
 $$
-S_t = S_{t-1} \left(1 - \frac{l}{100}\right)^{\Delta t} + \left(COP_t \cdot P_t + B_t - Q_t\right) \Delta t \quad t \in T
+S_t = S_{t-1} \left(1 - \frac{l}{100}\right)^{\Delta t} + \left(COP_t \cdot P_t + B_t + H_t - Q_t\right) \Delta t \quad t \in T
 $$
 
 with the following constraints:
@@ -63,6 +65,12 @@ $$
 
 $$
 0 \le B_t \le P_b \quad t \in T
+$$
+
+* So does the gas backup:
+
+$$
+0 \le H_t \le P_g \quad t \in T
 $$
 
 * Every window ends at least as full as it started, so that a window does not empty the tank at the expense of the next one:
@@ -132,8 +140,15 @@ The linear terms order the ways to cover the heat demand. They are built from th
 and with `lambda > 0` the largest derivative of the ramping penalty, $4 \lambda P_c$, is added to it. Then:
 
 * **The backup heater** pays $2h$ per kW of heat on top of its electricity, which the objective already sees like the compressor's. Its heat is therefore always more expensive than the compressor's, so it only runs for the heat the compressor cannot deliver, either because the compressor is at $P_c$, or because its COP is 0. It never runs to absorb a PV surplus or a cheap hour that the compressor could absorb.
+* **The gas backup** pays the same $2h$ per kW of heat, at the same rank (see [Gas backup](#gas-backup)).
 * **Missing a grid capacity** costs $10h$ per kW (see [Soft grid capacities](#soft-grid-capacities)).
 * **Going below the comfort floor** costs $20h / \Delta t$ per kWh below it and time slot, more than any kWh of heat the compressor, the backup heater or a missed grid capacity can deliver. So the tank only cools below its floor when they cannot hold it, and is brought back above it as soon as they can.
+
+## Gas backup
+
+The gas backup, `Pg`, adds heat to the tank like the backup heater, but its heat is not electricity: gas does not flow through the grid connection. $H_t$ is therefore only in the heat balance of the tank. It is not part of the net power $L_t + P_t + B_t - G_t$ that every objective is evaluated on, nor of the grid capacities and their slack, and the heat price $h$ does not count it. The heat pump's electric load stays $P_t + B_t$ (with $B_t = 0$, since a tank has one backup at most).
+
+It pays $2h$ per kW of heat, the backup heater's price without its electricity. So it ranks like the backup heater: it only runs for the heat the compressor cannot deliver (at $P_c$, at a COP of 0, or held back by an import capacity), before a grid capacity is missed and before the tank cools below its floor, and never to absorb a PV surplus or a cheap hour. The gas itself is not priced: its cost is not weighed against electricity, and is left to the report of the results. An import capacity that holds back the compressor and the backup heater does not hold back the gas backup.
 
 ## Soft comfort floor
 
@@ -180,9 +195,10 @@ It costs $10h$ per kW in the objective, between the backup heater and going belo
 | Attribute | Content |
 |---|---|
 | `backup_kw` | Power of the backup heater $B_t$ (kW electric, which is also kW thermal). 0 without a backup heater |
+| `gas_backup_kw` | Only with `Pg > 0`: heat of the gas backup $H_t$ (kW thermal, not electricity) |
 | `unmet_heat_kw` | Unmet heat $U_t$ (kW thermal): the heat that would have been required in each slot to keep the tank at least at its comfort floor. Positive while the temperature falls below the floor, 0 while it warms back up |
 
-The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater, stopping at the inlet temperature. `get_tank_unmet_heat()` computes the unmet heat of any schedule, with the same definition: for example, of the static schedule `flexible`, to compare it with the optimized one.
+The electric load of the heat pump is the returned power plus `attr(P, "backup_kw")`. The level of the tank is not returned, but `get_tank_level()` computes it from the power and the backup heater (or the gas backup, `attr(P, "gas_backup_kw")`, as its `backup`), stopping at the inlet temperature. `get_tank_unmet_heat()` computes the unmet heat of any schedule, with the same definition: for example, of the static schedule `flexible`, to compare it with the optimized one.
 
 OSQP sees the level as a fraction of the top of the band, so a small tank is solved as easily as a large one, and a window it still stops on at its iteration limit is solved once more with a fixed step size. A window the solver fails on even then (a numerical failure, since every window has a solution) runs the static schedule, with a message. With `on_failure = "error"`, it stops with an error naming the window and the solver status instead.
 

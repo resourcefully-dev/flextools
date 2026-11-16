@@ -748,6 +748,199 @@ test_that("a tank has one backup, and `Pg` is checked like `Pb`", {
 })
 
 
+# House behind the tank ---------------------------------------------------------
+
+# The tank's view of a run with a house: its demand is the heat it passes to
+# the house
+tank_side <- function(P, d) {
+  d$heat_demand <- attr(P, "house_heat_kw")
+  d
+}
+
+# The house's level path from the run's heat into it, from the setpoint
+house_path <- function(P, d, Hloss = 0, resolution = 60) {
+  dt <- resolution / 60
+  tank_house_path(
+    attr(P, "house_heat_kw"),
+    d$heat_demand,
+    0,
+    (1 - Hloss / 100)^dt,
+    dt
+  )
+}
+
+test_that("a lossless house is more tank", {
+  # Heat moves from the tank to the house whenever it is needed, so with no
+  # loss on either a 3 kWh tank with a 9 kWh house behind it is a 12 kWh tank
+  # that starts at the 3 kWh the house leaves it. The peak lacks 6 kWh, which
+  # they hold between them.
+  d <- peak_data()
+  for (objective in list("grid", "cost", 0.5)) {
+    P <- add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Hcap = 9, Hloss = 0)
+    P_big <- add_tank_optimization(d, objective, Tcap = 12, Pc = 1, SOCini = 25)
+    # The same heat, and the same value of the objective (the schedules may
+    # differ where the objective is indifferent), up to the rounding room the
+    # tank keeps below its top and the house does not
+    expect_equal(sum(P), sum(P_big), tolerance = 0.01)
+    value <- function(P) {
+      flow <- sum((d$static + P)^2)
+      cost <- sum(d$price_imported * P)
+      w <- if (identical(objective, "grid")) 1 else if (identical(objective, "cost")) 0 else objective
+      w * mean(d$price_imported)^2 * flow + (1 - w) * cost
+    }
+    expect_equal(value(P), value(P_big), tolerance = 5e-3)
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+    expect_equal(attr(P, "backup_kw"), rep(0, 24))
+    expect_null(attr(P, "gas_backup_kw"))
+
+    # The house is heated before the peak, and stays within its band
+    R <- house_path(P, d)
+    expect_gte(min(R), -1e-9)
+    expect_lte(max(R), 9 + 1e-9)
+    expect_gt(R[18], 0)
+    expect_equal(attr(P, "house_level_kwh"), round(R[1:24], 2))
+    # Without a loss, the heat into the house is the demand plus its level
+    expect_equal(sum(attr(P, "house_heat_kw")), sum(d$heat_demand) + R[25], tolerance = 1e-9)
+
+    # The tank closes its balance with the heat into the house as its demand,
+    # and the two end the day with the heat they started with
+    S <- tank_path(P, tank_side(P, d), init = 3)
+    expect_gte(min(S), 0 - rounding_tol)
+    expect_lte(max(S), 3 + rounding_tol)
+    expect_equal(tank_balance_gap(P, tank_side(P, d), init = 3), 0, tolerance = 1e-9)
+    expect_gte(S[25] + R[25], 3 - 2 * rounding_tol)
+    expect_equal(
+      get_tank_level(P, attr(P, "house_heat_kw"), d$cop, init = 3),
+      round(S[1:24], 2)
+    )
+  }
+})
+
+test_that("a lossy house is heated ahead of a price peak, and only then", {
+  # 2 kW of heat all day, 1 EUR/kWh from 17:00 to 21:00 and 0.2 otherwise. The
+  # 2 kWh tank holds one hour of the demand; the 30 kWh house, losing 3 % of
+  # its heat above the setpoint per hour, can hold the whole peak.
+  d <- tank_data(heat_demand = 2, cheap_hours = 0:23)
+  d$price_imported <- 0.2
+  d$price_imported[18:21] <- 1
+  for (objective in list("cost", 0.5)) {
+    P0 <- add_tank_optimization(d, objective, Tcap = 2, Pc = 2)
+    P <- add_tank_optimization(d, objective, Tcap = 2, Pc = 2, Hcap = 30, Hloss = 3)
+    expect_null(attr(P0, "house_heat_kw"))
+    expect_null(attr(P0, "house_level_kwh"))
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+
+    # The house is full of the peak's heat when it starts, and the compressor
+    # stays off through it
+    R <- house_path(P, d, Hloss = 3)
+    expect_equal(attr(P, "house_level_kwh"), round(R[1:24], 2))
+    expect_gt(R[18], 6)
+    expect_equal(as.numeric(P[18:20]), rep(0, 3))
+    expect_gte(min(R), -1e-9)
+    expect_lte(max(R), 30 + 1e-9)
+
+    # It costs some heat, and saves more on the price
+    expect_gt(sum(P), sum(P0))
+    expect_lt(sum(d$price_imported * P), sum(d$price_imported * P0) - 1)
+
+    # The house's loss is what its level loses, and closes its balance
+    kh <- 0.97
+    losses <- sum((1 - kh) * R[1:24])
+    expect_gt(losses, 0)
+    expect_equal(
+      sum(attr(P, "house_heat_kw")),
+      sum(d$heat_demand) + losses + R[25],
+      tolerance = 1e-9
+    )
+    expect_equal(tank_balance_gap(P, tank_side(P, d), init = 2), 0, tolerance = 1e-9)
+  }
+
+  # At a flat price, heat put in the house is heat lost: it stays at its
+  # setpoint, the tank passes it the demand, and the compressor runs as it
+  # does without a house
+  d$price_imported <- 0.2
+  P0 <- add_tank_optimization(d, "cost", Tcap = 2, Pc = 2)
+  P <- add_tank_optimization(d, "cost", Tcap = 2, Pc = 2, Hcap = 30, Hloss = 3)
+  expect_equal(attr(P, "house_level_kwh"), rep(0, 24))
+  expect_equal(attr(P, "house_heat_kw"), d$heat_demand)
+  expect_equal(sum(P), sum(P0), tolerance = 0.01)
+})
+
+test_that("demand neither store can serve is unmet heat, the house's floor holds", {
+  # The peak lacks 6 kWh with the tank alone; a 2 kWh house filled before it
+  # carries 2 of them, and 4 are left unmet. A backup heater too, behind a
+  # lossy house: 3 kWh more of heat over the peak, a little less in the house.
+  d <- peak_data()
+  for (objective in list("grid", "cost", 0.5)) {
+    P <- suppressMessages(
+      add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Hcap = 2, Hloss = 0)
+    )
+    R <- house_path(P, d)
+    expect_gte(min(R), -1e-9)
+    expect_equal(sum(attr(P, "unmet_heat_kw")), 4, tolerance = 0.02)
+    expect_equal(
+      attr(P, "unmet_heat_kw"),
+      get_tank_unmet_heat(
+        P, attr(P, "house_heat_kw"), d$cop, init = 3, Tcap = 3, SOCmin = 0
+      )
+    )
+
+    P <- suppressMessages(
+      add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Pb = 1, Hcap = 2, Hloss = 2)
+    )
+    B <- attr(P, "backup_kw")
+    expect_gte(min(house_path(P, d, Hloss = 2)), -1e-9)
+    unmet <- sum(attr(P, "unmet_heat_kw"))
+    expect_gt(unmet, 1)
+    expect_lt(unmet, 1.2)
+    expect_equal(sum(B[18:20]), 3, tolerance = 0.02)
+    expect_equal(
+      tank_balance_gap(P, tank_side(P, d), init = 3, backup = B),
+      0,
+      tolerance = 1e-9
+    )
+  }
+})
+
+test_that("the house carries from one window to the next, and `flexible` never heats it", {
+  # Three days of windows from 06:00 that optimise 18 hours each: the six
+  # hours after run `flexible`, and the house the evening peak left warm
+  # cools there, serving the demand
+  d <- tank_data(days = 3, heat_demand = 2, cheap_hours = 0:23, flexible = 0.7)
+  d$price_imported <- ifelse(lubridate::hour(d$datetime) %in% 21:23, 1, 0.2)
+  P <- suppressMessages(add_tank_optimization(
+    d, "cost", Tcap = 2, Pc = 2, Hcap = 20, Hloss = 3,
+    window_start_hour = 6, flex_window_hours = 18
+  ))
+  R <- house_path(P, d, Hloss = 3)
+  expect_equal(attr(P, "house_level_kwh"), round(R[1:72], 2))
+  expect_gte(min(R), -1e-9)
+  F <- attr(P, "house_heat_kw")
+  flexible_slots <- which(lubridate::hour(d$datetime) %in% 0:5)
+  expect_true(all(F[flexible_slots] <= d$heat_demand[flexible_slots] + 0.01))
+  expect_true(all(diff(R)[flexible_slots] <= 1e-9))
+  expect_gt(max(R[flexible_slots]), 0)
+  expect_equal(
+    tank_balance_gap(P, tank_side(P, d), init = 2),
+    0,
+    tolerance = 1e-9
+  )
+})
+
+test_that("a house takes `Hcap` and `Hloss` together, in range", {
+  d <- tank_data()
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30), "`Hcap`.*`Hloss`")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hloss = 3), "`Hloss`.*`Hcap`")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 0, Hloss = 3), "Hcap")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = -1, Hloss = 3), "Hcap")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = NA_real_, Hloss = 3), "Hcap")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = c(1, 2), Hloss = 3), "Hcap")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30, Hloss = -1), "Hloss")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30, Hloss = 100), "Hloss")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30, Hloss = "3"), "Hloss")
+})
+
+
 # Partial windows --------------------------------------------------------------
 
 test_that("the slots before the first window start form a leading window", {
@@ -1150,6 +1343,38 @@ test_that("without a gas backup the runs of 1.19.5 are unchanged", {
         }
       } else {
         expect_equal(P, golden[[key]], tolerance = 1e-9, label = key)
+      }
+    }
+  }
+})
+
+test_that("without a house the runs of 1.20.0 are unchanged", {
+  # Pinned from flextools 1.20.0, before the house: `Hcap` and `Hloss` left
+  # out or `NULL` give exactly those results, with no house attribute.
+  golden <- readRDS(test_path("golden-tank-schedules-1.20.0.rds"))
+  cases <- tank_golden_cases()
+  cases$peak_gas_grid <- list(peak_data(), list("grid", Tcap = 3, Pc = 1, Pg = 3))
+  cases$peak_gas_cost <- list(peak_data(), list("cost", Tcap = 3, Pc = 1, Pg = 3))
+  expect_setequal(names(golden), names(cases))
+  # As above, the slots on a rounding tie may move by one step on another
+  # platform
+  ties <- c("evening_w05_3", "evening_ramp", "peak_backup_grid", "peak_backup_w05")
+  for (key in names(cases)) {
+    args <- cases[[key]][[2]]
+    args["Hcap"] <- list(NULL)
+    args["Hloss"] <- list(NULL)
+    for (P in list(run_tank_case(cases[[key]]), run_tank_case(list(cases[[key]][[1]], args)))) {
+      expect_null(attr(P, "house_heat_kw"))
+      expect_null(attr(P, "house_level_kwh"))
+      if (key %in% ties) {
+        expect_identical(names(attributes(P)), names(attributes(golden[[key]])))
+        for (part in list(NULL, "backup_kw", "unmet_heat_kw")) {
+          x <- if (is.null(part)) as.numeric(P) else attr(P, part)
+          y <- if (is.null(part)) as.numeric(golden[[key]]) else attr(golden[[key]], part)
+          expect_lte(max(abs(x - y)), 0.01 + 1e-9, label = paste(key, part))
+        }
+      } else {
+        expect_identical(P, golden[[key]], label = key)
       }
     }
   }

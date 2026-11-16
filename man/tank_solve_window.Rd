@@ -27,7 +27,10 @@ tank_solve_window(
   slack_import_max = 0,
   slack_export_max = 0,
   level_unit = NULL,
-  power_unit = NULL
+  power_unit = NULL,
+  Hcap = 0,
+  kh = 1,
+  R0 = 0
 )
 }
 \arguments{
@@ -81,9 +84,19 @@ stands for, and the kW of one unit of its rows in kW. \code{NULL} (default)
 is \code{Pc} on OSQP, or the power that fills the band in one slot (\code{Smax / dt}) when smaller, so the solver sees the compressor on the same scale
 whatever the heat pump's size, and 1 (kW) on HiGHS. 1 is the formulation
 in kW that OSQP used up to flextools 1.19.4.}
+
+\item{Hcap}{numeric, the house's capacity behind the tank (kWh); 0 means
+no house, and \code{Q} is then the tank's demand. With a house, \code{Q} is the
+house's demand and the tank's is the heat it passes to the house.}
+
+\item{kh}{numeric, per-slot retention of the house}
+
+\item{R0}{numeric, house level before the first slot, within \verb{[0, Hcap]}
+(kWh)}
 }
 \value{
-list of the unrounded \code{power}, \code{backup} and \code{gas} (kW) and the
+list of the unrounded \code{power}, \code{backup} and \code{gas} (kW), the heat
+from the tank to the house \code{house} (kW, \code{NULL} without a house) and the
 \code{status}; when the window has no solution, \code{power} is \code{NULL} and \code{status}
 says why (see \code{tank_failure()})
 }

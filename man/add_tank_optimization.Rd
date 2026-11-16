@@ -19,6 +19,8 @@ add_tank_optimization(
   loss = 0,
   Pb = NULL,
   Pg = NULL,
+  Hcap = NULL,
+  Hloss = NULL,
   on_failure = c("flexible", "error")
 )
 }
@@ -81,6 +83,17 @@ tank's balance only. \code{NULL} (default) or 0 means no gas backup, and the
 result is the one without the argument. \code{Pb} and \code{Pg} cannot both be
 above 0.}
 
+\item{Hcap}{numeric, capacity of the house behind a space-heating tank (kWh
+thermal, > 0): the heat its interior holds between its setpoint and the
+top of its comfort band. For an interior heat capacity \code{C} (J/K) and a
+comfort band of \code{dT} (K), \code{C * dT / 3.6e6}. \code{NULL} (default) means no
+house, and the result is the one without the argument. Given with \code{Hloss}
+or not at all.}
+
+\item{Hloss}{numeric, loss of the house's heat above its setpoint (\% per
+hour, >= 0 and < 100). A house of time constant \code{tau} hours loses
+\code{100 * (1 - exp(-1 / tau))}. Given with \code{Hcap} or not at all.}
+
 \item{on_failure}{character, what a window the solver fails on does:
 \code{"flexible"} (default) runs the \code{flexible} schedule there, as described in
 \emph{Soft grid capacities}, with a message; \code{"error"} stops with an error
@@ -105,12 +118,21 @@ been required in that slot to keep the tank at least at its comfort floor
 serve at the inlet temperature). 0 wherever the level stays at or above
 the floor, or rises back towards it. It is a report, not part of the
 balance.
+\item \code{house_heat_kw}: only with a house. Numeric vector, one value per row,
+rounded to 2 decimals: the heat the tank passes to the house (kW
+thermal), which is the tank's demand.
+\item \code{house_level_kwh}: only with a house. Numeric vector, one value per row,
+rounded to 2 decimals: the house's level above its setpoint at the start
+of the slot (kWh thermal), between 0 and \code{Hcap}.
 }
 
 The heat pump's electric load is the power plus \code{attr(, "backup_kw")}. Its
 heat is \code{cop} times the power, plus \code{attr(, "backup_kw")} and
 \code{attr(, "gas_backup_kw")}: pass their sum as the \code{backup} of
-\code{\link[=get_tank_level]{get_tank_level()}} and \code{\link[=get_tank_unmet_heat]{get_tank_unmet_heat()}}.
+\code{\link[=get_tank_level]{get_tank_level()}} and \code{\link[=get_tank_unmet_heat]{get_tank_unmet_heat()}}, and with a house
+\code{attr(, "house_heat_kw")} as their \code{heat_demand}. The house's level follows
+exactly from it, from 0: \code{R[t] = kh * R[t-1] + (house_heat_kw[t] - heat_demand[t]) * dt}, nothing cut off, so the heat the house loses over the
+run is \code{(1 - kh)} times the sum of \code{R} at the start of every slot.
 }
 \description{
 Optimises the electric power of a heat pump's compressor that charges one
@@ -122,7 +144,8 @@ place of the battery. The compressor's
 heat is \code{cop * P}, so there is no conversion efficiency: the COP is the
 conversion. The backup heater turns \code{B} kW of electricity into \code{B} kW of heat.
 The gas backup (a hybrid heat pump's boiler) adds \code{H} kW of heat that is not
-electricity.
+electricity. A space-heating tank may have the house it heats behind it, as
+a second, lossy store (see \emph{The house behind the tank}).
 }
 \details{
 Per slot of \code{dt} hours, with \code{S} the level in kWh thermal above the inlet
@@ -160,6 +183,33 @@ with the end-of-window rule at their last slot). Only the first
 \code{flex_window_hours = 24 * window_days} every slot is optimised. The slots
 past \code{flex_window_hours} run the \code{flexible} schedule, without backup.
 }
+\section{The house behind the tank}{
+
+With \code{Hcap} and \code{Hloss}, the building the tank heats is a second store
+behind it, a "virtual RC battery": \code{R} is the heat its interior holds above
+its setpoint (kWh, 0 at the setpoint, \code{Hcap} at the top of its comfort
+band), \code{F >= 0} the heat the tank passes to it (kW), and the heat demand
+is the house's. Per slot, with \code{kh = (1 - Hloss/100)^dt}:
+\itemize{
+\item \code{S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + H[t] - F[t]) * dt}
+\item \code{R[t] = kh * R[t-1] + (F[t] - heat_demand[t]) * dt}
+\item \verb{0 <= R[t] <= Hcap}, the floor at the setpoint hard; \code{F} has no cap of its
+own
+\item every window ends with at least the heat it started with in the tank and
+the house together, \code{S + R}, soft as above.
+}
+
+The tank's band, its soft floor, the backups and their order are those
+without a house. The house starts the run at its setpoint (\code{R = 0}) and its
+level carries from one window to the next like the tank's. Nothing orders
+the two stores: the schedule holds heat where it loses least, and heats the
+house ahead when that costs less than the heat it loses before the demand
+needs it. The demand the tank cannot pass to the house is unmet heat, as
+without a house. The slots that run \code{flexible} never heat the house: it
+serves the demand while it is above its setpoint, and the tank gives the
+rest.
+}
+
 \section{Compressor first, backup heater second, unmet heat last}{
 
 The backup heater's electricity is part of the load the objective sees, like

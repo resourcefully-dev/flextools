@@ -583,6 +583,171 @@ test_that("the backup heater runs where the COP is 0, the compressor does not", 
 })
 
 
+# Gas backup -------------------------------------------------------------------
+
+test_that("the gas backup stays off while the compressor suffices", {
+  production <- rep(0, 24)
+  production[10:16] <- 5 # PV surplus, which gas heat could never absorb
+  d <- tank_data(production = production)
+  for (objective in list("grid", "cost", 0.5)) {
+    P0 <- add_tank_optimization(d, objective, Tcap = 3, Pc = 3)
+    P <- add_tank_optimization(d, objective, Tcap = 3, Pc = 3, Pg = 3)
+    expect_equal(attr(P, "gas_backup_kw"), rep(0, 24))
+    expect_equal(attr(P, "backup_kw"), rep(0, 24))
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+    # The same schedule as without it, so the same net flow in every slot, up
+    # to the rounding: the extra column moves the solution by 1e-15 kW, and
+    # 1/3 kW of compressor lands on a rounding tie in every slot
+    expect_lte(max(abs(as.numeric(P) - as.numeric(P0))), 0.01 + 1e-9)
+    expect_equal(sum(P), sum(P0), tolerance = 0.02)
+  }
+})
+
+test_that("the gas backup covers what the compressor and the tank cannot", {
+  d <- peak_data()
+  for (objective in list("grid", "cost", 0.5)) {
+    P <- add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Pg = 3)
+    H <- attr(P, "gas_backup_kw")
+
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+    # `backup_kw` stays the resistive heater's
+    expect_equal(attr(P, "backup_kw"), rep(0, 24))
+    expect_lte(max(H), 3)
+    # The compressor runs flat out through the peak, and the gas backup
+    # delivers only the heat it lacks, during the peak
+    expect_equal(as.numeric(P[18:20]), rep(1, 3))
+    expect_equal(sum(H), 6, tolerance = 0.02)
+    expect_equal(H[-(18:20)], rep(0, 21))
+
+    path <- tank_path(P, d, init = 3, backup = H)
+    expect_gte(min(path), 0 - rounding_tol)
+    expect_lte(max(path), 3 + rounding_tol)
+    expect_equal(tank_balance_gap(P, d, init = 3, backup = H), 0, tolerance = 1e-9)
+    expect_equal(
+      get_tank_unmet_heat(P, d$heat_demand, d$cop, init = 3, Tcap = 3, SOCmin = 0, backup = H),
+      rep(0, 24)
+    )
+  }
+})
+
+test_that("the gas backup runs where the COP is 0, the compressor does not", {
+  # 15 kWh of heat while the compressor is off, a 3 kWh tank with its floor
+  # at 1 kWh: the gas backup gives exactly the 13 kWh the tank cannot
+  cop <- rep(3, 24)
+  cop[11:15] <- 0
+  heat_demand <- rep(1, 24)
+  heat_demand[11:15] <- 3
+  d <- tank_data(cop = cop, heat_demand = heat_demand)
+  for (objective in list("grid", "cost", 0.5)) {
+    P <- add_tank_optimization(
+      d, objective, Tcap = 3, Pc = 3, SOCmin = 100 / 3, Pg = 3
+    )
+    H <- attr(P, "gas_backup_kw")
+    expect_equal(as.numeric(P[11:15]), rep(0, 5))
+    expect_equal(sum(H[11:15]), 13, tolerance = 0.02)
+    expect_equal(H[-(11:15)], rep(0, 19))
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+    path <- tank_path(P, d, init = 3, backup = H)
+    expect_gte(min(path), 1 - rounding_tol)
+    expect_equal(tank_balance_gap(P, d, init = 3, backup = H), 0, tolerance = 1e-9)
+  }
+
+  # A smaller gas backup holds the floor as long as it can, and the heat
+  # unmet is exactly what it lacks: 13 - 5 * 2 = 3 kWh
+  P <- suppressMessages(
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 3, SOCmin = 100 / 3, Pg = 2)
+  )
+  H <- attr(P, "gas_backup_kw")
+  expect_equal(as.numeric(P[11:15]), rep(0, 5))
+  expect_lte(max(abs(H[11:15] - 2)), 0.01 + 1e-9) # flat out, up to rounding
+  expect_equal(sum(attr(P, "unmet_heat_kw")), 3, tolerance = 0.02)
+})
+
+test_that("the gas backup is not bound by the import capacity", {
+  # 0.5 kW of import capacity through the peak: the compressor gets 1.5 kW of
+  # heat out of it against 6 kW of demand, and the tank holds 3 kWh, so the
+  # peak lacks 18 - 4.5 - 3 = 10.5 kWh
+  d <- peak_data()
+  d$import_capacity <- 1000
+  d$import_capacity[18:20] <- 0.5
+  for (objective in list("grid", "cost", 0.5)) {
+    # The backup heater shares the capacity with the compressor: the heat it
+    # cannot give is unmet
+    P_b <- suppressMessages(
+      add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Pb = 5)
+    )
+    net_b <- d$static + P_b + attr(P_b, "backup_kw") - d$production
+    expect_lte(max(net_b[18:20]), 0.5 + 0.01)
+    expect_equal(sum(attr(P_b, "unmet_heat_kw")), 10.5, tolerance = 0.05)
+
+    # The gas backup gives it all, and the capacity holds
+    P <- suppressMessages(
+      add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Pg = 5)
+    )
+    H <- attr(P, "gas_backup_kw")
+    net <- d$static + P - d$production
+    expect_lte(max(net[18:20]), 0.5 + 0.01)
+    expect_equal(as.numeric(P[18:20]), rep(0.5, 3), tolerance = 0.01)
+    expect_equal(sum(H), 10.5, tolerance = 0.02)
+    expect_gt(min(H[18:20]), 0.5) # each slot's gas heat is above the capacity
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+    expect_equal(tank_balance_gap(P, d, init = 3, backup = H), 0, tolerance = 1e-9)
+  }
+
+  # Where the static schedule misses the capacity too (soft capacities), the
+  # gas backup runs before the capacity is missed
+  d$flexible <- 1
+  P <- suppressMessages(
+    add_tank_optimization(d, "cost", Tcap = 3, Pc = 1, Pg = 5)
+  )
+  expect_lte(max((d$static + P - d$production)[18:20]), 0.5 + 0.01)
+  expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+})
+
+test_that("the gas backup's heat is not in the net flow the objective sees", {
+  # With the gas heat taken off the demand instead, the compressor has the
+  # same schedule: the objective did not see the gas backup as load. With a
+  # PV surplus and an evening import peak, the net flow is not flat.
+  production <- rep(0, 24)
+  production[10:16] <- 2
+  static <- c(rep(0.5, 17), rep(3, 4), rep(0.5, 3))
+  heat_demand <- rep(1, 24)
+  heat_demand[18:20] <- 6
+  d <- tank_data(production = production, static = static, heat_demand = heat_demand)
+  for (objective in list("grid", "cost", 0.5)) {
+    P <- add_tank_optimization(d, objective, Tcap = 3, Pc = 1, Pg = 3)
+    H <- attr(P, "gas_backup_kw")
+    expect_gt(sum(H), 0)
+    d_net <- d
+    d_net$heat_demand <- d$heat_demand - H
+    P_net <- add_tank_optimization(d_net, objective, Tcap = 3, Pc = 1)
+    net <- d$static + P - d$production
+    net_without <- d$static + P_net - d$production
+    expect_lte(max(abs(net - net_without)), 0.01 + 1e-9)
+  }
+})
+
+test_that("a tank has one backup, and `Pg` is checked like `Pb`", {
+  d <- tank_data()
+  expect_error(
+    add_tank_optimization(d, Tcap = 3, Pc = 3, Pb = 1, Pg = 1),
+    "`Pb`.*`Pg`"
+  )
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Pg = -1), "Pg")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Pg = c(1, 2)), "Pg")
+  expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Pg = NA_real_), "Pg")
+  # One of them at 0 is a tank with the other
+  expect_identical(
+    add_tank_optimization(peak_data(), Tcap = 3, Pc = 1, Pb = 0, Pg = 3),
+    add_tank_optimization(peak_data(), Tcap = 3, Pc = 1, Pg = 3)
+  )
+  expect_identical(
+    add_tank_optimization(peak_data(), Tcap = 3, Pc = 1, Pb = 3, Pg = 0),
+    add_tank_optimization(peak_data(), Tcap = 3, Pc = 1, Pb = 3)
+  )
+})
+
+
 # Partial windows --------------------------------------------------------------
 
 test_that("the slots before the first window start form a leading window", {
@@ -958,6 +1123,34 @@ test_that("runs that solved before the level was scaled are unchanged", {
       }
     } else {
       expect_equal(P, golden[[key]], tolerance = 1e-6, label = key)
+    }
+  }
+})
+
+test_that("without a gas backup the runs of 1.19.5 are unchanged", {
+  # Pinned from flextools 1.19.5, before the gas backup: `Pg = NULL` and
+  # `Pg = 0` give exactly those results, with no `gas_backup_kw` attribute.
+  # The slots on a rounding tie (see below) may move by one step elsewhere.
+  golden <- readRDS(test_path("golden-tank-schedules-1.19.5.rds"))
+  cases <- tank_golden_cases()
+  expect_setequal(names(golden), names(cases))
+  ties <- c("evening_w05_3", "evening_ramp", "peak_backup_grid", "peak_backup_w05")
+  for (key in names(cases)) {
+    for (Pg in list(NULL, 0)) {
+      args <- cases[[key]][[2]]
+      args["Pg"] <- list(Pg)
+      P <- run_tank_case(list(cases[[key]][[1]], args))
+      expect_null(attr(P, "gas_backup_kw"))
+      expect_setequal(names(attributes(P)), names(attributes(golden[[key]])))
+      if (key %in% ties) {
+        for (part in list(NULL, "backup_kw", "unmet_heat_kw")) {
+          x <- if (is.null(part)) as.numeric(P) else attr(P, part)
+          y <- if (is.null(part)) as.numeric(golden[[key]]) else attr(golden[[key]], part)
+          expect_lte(max(abs(x - y)), 0.01 + 1e-9, label = paste(key, part))
+        }
+      } else {
+        expect_equal(P, golden[[key]], tolerance = 1e-9, label = key)
+      }
     }
   }
 })

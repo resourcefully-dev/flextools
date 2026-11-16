@@ -1,3 +1,26 @@
+# flextools 1.20.0
+
+* `add_tank_optimization()` takes `Pg` (default `NULL`), the rating of a gas
+  backup in kW thermal, such as the boiler of a hybrid heat pump. Its heat
+  `H` enters the tank's balance next to the compressor's,
+  `S[t] = k * S[t-1] + (cop * P + B + H - Q) * dt`, with `0 <= H <= Pg` in
+  every slot, also where the COP is 0. Unlike the resistive backup heater
+  `Pb`, its heat is not electric load: it is not in the net flow any
+  objective sees, nor in the import and export capacities or their slack.
+  It ranks like the backup heater (`2 * h` per kW of heat, without the
+  electricity): it runs only for the heat the compressor cannot give,
+  before a missed grid capacity and before the comfort floor, never to
+  absorb a surplus, and the gas is not priced against electricity. Its heat
+  per slot comes back as `attr(result, "gas_backup_kw")`, rounded like
+  `backup_kw`, which stays the resistive heater's. A 3 kWh tank with a
+  1 kW compressor (COP 3) and an evening peak of 6 kW for three hours under
+  a 0.5 kW import capacity: a 5 kW backup heater shares the capacity with
+  the compressor and leaves 10.5 kWh unmet, a 5 kW gas backup gives the
+  10.5 kWh with the import within the capacity. `Pb` and `Pg` both above 0
+  is an error naming both. With `Pg = NULL` or 0 the results are those of
+  1.19.5, with no new attribute. `get_tank_level()` and
+  `get_tank_unmet_heat()` take the gas backup's heat as their `backup`.
+
 # flextools 1.19.5
 
 * Fix: `add_tank_optimization()` failed on heat pumps of a few MW with "the

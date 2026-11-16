@@ -4,7 +4,7 @@
 \alias{tank_min_unmet}
 \title{Least heat a window cannot give at the inlet temperature}
 \usage{
-tank_min_unmet(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total)
+tank_min_unmet(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total, ub_H = 0)
 }
 \arguments{
 \item{Q}{numeric vector, heat demand (kW thermal)}
@@ -19,13 +19,15 @@ tank_min_unmet(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total)
 
 \item{ub_P, ub_B, ub_total}{numeric vectors, caps of the compressor, the
 backup heater and their sum (kW)}
+
+\item{ub_H}{numeric, cap of the gas backup (kW thermal), outside \code{ub_total}}
 }
 \value{
 numeric vector, heat not served per slot (kW thermal)
 }
 \description{
 The heat demand the tank cannot serve at the inlet temperature (level 0)
-with the compressor and the backup heater at full power whenever the tank
-has room, the compressor first: no schedule leaves less.
+with the compressor, the backup heater and the gas backup at full power
+whenever the tank has room, the compressor first: no schedule leaves less.
 }
 \keyword{internal}

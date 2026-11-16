@@ -22,6 +22,7 @@ tank_solve_window(
   objective,
   lambda = 0,
   Pb = 0,
+  Pg = 0,
   soft = FALSE,
   slack_import_max = 0,
   slack_export_max = 0,
@@ -60,6 +61,9 @@ capacities (kW)}
 
 \item{Pb}{numeric, backup heater cap (kW); 0 means no backup heater}
 
+\item{Pg}{numeric, gas backup cap (kW thermal); 0 means no gas backup. Its
+heat enters the tank's balance only: not the net flow, nor the capacities.}
+
 \item{soft}{logical, whether the comfort floor is soft: the level may go
 down to the inlet temperature, below the floor at a price}
 
@@ -79,9 +83,9 @@ whatever the heat pump's size, and 1 (kW) on HiGHS. 1 is the formulation
 in kW that OSQP used up to flextools 1.19.4.}
 }
 \value{
-list of the unrounded \code{power} and \code{backup} (kW) and the \code{status};
-when the window has no solution, \code{power} is \code{NULL} and \code{status} says why
-(see \code{tank_failure()})
+list of the unrounded \code{power}, \code{backup} and \code{gas} (kW) and the
+\code{status}; when the window has no solution, \code{power} is \code{NULL} and \code{status}
+says why (see \code{tank_failure()})
 }
 \description{
 Solve one tank window

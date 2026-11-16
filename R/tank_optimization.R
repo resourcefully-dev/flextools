@@ -3,20 +3,23 @@
 # A heat pump charging one thermal tank. The compressor's electric power `P`
 # is the decision, the heat demand `Q` discharges the tank, and the COP `cop`
 # converts one into the other. A resistive backup heater `B` (COP 1) can add
-# heat next to the compressor. Per slot of `dt` hours, with the level `S` in
-# kWh thermal above the inlet temperature (level 0):
+# heat next to the compressor, or else a gas boiler `H`, whose heat is not
+# electric load. Per slot of `dt` hours, with the level `S` in kWh thermal
+# above the inlet temperature (level 0):
 #
-#   S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] - Q[t]) * dt
+#   S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + H[t] - Q[t]) * dt
 #   Smin <= S[t] <= Smax                              k = (1 - loss/100)^dt
 #   0 <= P[t] <= Pc,  P[t] = 0 where cop[t] = 0
 #   0 <= B[t] <= Pb   (also where cop[t] = 0)
+#   0 <= H[t] <= Pg   (also where cop[t] = 0)
 #   S[last slot of a window] >= S[slot before its first]
 #
 # A window with no schedule that holds this is solved again with a soft
 # comfort floor (the level may go down to 0, with the depth below `Smin`
 # penalised, plus `U` for the demand the tank cannot serve at 0) and soft grid
-# capacities. `B` is a variable only with a backup heater (`Pb > 0`), so
-# without one, and where the band holds, the problem is the one without them.
+# capacities. `B` is a variable only with a backup heater (`Pb > 0`) and `H`
+# only with a gas backup (`Pg > 0`), so without them, and where the band
+# holds, the problem is the one without them.
 #
 # The level carries from one window to the next, so windows are solved in
 # order, and every slot no window optimises runs the static `flexible`
@@ -258,25 +261,27 @@ tank_unmet_heat <- function(
 #' Least heat a window cannot give at the inlet temperature
 #'
 #' The heat demand the tank cannot serve at the inlet temperature (level 0)
-#' with the compressor and the backup heater at full power whenever the tank
-#' has room, the compressor first: no schedule leaves less.
+#' with the compressor, the backup heater and the gas backup at full power
+#' whenever the tank has room, the compressor first: no schedule leaves less.
 #'
 #' @inheritParams tank_solve_window
 #' @param ub_P,ub_B,ub_total numeric vectors, caps of the compressor, the
 #'   backup heater and their sum (kW)
+#' @param ub_H numeric, cap of the gas backup (kW thermal), outside `ub_total`
 #'
 #' @return numeric vector, heat not served per slot (kW thermal)
 #' @keywords internal
 #'
-tank_min_unmet <- function(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total) {
+tank_min_unmet <- function(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total, ub_H = 0) {
   n <- length(Q)
   Smax <- rep_len(Smax, n)
+  ub_H <- rep_len(ub_H, n)
   U <- numeric(n)
   s <- S0
   for (t in seq_len(n)) {
     P <- min(ub_P[t], ub_total[t])
     B <- min(ub_B[t], ub_total[t] - P)
-    heat <- min(cop[t] * P + B, max((Smax[t] - k * s) / dt + Q[t], 0))
+    heat <- min(cop[t] * P + B + ub_H[t], max((Smax[t] - k * s) / dt + Q[t], 0))
     s_next <- k * s + (heat - Q[t]) * dt
     if (s_next < 0) {
       U[t] <- -s_next / dt
@@ -296,7 +301,7 @@ tank_min_unmet <- function(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total) {
 #' @keywords internal
 #'
 tank_failure <- function(status) {
-  list(power = NULL, backup = NULL, status = status)
+  list(power = NULL, backup = NULL, gas = NULL, status = status)
 }
 
 
@@ -318,6 +323,8 @@ tank_failure <- function(status) {
 #' @param objective `"grid"`, `"cost"` or a number strictly between 0 and 1
 #' @param lambda numeric, ramping penalty weight
 #' @param Pb numeric, backup heater cap (kW); 0 means no backup heater
+#' @param Pg numeric, gas backup cap (kW thermal); 0 means no gas backup. Its
+#'   heat enters the tank's balance only: not the net flow, nor the capacities.
 #' @param soft logical, whether the comfort floor is soft: the level may go
 #'   down to the inlet temperature, below the floor at a price
 #' @param slack_import_max,slack_export_max numeric vectors, how far each slot
@@ -334,9 +341,9 @@ tank_failure <- function(status) {
 #'   whatever the heat pump's size, and 1 (kW) on HiGHS. 1 is the formulation
 #'   in kW that OSQP used up to flextools 1.19.4.
 #'
-#' @return list of the unrounded `power` and `backup` (kW) and the `status`;
-#'   when the window has no solution, `power` is `NULL` and `status` says why
-#'   (see `tank_failure()`)
+#' @return list of the unrounded `power`, `backup` and `gas` (kW) and the
+#'   `status`; when the window has no solution, `power` is `NULL` and `status`
+#'   says why (see `tank_failure()`)
 #' @keywords internal
 #'
 tank_solve_window <- function(
@@ -357,6 +364,7 @@ tank_solve_window <- function(
   objective,
   lambda = 0,
   Pb = 0,
+  Pg = 0,
   soft = FALSE,
   slack_import_max = 0,
   slack_export_max = 0,
@@ -369,6 +377,9 @@ tank_solve_window <- function(
   slack_import_max <- as.numeric(rep_len(slack_import_max, n))
   slack_export_max <- as.numeric(rep_len(slack_export_max, n))
   with_backup <- Pb > 0
+  # The gas backup's heat is no electric load: it is in no row or box of the
+  # load below, only in the tank's dynamics
+  with_gas <- Pg > 0
   soft_caps <- any(slack_import_max > 0) || any(slack_export_max > 0)
 
   # The net flow `L + P + B - G` must stay within the capacities, which for
@@ -440,7 +451,8 @@ tank_solve_window <- function(
       Smax = ub_S,
       ub_P = ub_P,
       ub_B = if (with_backup) ub_B else rep(0, n),
-      ub_total = ub_total
+      ub_total = ub_total,
+      ub_H = Pg
     )
   } else {
     lb_S <- rep(Smin, n)
@@ -455,8 +467,8 @@ tank_solve_window <- function(
   # level is between 0 and 1 for any tank. Every row and bound on the level
   # (`S`), its depth below the floor (`D`) and the missed end condition (`R`)
   # is in that unit, and so is the price of `D` and `R`. The heat (`P`, `B`,
-  # `U`) is in `power_unit` (below). The power is the solution; the level in
-  # kWh follows from it on the exact dynamics below. HiGHS keeps kWh.
+  # `H`, `U`) is in `power_unit` (below). The power is the solution; the level
+  # in kWh follows from it on the exact dynamics below. HiGHS keeps kWh.
   use_highs <- identical(objective, "cost") && lambda == 0
   if (is.null(level_unit)) {
     level_unit <- if (use_highs) 1 else Smax
@@ -484,6 +496,11 @@ tank_solve_window <- function(
     idx_B <- nv + seq_len(n)
     nv <- nv + n
   }
+  idx_H <- integer(0)
+  if (with_gas) {
+    idx_H <- nv + seq_len(n)
+    nv <- nv + n
+  }
   idx_D <- integer(0)
   idx_R <- integer(0)
   if (soft) {
@@ -507,22 +524,24 @@ tank_solve_window <- function(
     nv <- nv + 2 * n
   }
 
-  # Dynamics: S_t - k * S_{t-1} - dt * (cop_t * P_t + B_t + U_t) = -Q_t * dt
-  # (+ k * S0 at t = 1), divided by `level_unit`
+  # Dynamics: S_t - k * S_{t-1} - dt * (cop_t * P_t + B_t + H_t + U_t) =
+  # -Q_t * dt (+ k * S0 at t = 1), divided by `level_unit`
   A_dyn <- Matrix::sparseMatrix(
     i = c(
       seq_len(n),
       seq_len(n),
       seq_len(n - 1) + 1,
       if (with_backup) seq_len(n),
+      if (with_gas) seq_len(n),
       if (soft) seq_len(n)
     ),
-    j = c(idx_S, idx_P, idx_S[seq_len(n - 1)], idx_B, idx_U),
+    j = c(idx_S, idx_P, idx_S[seq_len(n - 1)], idx_B, idx_H, idx_U),
     x = c(
       rep(1, n),
       -cop * dt / level_unit,
       rep(-k, n - 1),
       if (with_backup) rep(-dt / level_unit, n),
+      if (with_gas) rep(-dt / level_unit, n),
       if (soft) rep(-dt / level_unit, n)
     ),
     dims = c(n, nv)
@@ -537,6 +556,10 @@ tank_solve_window <- function(
   if (with_backup) {
     lower <- c(lower, rep(0, n))
     upper <- c(upper, ub_B)
+  }
+  if (with_gas) {
+    lower <- c(lower, rep(0, n))
+    upper <- c(upper, rep(Pg, n))
   }
   if (soft) {
     # U: no slot needs more than its demand plus refilling the whole band.
@@ -642,14 +665,16 @@ tank_solve_window <- function(
     scale <- 1
   }
 
-  # Heat from the backup heater costs more than any compressor heat, and
-  # missing a grid capacity more still. Going below the comfort floor costs
-  # more per kWh and slot than any of them per kWh of heat, so the solver
-  # runs the compressor first, then the backup heater, then misses the
-  # capacity, and only then lets the tank cool below its floor. The demand the
-  # tank cannot serve at the inlet temperature (`U`) is capped at the least
-  # any schedule leaves instead of priced.
-  if (with_backup || soft || soft_caps) {
+  # Heat from the backup heater or the gas backup costs more than any
+  # compressor heat, and missing a grid capacity more still. Going below the
+  # comfort floor costs more per kWh and slot than any of them per kWh of
+  # heat, so the solver runs the compressor first, then the backup heater (or
+  # the gas backup), then misses the capacity, and only then lets the tank
+  # cool below its floor. The gas backup pays the backup heater's price
+  # without its electricity, which it does not draw: the gas itself is not
+  # priced. The demand the tank cannot serve at the inlet temperature (`U`)
+  # is capped at the least any schedule leaves instead of priced.
+  if (with_backup || with_gas || soft || soft_caps) {
     heat_price <- tank_heat_price(
       L,
       G,
@@ -663,6 +688,7 @@ tank_solve_window <- function(
     )
   }
   c_B <- if (with_backup) 2 * heat_price else 0
+  c_H <- if (with_gas) 2 * heat_price else 0
   c_U <- 0
   c_D <- if (soft) 20 * heat_price / dt * level_unit else 0
   c_S <- if (soft_caps) 10 * heat_price else 0
@@ -673,6 +699,7 @@ tank_solve_window <- function(
     # Pure LP on HiGHS
     lin <- numeric(nv)
     lin[idx_B] <- c_B
+    lin[idx_H] <- c_H
     lin[idx_U] <- c_U
     lin[c(idx_D, idx_R)] <- c_D
     lin[c(idx_si, idx_se)] <- c_S
@@ -726,6 +753,8 @@ tank_solve_window <- function(
       P_quad[idx_B, idx_B] <- flow_block
       q[idx_B] <- 2 * w_flow * (L - G) + c_B
     }
+    # The gas backup is no electric load: its price only
+    q[idx_H] <- c_H
     q[idx_U] <- c_U
     q[c(idx_D, idx_R)] <- c_D
     q[c(idx_si, idx_se)] <- c_S
@@ -734,7 +763,7 @@ tank_solve_window <- function(
     # rows in kW (the balance, the capacities and the cap on `U`) are divided
     # by it. The level's rows (dynamics, floor, end) are in `level_unit`.
     col_unit <- rep(1, nv)
-    col_unit[c(idx_P, idx_B, idx_U, idx_si, idx_se, idx_I, idx_E)] <- power_unit
+    col_unit[c(idx_P, idx_B, idx_H, idx_U, idx_si, idx_se, idx_I, idx_E)] <- power_unit
     row_unit <- c(
       col_unit,
       rep(1, n),
@@ -780,6 +809,7 @@ tank_solve_window <- function(
     P <- pmin(pmax(x[idx_P], lb_P), ub_P)
     B <- rep(0, n)
   }
+  H <- if (with_gas) pmin(pmax(x[idx_H], 0), Pg) else rep(0, n)
 
   # OSQP declares an infeasible problem as such, but its accuracy is absolute,
   # so check the power it returns against the band once more on the exact
@@ -793,7 +823,7 @@ tank_solve_window <- function(
   # OSQP's accuracy is relative on rows scaled by `Smax`, so its overshoot
   # grows with the tank: the check allows 1e-4 of the top (0.01 % SOC, the
   # smallest step of the reported SOC) and at least 0.001 kWh.
-  level <- tank_level_path(P, Q, cop, S0, k, dt, backup = B)[-1]
+  level <- tank_level_path(P, Q, cop, S0, k, dt, backup = B + H)[-1]
   tol <- max(1e-3, 1e-4 * Smax)
   if (
     (!soft && any(level < Smin - tol)) ||
@@ -802,7 +832,7 @@ tank_solve_window <- function(
   ) {
     return(tank_failure("the solution leaves the tank's band on the exact dynamics"))
   }
-  list(power = P, backup = B, status = "optimal")
+  list(power = P, backup = B, gas = H, status = "optimal")
 }
 
 
@@ -937,24 +967,29 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' Heat pump with a thermal tank: optimal compressor profile
 #'
 #' Optimises the electric power of a heat pump's compressor that charges one
-#' thermal tank, which the heat demand discharges, with an optional resistive
-#' backup heater next to it. It mirrors [add_battery_optimization()]: the same
-#' `opt_data` conventions, objectives (except `"capacity"`), optimization
-#' windows and solvers, with the tank in place of the battery. The compressor's
+#' thermal tank, which the heat demand discharges, with an optional backup
+#' next to it: a resistive heater or a gas boiler. It mirrors
+#' [add_battery_optimization()]: the same `opt_data` conventions, objectives
+#' (except `"capacity"`), optimization windows and solvers, with the tank in
+#' place of the battery. The compressor's
 #' heat is `cop * P`, so there is no conversion efficiency: the COP is the
 #' conversion. The backup heater turns `B` kW of electricity into `B` kW of heat.
+#' The gas backup (a hybrid heat pump's boiler) adds `H` kW of heat that is not
+#' electricity.
 #'
 #' Per slot of `dt` hours, with `S` the level in kWh thermal above the inlet
 #' water temperature (level 0, `SOC = 0`) and `k = (1 - loss/100)^dt`:
 #'
-#' - `S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] - heat_demand[t]) * dt`
+#' - `S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + H[t] - heat_demand[t]) * dt`
 #' - `Tcap * SOCmin/100 <= S[t] <= Tcap * SOCmax/100`
 #' - `0 <= P[t] <= Pc`, and `P[t] = 0` where `cop[t] = 0`
 #' - `0 <= B[t] <= Pb`, also where `cop[t] = 0`
+#' - `0 <= H[t] <= Pg`, also where `cop[t] = 0`
 #' - every window ends at least as full as it started.
 #'
-#' `B` (the backup heater) is a variable only with `Pb > 0`. The comfort floor
-#' `SOCmin` is **soft**: when the compressor and the backup heater cannot hold
+#' `B` (the backup heater) is a variable only with `Pb > 0`, and `H` (the gas
+#' backup) only with `Pg > 0`; a tank has one backup at most. The comfort floor
+#' `SOCmin` is **soft**: when the compressor and the backup cannot hold
 #' it, the tank keeps giving heat below it, cooling down to the inlet
 #' temperature (level 0) at most, as a real tank would. The **unmet heat** is
 #' the heat that would have been required to keep the tank at least at its
@@ -974,7 +1009,7 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' with the end-of-window rule at their last slot). Only the first
 #' `flex_window_hours` of every window are optimised, so with
 #' `flex_window_hours = 24 * window_days` every slot is optimised. The slots
-#' past `flex_window_hours` run the `flexible` schedule, without backup heater.
+#' past `flex_window_hours` run the `flexible` schedule, without backup.
 #'
 #' @section Compressor first, backup heater second, unmet heat last:
 #' The backup heater's electricity is part of the load the objective sees, like
@@ -998,6 +1033,15 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' runs for heat the compressor cannot deliver (it never absorbs a PV surplus
 #' the compressor could).
 #'
+#' The gas backup pays the same `2 * h` per kW of heat, at the same rank: only
+#' for heat the compressor cannot deliver, before a missed grid capacity and
+#' before the comfort floor. Its heat is not electricity: it is not part of the
+#' net flow that any objective sees, nor of the grid capacities and their
+#' slack, and `h` does not count it. The gas it burns is not priced (its cost
+#' is not weighed against electricity), so it never runs where the compressor
+#' could heat instead within the grid capacities, however expensive the
+#' electricity.
+#'
 #' When a window has no schedule that holds the band within the grid
 #' capacities, it is solved again with a soft floor: the level may go down to
 #' 0, and every kWh below `SOCmin` costs `20 * h / dt` per slot, more than
@@ -1017,11 +1061,11 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' `optimization_slack_ceiling()`): for import, with the heat pump running
 #' `flexible`; for export, with the heat pump off, since a full tank cannot
 #' absorb a surplus. It costs `10 * h` per kW (electric), between the backup
-#' heater and the comfort floor: the solver uses the compressor and the backup
-#' heater to their limits before it misses a capacity, and misses an import
-#' capacity before it lets the tank cool below its floor. The heat pump off
-#' with the tank cooling always fits these bounds, so **every window has a
-#' schedule**.
+#' and the comfort floor: the solver uses the compressor and the backup to
+#' their limits before it misses a capacity, and misses an import capacity
+#' before it lets the tank cool below its floor. The gas backup is not bound
+#' by the capacities at all. The heat pump off with the tank cooling always
+#' fits these bounds, so **every window has a schedule**.
 #' A capacity left missed is reported with a message; compare the net flow
 #' `static + P + attr(, "backup_kw") - production` with the capacities to find
 #' where.
@@ -1080,6 +1124,11 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' @param Pb numeric, rating of the resistive backup heater (kW electric, which
 #'   is also its kW thermal, >= 0). `NULL` (default) or 0 means no backup
 #'   heater.
+#' @param Pg numeric, rating of the gas backup, such as the boiler of a hybrid
+#'   heat pump (kW thermal, >= 0). Its heat is not electric load: it is in the
+#'   tank's balance only. `NULL` (default) or 0 means no gas backup, and the
+#'   result is the one without the argument. `Pb` and `Pg` cannot both be
+#'   above 0.
 #'
 #' @return numeric vector, the compressor's electric power (kW), one value per
 #'   `opt_data` row, rounded to 2 decimals: the optimised power in optimised
@@ -1088,7 +1137,10 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'
 #' - `backup_kw`: numeric vector, one value per row, rounded to 2 decimals: the
 #'   backup heater's power (kW electric = kW thermal); 0 outside optimised
-#'   windows and everywhere without a backup heater.
+#'   windows and everywhere without a backup heater (also with a gas backup).
+#' - `gas_backup_kw`: only with `Pg > 0`. Numeric vector, one value per row,
+#'   rounded to 2 decimals: the gas backup's heat (kW thermal, not
+#'   electricity); 0 outside optimised windows.
 #' - `unmet_heat_kw`: numeric vector, one value per row, rounded to 2 decimals:
 #'   the unmet heat (kW thermal, not electricity): the heat that would have
 #'   been required in that slot to keep the tank at least at its comfort floor
@@ -1097,7 +1149,10 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   the floor, or rises back towards it. It is a report, not part of the
 #'   balance.
 #'
-#' The heat pump's electric load is the power plus `attr(, "backup_kw")`.
+#' The heat pump's electric load is the power plus `attr(, "backup_kw")`. Its
+#' heat is `cop` times the power, plus `attr(, "backup_kw")` and
+#' `attr(, "gas_backup_kw")`: pass their sum as the `backup` of
+#' [get_tank_level()] and [get_tank_unmet_heat()].
 #'
 #' @export
 #'
@@ -1139,6 +1194,7 @@ add_tank_optimization <- function(
   lambda = 0,
   loss = 0,
   Pb = NULL,
+  Pg = NULL,
   on_failure = c("flexible", "error")
 ) {
   if (is.null(opt_data)) {
@@ -1183,6 +1239,9 @@ add_tank_optimization <- function(
   if (is.null(Pb)) {
     Pb <- 0
   }
+  if (is.null(Pg)) {
+    Pg <- 0
+  }
   if (identical(on_failure, c("flexible", "error"))) {
     on_failure <- "flexible"
   }
@@ -1197,6 +1256,13 @@ add_tank_optimization <- function(
     )
   }
   tank_check_number(Pb, "Pb", 0)
+  tank_check_number(Pg, "Pg", 0)
+  if (Pb > 0 && Pg > 0) {
+    stop(
+      "Error: a tank has one backup: `Pb` (resistive) and `Pg` (gas) cannot both be above 0.",
+      call. = FALSE
+    )
+  }
   tank_check_number(SOCmin, "SOCmin", 0, 100)
   tank_check_number(SOCmax, "SOCmax", 0, 100)
   if (SOCmin >= SOCmax) {
@@ -1247,6 +1313,7 @@ add_tank_optimization <- function(
 
   P_out <- round(flexible, 2)
   B_out <- numeric(n_rows)
+  H_out <- numeric(n_rows)
   level <- Tcap * SOCini / 100 # level at the start of slot `pos`
   pos <- 1L
 
@@ -1261,7 +1328,7 @@ add_tank_optimization <- function(
       level,
       k,
       dt,
-      backup = B_out[idx]
+      backup = B_out[idx] + H_out[idx]
     )
     path[length(path)]
   }
@@ -1312,7 +1379,8 @@ add_tank_optimization <- function(
       dt = dt,
       objective = opt_objective,
       lambda = lambda,
-      Pb = Pb
+      Pb = Pb,
+      Pg = Pg
     )
     sol <- do.call(tank_solve_window, window_args)
 
@@ -1359,6 +1427,8 @@ add_tank_optimization <- function(
       )
       level <- run_flexible(level, idx)
     } else {
+      # The backup heater and the gas backup add heat to the tank alike, and a
+      # tank has one of them at most: they are rounded as one backup
       target <- tank_level_path(
         sol$power,
         Q[idx],
@@ -1366,7 +1436,7 @@ add_tank_optimization <- function(
         S0,
         k,
         dt,
-        backup = sol$backup
+        backup = sol$backup + sol$gas
       )[-1]
       rounded <- tank_round_power(
         target,
@@ -1376,13 +1446,18 @@ add_tank_optimization <- function(
         k,
         dt,
         Pc,
-        backup = sol$backup,
-        Pb = Pb,
+        backup = sol$backup + sol$gas,
+        Pb = Pb + Pg,
         power = sol$power,
         Smax = Smax
       )
       P_out[idx] <- rounded$power
-      B_out[idx] <- rounded$backup
+      if (Pg > 0) {
+        H_out[idx] <- rounded$backup
+      } else {
+        B_out[idx] <- rounded$backup
+      }
+      # The gas backup is not in the net flow
       net <- L[idx] + P_out[idx] + B_out[idx] - G[idx]
       if (
         any(net > import_capacity[idx] + 0.01) ||
@@ -1412,7 +1487,7 @@ add_tank_optimization <- function(
     SOCmin = SOCmin,
     loss = loss,
     time_resolution = time_resolution,
-    backup = B_out
+    backup = B_out + H_out
   )
   if (any(U_out > 0)) {
     message(
@@ -1421,6 +1496,9 @@ add_tank_optimization <- function(
   }
 
   attr(P_out, "backup_kw") <- B_out
+  if (Pg > 0) {
+    attr(P_out, "gas_backup_kw") <- H_out
+  }
   attr(P_out, "unmet_heat_kw") <- U_out
   P_out
 }
@@ -1444,9 +1522,10 @@ add_tank_optimization <- function(
 #' @param loss numeric, standing loss of the level (% per hour)
 #' @param time_resolution numeric, time resolution of the time-series (in
 #'   minutes)
-#' @param backup numeric, backup heater power (kW electric = kW thermal):
-#'   `attr(result, "backup_kw")` of [add_tank_optimization()], or 0 without a
-#'   backup heater
+#' @param backup numeric, backup heat (kW thermal): `attr(result,
+#'   "backup_kw")` of [add_tank_optimization()] (a resistive heater, kW
+#'   electric = kW thermal), or its `attr(result, "gas_backup_kw")` with a gas
+#'   backup, or 0 without a backup
 #'
 #' @return numeric vector of the level (kWh), rounded to 2 decimals
 #' @export

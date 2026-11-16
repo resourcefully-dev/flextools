@@ -595,8 +595,11 @@ test_that("the gas backup stays off while the compressor suffices", {
     expect_equal(attr(P, "gas_backup_kw"), rep(0, 24))
     expect_equal(attr(P, "backup_kw"), rep(0, 24))
     expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
-    # The same schedule as without it, so the same net flow in every slot
-    expect_equal(as.numeric(P), as.numeric(P0), tolerance = 1e-9)
+    # The same schedule as without it, so the same net flow in every slot, up
+    # to the rounding: the extra column moves the solution by 1e-15 kW, and
+    # 1/3 kW of compressor lands on a rounding tie in every slot
+    expect_lte(max(abs(as.numeric(P) - as.numeric(P0))), 0.01 + 1e-9)
+    expect_equal(sum(P), sum(P0), tolerance = 0.02)
   }
 })
 

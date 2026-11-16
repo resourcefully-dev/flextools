@@ -172,6 +172,26 @@ The floor of the house at its setpoint is hard: the demand is always served from
 
 Nothing orders the two stores: the losses do. The schedule holds heat in the tank wherever the tank loses less, and heats the house ahead of the demand when that costs less than the heat it will lose by then, for example before a price peak. For a building with interior heat capacity $C$ (J/K), heat loss coefficient $K$ (W/K) and a comfort band $\Delta T$ (K), $H_{cap} = C \Delta T / 3.6 \cdot 10^{6}$ and, with the time constant $\tau = C / K / 3600$ hours, $l_h = 100 \left(1 - e^{-1/\tau}\right)$.
 
+## Cooling
+
+Nothing in the model is particular to heat: each store holds energy above a reference, and each loses a share of it per hour. A chiller with a chilled-water buffer, cooling a house, is the same problem read as cold:
+
+| Heating | Cooling |
+|---|---|
+| `heat_demand` $Q_t$: heat the house needs | Heat the house gains (sun, people, outdoor air), which the chiller has to remove |
+| `cop` | EER of the chiller |
+| $S_t$: heat in the tank above the inlet temperature | Cold in the buffer below its return temperature |
+| $R_t$: heat in the house above its setpoint | Cold in the house below its setpoint: how far it is pre-cooled |
+| $R_t \ge 0$ | The house is never warmer than its setpoint |
+| `Hcap` | How far below the setpoint the house may be pre-cooled, as above with $\Delta T$ below it |
+| `unmet_heat_kw` | Cooling that could not be delivered |
+
+So the house is pre-cooled ahead of a price peak, for example on PV power at midday ahead of the evening peak. A chiller without a buffer runs with a very small tank (`Tcap = 0.05`, say). Some parts of the model have no counterpart:
+
+- Neither backup (`Pb`, `Pg`) has a cooling counterpart: leave both out.
+- Only the sensible part of the cooling demand can be stored in the building. Dehumidification (the latent part) has to be served when it comes, so it is best left out of $Q_t$ and added to the static load.
+- The house's loss is a fixed share per hour. With the sun and the outdoor air behind most of the drift back to the setpoint, it is rougher for cooling than for heating.
+
 ## Soft comfort floor
 
 Without a soft floor, a window where the compressor and the backup heater cannot keep the tank above $SOC_{min}$ (a cold spell, a compressor too small for the peak, a COP of 0 during a long defrost) would have no solution at all. A real tank, in that case, keeps giving heat: its water gets colder than the comfort temperature, down to the temperature of the inlet water, and from there it gives no more. The optimization does the same. When a window has no solution that holds the floor, it is solved again with:

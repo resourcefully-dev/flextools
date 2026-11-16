@@ -927,6 +927,45 @@ test_that("the house carries from one window to the next, and `flexible` never h
   )
 })
 
+test_that("read as cold, a house is pre-cooled ahead of a price peak", {
+  # Cooling: the demand is the heat the house gains, the COP is the chiller's
+  # EER, the tank holds cold below its return temperature and the house holds
+  # cold below its setpoint. 4 kW of cooling at 15:00, an EER that falls from
+  # 4 to 2.5 in the afternoon, cheap PV power from 10:00 to 16:00 and a peak
+  # from 17:00 to 21:00. The house can be pre-cooled by 8 kWh and loses 10 %
+  # of it per hour. A 1.5 kWh chilled-water buffer, and a chiller without one
+  # (a 0.05 kWh tank).
+  h <- 0:23
+  cooling <- 4 * pmax(0, sin(pi * (h - 9) / 13))
+  d <- tank_data(heat_demand = cooling, cop = 4 - 1.5 * cooling / 4, cheap_hours = 0:23)
+  d$flexible <- d$heat_demand / d$cop
+  d$price_imported <- 0.25
+  d$price_imported[11:16] <- 0.05
+  d$price_imported[18:21] <- 0.6
+  for (Tcap in c(1.5, 0.05)) {
+    P0 <- add_tank_optimization(d, "cost", Tcap = Tcap, Pc = 2)
+    P <- add_tank_optimization(d, "cost", Tcap = Tcap, Pc = 2, Hcap = 8, Hloss = 10)
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 24))
+
+    # The house is pre-cooled on the PV power and never gets warmer than its
+    # setpoint, and the chiller runs less through the peak
+    R <- house_path(P, d, Hloss = 10)
+    expect_equal(attr(P, "house_level_kwh"), round(R[1:24], 2))
+    expect_gt(R[18], 6)
+    expect_gte(min(R), -1e-9)
+    expect_lte(max(R), 8 + 1e-9)
+    expect_lt(sum(P[18:21]), sum(P0[18:21]) - 1)
+    expect_lt(sum(d$price_imported * P), sum(d$price_imported * P0) - 1)
+
+    expect_equal(
+      sum(attr(P, "house_heat_kw")),
+      sum(d$heat_demand) + sum(0.1 * R[1:24]) + R[25],
+      tolerance = 1e-9
+    )
+    expect_equal(tank_balance_gap(P, tank_side(P, d), init = Tcap), 0, tolerance = 1e-9)
+  }
+})
+
 test_that("a house takes `Hcap` and `Hloss` together, in range", {
   d <- tank_data()
   expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30), "`Hcap`.*`Hloss`")

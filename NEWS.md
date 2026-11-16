@@ -24,6 +24,12 @@
   below 0 or `Hloss` outside [0, 100) is an error naming it. Without them the
   results are those of 1.20.0, with no new attribute.
 
+* The thermal optimization article explains how to use `add_tank_optimization()`
+  for cooling, by reading every quantity as cold instead of heat: the cooling
+  demand as `heat_demand`, the chiller's EER as `cop`, and a house pre-cooled
+  below its setpoint as the house store. A chiller without a buffer runs
+  with a very small tank.
+
 # flextools 1.20.0
 
 * `add_tank_optimization()` takes `Pg` (default `NULL`), the rating of a gas

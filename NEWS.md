@@ -1,3 +1,62 @@
+# flextools 1.22.0
+
+* Breaking: `smart_v2g()` plans every session's departure at
+  `soc_final_min` and lets it hold up to `soc_max` above that.
+  * With a `BatteryCapacity` column and no `StateOfCharge` column, a
+    session arrives at `soc_final_min - 100 * Energy / BatteryCapacity`
+    (until now at `soc_max` less its energy). One that would arrive below
+    0 % is an error naming it. A 70 kWh car with 21 kWh and
+    `soc_final_min = 80` arrives at 50 %.
+  * Every objective plans the departure at `soc_final_min` (a session with
+    a `StateOfCharge` column at `StateOfCharge + 100 * Energy /
+    BatteryCapacity`), a lower bound. A session leaves lower only where the
+    grid capacities cannot fit its energy, by no more than they force, and
+    never below what it arrived with. Until now it could be lowered only
+    down to `soc_final_min`, and with the default `soc_final_min = soc_max`
+    not at all: the capacity was relaxed for it. A 4-hour session of
+    21 kWh with 4 kW of room under the import capacity leaves at 72.9 %
+    under every objective.
+  * The vehicles are never drained for a breach the rest of the site has
+    without them: where it breaks the import capacity on its own (or the
+    export capacity with the uncontrolled fleet), the setpoint and the
+    scheduler hold them only to adding nothing to it. Where they can, they
+    still discharge into it and charge it back.
+  * Between the departure level and `soc_max` lies headroom: `soc_max -
+    soc_final_min` of the battery, never above `soc_max`. A session charges
+    into it only where its objective gains, absorbing export or an export
+    breach, or discharging it later to lower a peak, meet the import
+    capacity or (under `"cost"` and combined objectives) earn a price spread
+    that pays for `discharge_eff` and `cycle_cost`. What it holds there
+    when it leaves is never owed back: no objective discharges a session
+    down to its departure level, and none rewards leaving above it. The
+    exact final level of 1.17.0, whose forced give-back discharged into
+    export, does not return. The car above, plugged in from 08:00 to 21:00
+    at a site exporting 25 kW against a 10 kW export capacity from 10:00
+    to 15:00 and importing 30 kW against 20 kW from 17:00, charges to
+    100 % in the export breach under `"capacity"` and `"grid"`, gives most
+    of it back in the evening breach and leaves at 81.3 %. Both breaches
+    come down by more than 10 kWh against no headroom.
+  * The setpoint first plans each window with every session's energy due
+    at its departure and the headroom on top, under the capacities as
+    given, then within the vehicles' reach, then against what the rest of
+    the site already breaks. Only where none of those fits does it drop
+    energy, without headroom. Under `"capacity"` the slice may charge into
+    the headroom (counted as energy moved, so it shifts no more than it
+    must) and never gives it back except to cut a breach.
+  * The scheduler charges a session into its headroom only where the
+    setpoint asks for more than the sessions charge towards their energy,
+    and never ahead of the setpoint's cumulative energy, nor under
+    `opt_objective = "none"`, whose setpoint is a limit. The default
+    `soc_final_min = soc_max` leaves no headroom.
+* Fix: the `"cost"` objective of `smart_v2g()` discharged and charged back
+  for nothing at a flat price (37.5 kWh in a day for one car next to a 5 kW
+  load at 0.25 EUR/kWh). HiGHS stopped at its default relative MIP gap
+  (1e-4), measured against the whole window's cost with the site's fixed
+  import, which is larger than the tie-break that rules such a round trip
+  out. The V2G windows now solve to a zero relative gap.
+* The internal `v2g_energy_min_ratio()` is gone (the minimum share is the
+  arrival level now), and `capacity_window()` takes the V2G `headroom`.
+
 # flextools 1.21.0
 
 * `add_tank_optimization()` takes `Hcap` and `Hloss` (default `NULL`, both

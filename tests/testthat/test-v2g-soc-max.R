@@ -110,9 +110,10 @@ test_that("soc_max caps the departure level of the v2g sessions", {
   expect_error(run_ahead("grid", soc_max = 66), "at or above `soc_max`.*S1")
 })
 
-test_that("the v2g scheduler never charges above the departure level", {
+test_that("the v2g scheduler never charges above the departure level without headroom", {
   # A setpoint that always asks for more: the session charges its energy and
-  # stops, whatever `soc_max` (internal: SoC as a fraction).
+  # stops (internal: SoC as a fraction; `soc_final_min` at `soc_max`, the
+  # default, leaves no headroom).
   session <- ahead_session %>%
     mutate(StateOfCharge = 0.66) %>%
     evsim::adapt_charging_features(time_resolution = 15) %>%
@@ -122,6 +123,32 @@ test_that("the v2g scheduler never charges above the departure level", {
   battery <- 0.66 * 70 + cumsum(results$sessions$Energy)
   expect_equal(max(battery), 0.8 * 70, tolerance = 0.02)
   expect_equal(battery[length(battery)], 0.8 * 70, tolerance = 0.02)
+})
+
+test_that("the v2g scheduler charges into the headroom and never gives it back", {
+  # With soc_final_min = 0.8 and soc_max = 1 the session may hold 14 kWh
+  # above the 80 % its energy takes it to. A setpoint that asks for more
+  # until 14:00 fills it to 100 %; one that asks for nothing after that does
+  # not discharge it.
+  session <- ahead_session %>%
+    mutate(StateOfCharge = 0.66) %>%
+    evsim::adapt_charging_features(time_resolution = 15) %>%
+    mutate(Responsive = TRUE)
+  setpoint <- tibble(
+    datetime = ahead_dttm,
+    setpoint = ifelse(ahead_hour < 14, 100, 0)
+  )
+  results <- schedule_sessions_v2g(
+    session,
+    setpoint,
+    soc_min = 0.2,
+    soc_final_min = 0.8,
+    soc_max = 1
+  )
+  battery <- 0.66 * 70 + cumsum(results$sessions$Energy)
+  expect_equal(max(battery), 70, tolerance = 0.02)
+  expect_equal(battery[length(battery)], 70, tolerance = 0.02)
+  expect_true(all(results$sessions$Energy >= 0))
 })
 
 # Plugged in all day at 50% of 70 kWh with 10 kWh to charge. Import costs

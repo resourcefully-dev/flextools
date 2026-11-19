@@ -23,7 +23,9 @@ demand_combined_v2g_window(
   cumsum_min = NULL,
   LFmin = NULL,
   discharge_eff = 1,
-  discharge_cost = 0
+  discharge_cost = 0,
+  cumsum_target = NULL,
+  headroom = NULL
 )
 }
 \arguments{
@@ -78,6 +80,10 @@ spread covers the losses (see \code{solve_optimization_window_v2g()}).}
 
 \item{discharge_cost}{numeric, cost per kWh discharged to the grid
 (default 0), on top of the tie-break price.}
+
+\item{cumsum_target, headroom}{numeric vectors or \code{NULL} (default): the
+departure deadlines with every session's energy due, and the cumulative
+headroom of the sessions. See \code{solve_optimization_window_v2g()}.}
 }
 \value{
 numeric vector, the optimized load

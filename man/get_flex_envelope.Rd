@@ -43,9 +43,8 @@ charging at nominal power for the whole connection), capped by
 \code{load_capacity}. \code{Inf} when no session is given.
 \item \code{owed}: the cumulative energy owed to the sessions that have departed by
 the end of each slot, \code{energy_min * Energy} per session (\code{energy_min} may
-be one share per session, as the V2G minimum final SoC gives, see
-\code{v2g_energy_min_ratio()}), in the units of
-the setpoint (kW per slot, i.e. kWh divided by the slot length in hours).
+be one share per session), in the units of the setpoint (kW per slot,
+i.e. kWh divided by the slot length in hours).
 A session is due in the slot containing its departure, or its
 uncontrolled charging end when that is later (a session that cannot
 charge its energy within its connection), so its uncontrolled profile

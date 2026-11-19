@@ -16,7 +16,9 @@ capacity_v2g_window(
   lambda = 0,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  discharge_floor = NULL
+  discharge_floor = NULL,
+  cumsum_target = NULL,
+  headroom = NULL
 )
 }
 \arguments{
@@ -29,6 +31,12 @@ load's energy the optimized load must carry. See
 \item{discharge_floor}{numeric vector or \code{NULL} (default), the
 \code{v2g_discharge_floor()} of the slots. \code{get_setpoints_v2g()} passes it
 counting only the load that is decided; \code{NULL} computes it from \code{LS}.}
+
+\item{cumsum_target}{numeric vector or \code{NULL} (default), the departure
+deadlines with every session's energy due (see \code{get_setpoints_v2g()}).}
+
+\item{headroom}{numeric vector or \code{NULL}, the cumulative headroom of the
+sessions arrived by each slot (see \code{v2g_headroom_cumsum()}).}
 }
 \description{
 The V2G counterpart of \code{demand_capacity_window()}. The slice that has to
@@ -39,5 +47,18 @@ deadlines and SoC floor of \code{cumsum_min}. The slice is then placed with
 \code{demand_grid_v2g_window()} charge-only (\code{LFmin = 0}): the placement only
 puts back the energy the slice took, and never discharges the rest of the
 fleet to flatten slots within the caps.
+}
+\details{
+With \code{cumsum_target}, the window is first planned with every session's
+energy due at its departure and the sessions' \code{headroom} on top: the slice
+may then charge more than it moves, into an export breach, and give it back
+later only where that cuts an import breach. That plan stands unless the
+sessions themselves take the site beyond a cap, beyond what the rest of the
+site already imports above it, or beyond what the site exports above it
+with the uncontrolled fleet: the vehicles are never drained for a breach
+the site has without them. Otherwise the same plan is
+tried against those caps, and only where the sessions' energy does not fit
+under them either, the window is planned again with \code{energy_ratio} and
+\code{cumsum_min} (energy dropped as far as the caps force, no headroom).
 }
 \keyword{internal}

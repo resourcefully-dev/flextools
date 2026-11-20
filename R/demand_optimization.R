@@ -314,7 +314,11 @@ demand_solve_milp_window <- function(solver_data, bounds) {
     lhs = problem$lhs,
     rhs = problem$rhs,
     types = problem$types,
-    control = optimization_highs_options(include_mip_gap = FALSE)
+    control = if (is.null(solver_data$mip_rel_gap)) {
+      optimization_highs_options(include_mip_gap = FALSE)
+    } else {
+      optimization_highs_options(mip_rel_gap = solver_data$mip_rel_gap)
+    }
   )
 
   list(result = result, x = result$primal_solution)
@@ -409,6 +413,16 @@ demand_select_window_solver <- function(solver_data) {
 # `LFmin` is the per-slot floor of the optimized load: 0 for demand, and below
 # 0 (discharge) for V2G, where capacity_v2g_window() passes the connected power
 # and `v2g_discharge_floor()`, so a discharge only ever cuts import.
+#
+# `headroom` (V2G, forward only) is the cumulative energy the sessions arrived
+# by each slot may hold above their own (see v2g_headroom_cumsum()): `added`
+# may then run ahead of `slice` by that much, and exceed it in all. Stage 2
+# then counts every kWh that moves, `sum(slice) + sum(added)`: a shifted kWh
+# costs 2 and one charged into the headroom 1, and discharging the headroom
+# again adds to the cost, so the slice never gives it back unless that cuts
+# the breach (stage 1). Counting only the excess of `added` over `slice`
+# instead would pay the slice for every kWh of headroom it discharged. It is
+# not combined with `energy_lb`.
 capacity_slice_problem <- function(
   G,
   LF,
@@ -420,8 +434,17 @@ capacity_slice_problem <- function(
   export_capacity,
   energy_lb = NULL,
   cumsum_min = NULL,
-  LFmin = 0
+  LFmin = 0,
+  headroom = NULL
 ) {
+  if (!is.null(headroom) && (!is.null(energy_lb) || direction != "forward")) {
+    stop("Error: `headroom` needs `direction = \"forward\"` and no `energy_lb`")
+  }
+  headroom <- if (is.null(headroom)) {
+    rep(0, length(LF))
+  } else {
+    round(rep_len(as.numeric(headroom), length(LF)), 2)
+  }
   time_slots <- length(LF)
   LFmin <- rep_len(as.numeric(LFmin), time_slots)
   identityMat <- diag(time_slots)
@@ -455,7 +478,7 @@ capacity_slice_problem <- function(
 
     A_cumsum_ub <- block(-cumsumMat, cumsumMat)
     lhs_cumsum_ub <- rep(-Inf, time_slots)
-    rhs_cumsum_ub <- rep(0, time_slots)
+    rhs_cumsum_ub <- headroom
     # Departure deadlines: cumsum(LF - slice + added) >= cumsum_min, capped at
     # cumsum(LF) as in get_bounds().
     if (!is.null(cumsum_min)) {
@@ -503,7 +526,10 @@ capacity_slice_problem <- function(
   n <- time_slots
   A_energy <- matrix(c(rep(-1, n), rep(1, n), rep(0, 4 * n)), nrow = 1)
   LF_energy <- sum(LF)
-  if (
+  if (headroom[n] > 0) {
+    L_moved <- c(rep(1, n), rep(1, n), rep(0, 4 * n))
+    lhs_energy <- 0
+  } else if (
     is.null(energy_lb) ||
       energy_lb >= LF_energy - optimization_solution_tolerance()
   ) {
@@ -570,8 +596,8 @@ capacity_slice_problem <- function(
       rep(Inf, n),
       rhs_cumsum_lb,
       rhs_cumsum_ub,
-      rep(0, n),
-      0,
+      headroom,
+      headroom[n],
       rep(Inf, 3 * n)
     )
   )
@@ -594,7 +620,8 @@ select_capacity_slice <- function(
   export_capacity,
   energy_lb = NULL,
   cumsum_min = NULL,
-  LFmin = 0
+  LFmin = 0,
+  headroom = NULL
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -616,7 +643,8 @@ select_capacity_slice <- function(
     export_capacity = export_capacity,
     energy_lb = energy_lb,
     cumsum_min = cumsum_min,
-    LFmin = LFmin
+    LFmin = LFmin,
+    headroom = headroom
   )
 
   solve <- function(L, lower, upper, A, lhs, rhs) {
@@ -813,7 +841,8 @@ capacity_window <- function(
   place_slice,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = 0
+  LFmin = 0,
+  headroom = NULL
 ) {
   G <- round(as.numeric(G), 2)
   LF <- round(as.numeric(LF), 2)
@@ -863,7 +892,8 @@ capacity_window <- function(
     export_capacity = export_capacity,
     energy_lb = energy_lb,
     cumsum_min = cumsum_min,
-    LFmin = LFmin
+    LFmin = LFmin,
+    headroom = headroom
   )
 
   if (is.null(slice_solution)) {
@@ -888,26 +918,36 @@ capacity_window <- function(
   }
 
   moved_slice <- slice_solution$slice
-  if (all(moved_slice == 0)) {
+  moved_energy <- sum(moved_slice)
+  added_energy <- sum(slice_solution$added)
+  # Without headroom a rounding residue of `added` alone is no move
+  if (all(moved_slice == 0) && (is.null(headroom) || added_energy <= tol)) {
     return(LF_target)
   }
 
   # The slice LP decided how much of the removed energy is re-added (all of it
   # unless the caps left no room). The grid LP that places it must carry
   # exactly that energy, expressed as a ratio of the rounded slice so both
-  # sides round to the same 2-decimal figure.
-  moved_energy <- sum(moved_slice)
-  added_energy <- sum(slice_solution$added)
+  # sides round to the same 2-decimal figure. With `headroom` it may add more
+  # than it removed, or add it before it removes it: the energy it added is
+  # then placed instead, no earlier than the slice LP put it.
   fixed_load <- round(LF_target - moved_slice, 2)
   if (added_energy <= tol) {
     # The caps left no room for any of the removed energy: with a minimum
     # below 100% the LP dropped all of it, and there is nothing left to place.
     return(fixed_load)
   }
-  slice_ratio <- if (added_energy < moved_energy - tol) {
-    rep(added_energy / moved_energy, 2)
-  } else {
-    c(1, 1)
+  slice_to_place <- moved_slice
+  slice_ratio <- c(1, 1)
+  # Without headroom `added` exceeds the slice only by its rounding
+  charges_ahead <- !is.null(headroom) && (
+    added_energy > moved_energy + tol ||
+      any(cumsum(slice_solution$added - moved_slice) > tol)
+  )
+  if (charges_ahead) {
+    slice_to_place <- slice_solution$added
+  } else if (added_energy < moved_energy - tol) {
+    slice_ratio <- rep(added_energy / moved_energy, 2)
   }
 
   # The excess the selected slice leaves, rounded up to the 2-decimal grid of
@@ -917,7 +957,7 @@ capacity_window <- function(
   }
 
   optimized_slice <- place_slice(
-    LF = moved_slice,
+    LF = slice_to_place,
     time_horizon = time_horizon,
     LS = LS + fixed_load,
     LFmax = round(pmax(LFmax - fixed_load, 0), 2),

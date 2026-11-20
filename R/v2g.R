@@ -62,26 +62,24 @@
 #'   before it reaches the floor. Up to version 1.16.0 it was a fraction
 #'   (default 0.2).
 #' @param soc_max numeric, State-of-Charge ceiling of every V2G session, in % of
-#'   its battery capacity (default 100, `soc_min < soc_max <= 100`), and the
-#'   level every session aims for at departure. With a `BatteryCapacity`
-#'   column (and no `StateOfCharge` column) a session's `Energy` is what it
-#'   charges to reach `soc_max`: it arrives at `soc_max - 100 * Energy /
-#'   BatteryCapacity`, and a session whose energy does not fit below `soc_max`
-#'   (arriving below 0 %) is an error. A session never holds more than it
-#'   leaves with, so it never charges above `soc_max`. A session whose
-#'   departure level would be above `soc_max` (given its `StateOfCharge`)
-#'   charges only up to it (`Energy` capped at `(soc_max - StateOfCharge) /
-#'   100 * BatteryCapacity`, with a message), and a session arriving at or
-#'   above `soc_max` is an error.
-#' @param soc_final_min numeric, minimum State-of-Charge every V2G session
-#'   leaves with, in % of its battery capacity (default `soc_max`, `soc_min <=
-#'   soc_final_min <= soc_max`). Every session aims for `soc_max` (all its
-#'   `Energy`), and may leave lower, down to `soc_final_min`, only where the
-#'   grid capacities cannot fit its full energy (see Details). A session
-#'   arriving above it may leave at its arrival level. With the default no
-#'   session leaves below `soc_max`. Up to version 1.17.1 `smart_v2g()` also
-#'   took `energy_min` and `energy_max`, the share of the energy every session
-#'   charges at least and at most: `soc_final_min` and `soc_max` replace them.
+#'   its battery capacity (default 100, `soc_min < soc_max <= 100`). No session
+#'   holds more while connected. What lies between `soc_final_min` and it is
+#'   headroom (see Details). A session whose departure level would be above
+#'   `soc_max` (given its `StateOfCharge`) charges only up to it (`Energy`
+#'   capped at `(soc_max - StateOfCharge) / 100 * BatteryCapacity`, with a
+#'   message), and a session arriving at or above `soc_max` is an error.
+#' @param soc_final_min numeric, State-of-Charge every V2G session plans to
+#'   leave with, in % of its battery capacity (default `soc_max`, `soc_min <=
+#'   soc_final_min <= soc_max`). With a `BatteryCapacity` column (and no
+#'   `StateOfCharge` column) a session's `Energy` is what it charges to reach
+#'   it: it arrives at `soc_final_min - 100 * Energy / BatteryCapacity`, and a
+#'   session whose energy does not fit below `soc_final_min` (arriving below
+#'   0 %) is an error. A session leaves at or above it, and lower only where
+#'   the grid capacities cannot fit its energy (see Details). Up to version
+#'   1.21.0 every session arrived at `soc_max` less its energy and aimed for
+#'   `soc_max`, and `soc_final_min` was only how far the capacities could
+#'   lower it. Up to version 1.17.1 `smart_v2g()` also took `energy_min` and
+#'   `energy_max`.
 #' @param cycle_cost numeric, degradation cost of one full cycle of a V2G
 #'   battery, in Euro per `BatteryCapacity` kWh discharged (NOT Euro/kWh), as
 #'   in `add_battery_optimization()`. Default 0. Divided by the battery
@@ -104,43 +102,58 @@
 #'
 #' It can also carry a `BatteryCapacity` column, the battery size of each
 #' vehicle in kWh (a positive finite number). Without a `StateOfCharge`
-#' column, each session's `Energy` then takes it to `soc_max`: it arrives at
-#' `soc_max - 100 * Energy / BatteryCapacity` (21 kWh on a 70 kWh battery
-#' arrives at 70 % with `soc_max = 100`), and can discharge `(70 - soc_min) /
-#' 100 * 70` kWh while it still has the time to charge it back. With a
-#' `StateOfCharge` column too, the session arrives at it and leaves at most at
-#' `StateOfCharge + 100 * Energy / BatteryCapacity`; it must fit in its
-#' battery, `Energy <= BatteryCapacity * (100 - StateOfCharge) / 100`, or
-#' `smart_v2g()` stops and names it. When `BatteryCapacity` is absent, each
-#' session's `Energy` takes its battery from `StateOfCharge` to full, so its
-#' battery capacity is `Energy / (1 - StateOfCharge / 100)` (twice the energy
-#' at 50 %), and `soc_final_min` applies to that derived battery: a session
-#' arriving at 50 % with `soc_final_min = 80` must charge at least 60 % of its
-#' energy.
+#' column, each session's `Energy` then takes it to `soc_final_min`: it
+#' arrives at `soc_final_min - 100 * Energy / BatteryCapacity` (21 kWh on a
+#' 70 kWh battery arrives at 50 % with `soc_final_min = 80`), and can
+#' discharge `(50 - soc_min) / 100 * 70` kWh while it still has the time to
+#' charge it back. With a `StateOfCharge` column too, the session arrives at
+#' it and plans to leave at `StateOfCharge + 100 * Energy / BatteryCapacity`;
+#' it must fit in its battery, `Energy <= BatteryCapacity * (100 -
+#' StateOfCharge) / 100`, or `smart_v2g()` stops and names it. When
+#' `BatteryCapacity` is absent, each session's `Energy` takes its battery from
+#' `StateOfCharge` to full, so its battery capacity is `Energy / (1 -
+#' StateOfCharge / 100)` (twice the energy at 50 %).
 #'
 #' Like `SOCmin` and `SOCmax` of `add_battery_optimization()`, `soc_min` and
-#' `soc_max` are the floor and the ceiling of the batteries (in %), and
-#' `soc_final_min` is the least each one leaves with, within the two.
+#' `soc_max` are the floor and the ceiling of the batteries (in %).
 #'
-#' Each session charges at most its `Energy` and at least what takes it to
-#' `soc_final_min`, `(soc_final_min - StateOfCharge) / 100 * BatteryCapacity`
-#' (nothing when it arrives above it), net of discharge. The setpoint aims for the maximum of
-#' every session and drops energy towards its minimum only where the grid
-#' capacities cannot fit the maximum, under every objective. The scheduler
-#' charges every session towards its maximum: it postpones charge and
-#' discharges what the session can charge back first, and curtails or
-#' discharges it below its maximum, never below its minimum, only as far as
-#' the import capacity needs. So nothing is ever given back: a session leaves
-#' at `StateOfCharge + 100 * Energy / BatteryCapacity` (`soc_max` without a
-#' `StateOfCharge` column, full without a `BatteryCapacity` column), or lower
-#' only when the grid capacities need it.
+#' Every objective plans each session's departure at its `Energy`
+#' (`soc_final_min` without a `StateOfCharge` column), a lower bound: the
+#' setpoint first plans the window with every session's energy due at its
+#' departure. Only where the grid capacities cannot fit that, it drops energy
+#' as far as they force, never below what a session arrived with (it never
+#' leaves with less than it arrived with). The scheduler charges every session
+#' towards its energy: it postpones charge and discharges what the session can
+#' charge back first, and curtails or discharges it below its energy only as
+#' far as the import capacity needs.
+#'
+#' Above its departure level each session has headroom: `soc_max -
+#' soc_final_min` of its battery, never above `soc_max`. The setpoint charges
+#' into it only where its objective gains: to absorb what the site would
+#' export, or push over the export capacity, to discharge it later to lower a
+#' peak or meet the import capacity, or, under `"cost"` and combined
+#' objectives, to discharge it later at a price that pays for `discharge_eff`
+#' and `cycle_cost`. What a session holds above its departure level when it
+#' leaves is never owed back: no objective discharges a session to bring it
+#' down to its departure level, and none rewards leaving above it. A window
+#' whose capacities cannot fit every session's energy is planned without
+#' headroom (under `"capacity"`, unless the headroom leaves less of the
+#' breach). The scheduler charges a session into its headroom only where the
+#' setpoint asks for more than the sessions charge towards their energy, and
+#' never with `opt_objective = "none"`, whose setpoint is a limit. With the
+#' default `soc_final_min = soc_max` there is no headroom. Up to version
+#' 1.21.0 there was none at all, and every session aimed for `soc_max`; up to
+#' 1.17.1 a session charged ahead to an exact final level and had to give it
+#' back, discharging while the site exported.
 #'
 #' The setpoint plans charge and discharge only while the responsive sessions
 #' are connected, within their nominal power in both directions (and
 #' `load_capacity`), and keeps the energy owed to every session by its
-#' departure: the cumulative flexible load never drops below the minimum share
-#' of the energy of the sessions that have left, minus what the connected
-#' sessions can still discharge down to `soc_min`.
+#' departure: the cumulative flexible load never drops below the energy of the
+#' sessions that have left (nothing, where the capacities cannot fit it),
+#' minus what the connected sessions can still discharge down to `soc_min`,
+#' and never rises above the uncontrolled one plus the headroom of the
+#' sessions that have arrived.
 #'
 #' The `opt_objective` shapes that plan as in `smart_charging()`:
 #' * `"grid"` minimises the squared net power of the site. The fleet
@@ -234,15 +247,13 @@ smart_v2g <- function(
   check_soc_max(soc_max, soc_min, full = 100)
   check_soc_final_min(soc_final_min, soc_min, soc_max)
   check_cycle_cost(cycle_cost)
-  sessions <- set_v2g_arrival(sessions, soc_max)
+  sessions <- set_v2g_arrival(sessions, soc_final_min)
   sessions <- set_state_of_charge(sessions, full = 100)
   # The arguments and the `StateOfCharge` column are in %, as in
-  # add_battery_optimization(); the V2G internals work with fractions. A
-  # minimum final SoC at `soc_max` lowers no session (`NULL` internally, see
-  # v2g_energy_min_ratio()).
+  # add_battery_optimization(); the V2G internals work with fractions.
   sessions$StateOfCharge <- sessions$StateOfCharge / 100
   soc_min <- soc_min / 100
-  soc_final_min <- if (soc_final_min < soc_max) soc_final_min / 100
+  soc_final_min <- soc_final_min / 100
   soc_max <- soc_max / 100
   check_v2g_battery_fit(sessions)
   sessions <- cap_v2g_departure(sessions, soc_max)
@@ -368,13 +379,16 @@ smart_v2g <- function(
     soc_min,
     discharge_eff,
     soc_final_min,
-    cycle_cost
+    cycle_cost,
+    soc_max
   )
 
   if (show_progress) {
     cli::cli_progress_step("Scheduling V2G sessions")
   }
 
+  # A setpoint given directly (`"none"`) is a limit, not a plan: no objective
+  # gains from the headroom there, so no session charges into it.
   scheduling_lst <- smart_v2g_window_parallel(
     windows_data,
     setpoints_lst,
@@ -383,7 +397,8 @@ smart_v2g <- function(
     discharge_eff,
     include_log,
     soc_min,
-    soc_final_min
+    if (identical(opt_objective, "none")) soc_max else soc_final_min,
+    soc_max
   )
 
   if (show_progress) {
@@ -471,9 +486,9 @@ smart_v2g <- function(
 #'   `soc_min` of [smart_v2g()] divided by 100).
 #' @param discharge_eff numeric, discharge efficiency of the vehicles, counted
 #'   by the cost and combined objectives. See [smart_v2g()].
-#' @param soc_final_min numeric or `NULL`, minimum SoC the sessions leave
-#'   with, as a fraction (`NULL`: all their energy). See [smart_v2g()]
-#'   and `v2g_energy_min_ratio()`.
+#' @param soc_final_min,soc_max numeric, the departure level and the SoC
+#'   ceiling, as fractions: the headroom of each session (see
+#'   `v2g_headroom()`). `soc_final_min = soc_max` (the default) gives none.
 #' @param cycle_cost numeric, cost of one full battery cycle, counted by the
 #'   cost and combined objectives per kWh discharged as `cycle_cost /
 #'   BatteryCapacity`. See [smart_v2g()].
@@ -488,8 +503,9 @@ get_setpoints_v2g <- function(
   lambda,
   soc_min = 0.2,
   discharge_eff = 1,
-  soc_final_min = NULL,
-  cycle_cost = 0
+  soc_final_min = soc_max,
+  cycle_cost = 0,
+  soc_max = 1
 ) {
   if (nrow(sessions_window) == 0) {
     return(sessions_window)
@@ -583,32 +599,32 @@ get_setpoints_v2g <- function(
         opt_idxs <- (dttm_seq >= window_prof_dttm[1]) &
           (dttm_seq <= window_prof_dttm[2])
 
-        # Each session owes at least its own minimum share at departure (what
-        # takes it to `soc_final_min`); the setpoint targets all the energy
-        # and drops towards the fleet's minimum only where the grid
-        # capacities cannot fit it. Both ratios are shares of the responsive
-        # sessions' own demand `LF`; the non-responsive demand `L_fixed_prof`
-        # is added back untouched below.
+        # Each session's energy is due at its departure (`cumsum_target`), and
+        # it may hold its headroom on top. Where the grid capacities cannot
+        # fit that, the window is planned again owing nothing below the
+        # arrival levels (`cumsum_min`, energy down to 0), with a reward for
+        # every unit of energy kept, so a session gives up only what the caps
+        # force. Both are shares of the responsive sessions' own demand `LF`;
+        # the non-responsive demand `L_fixed_prof` is added back untouched
+        # below.
         sessions_soc <- set_state_of_charge(sessions_window_prof_flex)
-        energy_min_session <- v2g_energy_min_ratio(sessions_soc, soc_final_min)
-        energy_ratio <- c(
-          min(
-            sum(energy_min_session * sessions_soc$Energy) /
-              max(sum(sessions_soc$Energy), 1e-9),
-            1
-          ),
-          1
-        )
+        energy_ratio <- c(0, 1)
         envelope <- get_flex_envelope(
           sessions_soc,
           dttm_seq = dttm_seq,
           profile = profile,
           load_capacity = opt_data$load_capacity,
-          energy_min = energy_min_session,
+          energy_min = 1,
           soc_min = soc_min
         )
         LFmax_prof <- envelope$LFmax[opt_idxs]
-        cumsum_min <- (envelope$owed - envelope$reserve)[opt_idxs]
+        cumsum_target <- (envelope$owed - envelope$reserve)[opt_idxs]
+        cumsum_min <- -envelope$reserve[opt_idxs]
+        headroom <- v2g_headroom_cumsum(
+          sessions_soc,
+          v2g_headroom(sessions_soc, soc_max, soc_final_min),
+          dttm_seq
+        )[opt_idxs]
         # Wear per kWh discharged: the cost of a full cycle over the mean
         # battery of the profile's responsive sessions.
         discharge_cost <- 0
@@ -641,7 +657,9 @@ get_setpoints_v2g <- function(
             lambda = lambda,
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
-            LFmin = discharge_floor
+            LFmin = discharge_floor,
+            cumsum_target = cumsum_target,
+            headroom = headroom
           )
         } else if (opt_objective == "cost") {
           # No discharge floor: the cost LP discharges into export only when
@@ -664,7 +682,9 @@ get_setpoints_v2g <- function(
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
             discharge_eff = discharge_eff,
-            discharge_cost = discharge_cost
+            discharge_cost = discharge_cost,
+            cumsum_target = cumsum_target,
+            headroom = headroom
           )
         } else if (opt_objective == "capacity") {
           O <- capacity_v2g_window(
@@ -683,7 +703,9 @@ get_setpoints_v2g <- function(
               round(opt_data$production[opt_idxs], 2),
               round(LS_decided[opt_idxs], 2),
               opt_data$import_capacity[opt_idxs]
-            )
+            ),
+            cumsum_target = cumsum_target,
+            headroom = headroom
           )
         } else if (is.numeric(opt_objective)) {
           O <- demand_combined_v2g_window(
@@ -705,7 +727,9 @@ get_setpoints_v2g <- function(
             cumsum_min = cumsum_min,
             LFmin = discharge_floor,
             discharge_eff = discharge_eff,
-            discharge_cost = discharge_cost
+            discharge_cost = discharge_cost,
+            cumsum_target = cumsum_target,
+            headroom = headroom
           )
         } else {
           stop("Error: `opt_objective` not valid")
@@ -743,8 +767,9 @@ get_setpoints_v2g_parallel <- function(
   lambda,
   soc_min = 0.2,
   discharge_eff = 1,
-  soc_final_min = NULL,
-  cycle_cost = 0
+  soc_final_min = soc_max,
+  cycle_cost = 0,
+  soc_max = 1
 ) {
   reset_message_once()
 
@@ -759,7 +784,8 @@ get_setpoints_v2g_parallel <- function(
       soc_min = soc_min,
       discharge_eff = discharge_eff,
       soc_final_min = soc_final_min,
-      cycle_cost = cycle_cost
+      cycle_cost = cycle_cost,
+      soc_max = soc_max
     )
   )
 }
@@ -775,7 +801,8 @@ smart_v2g_window <- function(
   discharge_eff = 1,
   include_log = FALSE,
   soc_min = 0.2,
-  soc_final_min = NULL
+  soc_final_min = soc_max,
+  soc_max = 1
 ) {
   if (nrow(setpoints) == 0) {
     return(list(
@@ -830,9 +857,11 @@ smart_v2g_window <- function(
   )
   # The sessions give up energy (below their full target) only as far as the
   # import capacity needs it: `power_cap` is the most the flexible load may
-  # draw with the rest of the site as the setpoint plans it. A setpoint below
-  # what they can postpone or discharge, within that cap, comes from planning
-  # the fleet as a whole, and there they keep their energy.
+  # draw with the rest of the site as the setpoint plans it, never below 0,
+  # so they are never drained for a breach the rest of the site has without
+  # them (see solve_optimization_window_v2g()). A setpoint below what they
+  # can postpone or discharge, within that cap, comes from planning the fleet
+  # as a whole, and there they keep their energy.
   if (!is.null(opt_data) && "import_capacity" %in% names(opt_data)) {
     other_profiles <- setpoints %>%
       dplyr::select(-"datetime", -any_of(window_profiles)) %>%
@@ -840,8 +869,11 @@ smart_v2g_window <- function(
     if (length(other_profiles) == 0) {
       other_profiles <- 0
     }
-    setpoint_flex$power_cap <- opt_data$import_capacity - opt_data$static +
-      opt_data$production - L_fixed_total - other_profiles
+    setpoint_flex$power_cap <- pmax(
+      opt_data$import_capacity - opt_data$static + opt_data$production -
+        L_fixed_total - other_profiles,
+      0
+    )
   }
 
   results_log <- character(0)
@@ -855,7 +887,8 @@ smart_v2g_window <- function(
       show_progress = FALSE,
       power_th = power_th,
       soc_min = soc_min,
-      soc_final_min = soc_final_min
+      soc_final_min = soc_final_min,
+      soc_max = soc_max
     )
     sessions_window_flex_final <- results$sessions
     results_log <- results$log
@@ -902,7 +935,8 @@ smart_v2g_window_parallel <- function(
   discharge_eff,
   include_log,
   soc_min = 0.2,
-  soc_final_min = NULL
+  soc_final_min = soc_max,
+  soc_max = 1
 ) {
   if (
     !requireNamespace("mirai", quietly = TRUE) ||
@@ -922,7 +956,8 @@ smart_v2g_window_parallel <- function(
           discharge_eff = discharge_eff,
           include_log = include_log,
           soc_min = soc_min,
-          soc_final_min = soc_final_min
+          soc_final_min = soc_final_min,
+          soc_max = soc_max
         )
       }
     )
@@ -942,7 +977,8 @@ smart_v2g_window_parallel <- function(
             discharge_eff = discharge_eff,
             include_log = include_log,
             soc_min = soc_min,
-            soc_final_min = soc_final_min
+            soc_final_min = soc_final_min,
+            soc_max = soc_max
           )
         },
         smart_v2g_window = smart_v2g_window,
@@ -951,7 +987,8 @@ smart_v2g_window_parallel <- function(
         discharge_eff = discharge_eff,
         include_log = include_log,
         soc_min = soc_min,
-        soc_final_min = soc_final_min
+        soc_final_min = soc_final_min,
+        soc_max = soc_max
       )
     )
   }
@@ -970,6 +1007,18 @@ smart_v2g_window_parallel <- function(
 #' puts back the energy the slice took, and never discharges the rest of the
 #' fleet to flatten slots within the caps.
 #'
+#' With `cumsum_target`, the window is first planned with every session's
+#' energy due at its departure and the sessions' `headroom` on top: the slice
+#' may then charge more than it moves, into an export breach, and give it back
+#' later only where that cuts an import breach. That plan stands unless the
+#' sessions themselves take the site beyond a cap, beyond what the rest of the
+#' site already imports above it, or beyond what the site exports above it
+#' with the uncontrolled fleet: the vehicles are never drained for a breach
+#' the site has without them. Otherwise the same plan is
+#' tried against those caps, and only where the sessions' energy does not fit
+#' under them either, the window is planned again with `energy_ratio` and
+#' `cumsum_min` (energy dropped as far as the caps force, no headroom).
+#'
 #' @param lambda numeric, penalty on change of the placed slice.
 #' @param energy_ratio numeric vector `c(min, max)`, share of the flexible
 #'   load's energy the optimized load must carry. See
@@ -977,6 +1026,10 @@ smart_v2g_window_parallel <- function(
 #' @param discharge_floor numeric vector or `NULL` (default), the
 #'   `v2g_discharge_floor()` of the slots. `get_setpoints_v2g()` passes it
 #'   counting only the load that is decided; `NULL` computes it from `LS`.
+#' @param cumsum_target numeric vector or `NULL` (default), the departure
+#'   deadlines with every session's energy due (see `get_setpoints_v2g()`).
+#' @param headroom numeric vector or `NULL`, the cumulative headroom of the
+#'   sessions arrived by each slot (see `v2g_headroom_cumsum()`).
 #'
 #' @keywords internal
 #'
@@ -992,7 +1045,9 @@ capacity_v2g_window <- function(
   lambda = 0,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  discharge_floor = NULL
+  discharge_floor = NULL,
+  cumsum_target = NULL,
+  headroom = NULL
 ) {
   time_slots <- length(LF)
   LFmax <- as.numeric(rep_len(LFmax, time_slots))
@@ -1004,39 +1059,82 @@ capacity_v2g_window <- function(
     )
   }
 
-  capacity_window(
-    G = G,
-    LF = LF,
-    LS = LS,
-    direction = direction,
-    time_horizon = time_horizon,
-    LFmax = LFmax,
-    import_capacity = import_capacity,
-    export_capacity = export_capacity,
-    place_slice = function(LF, time_horizon, LS, LFmax, import_capacity,
-                           export_capacity, energy_ratio, cumsum_min) {
-      demand_grid_v2g_window(
-        G = G,
-        LF = LF,
-        LS = LS,
-        direction = direction,
-        time_horizon = time_horizon,
-        LFmax = LFmax,
-        import_capacity = import_capacity,
-        export_capacity = export_capacity,
-        lambda = lambda,
-        energy_ratio = energy_ratio,
-        cumsum_min = cumsum_min,
-        # Charge-only: the placement puts back the slice's energy and never
-        # discharges the rest of the fleet (which would reshape slots within
-        # the caps). Any discharge the breach needs is already in the slice.
-        LFmin = 0
-      )
-    },
-    energy_ratio = energy_ratio,
-    cumsum_min = cumsum_min,
-    LFmin = pmin(pmax(-LFmax, discharge_floor), 0)
+  plan <- function(energy_ratio, cumsum_min, headroom, import_capacity,
+                   export_capacity) {
+    capacity_window(
+      G = G,
+      LF = LF,
+      LS = LS,
+      direction = direction,
+      time_horizon = time_horizon,
+      LFmax = LFmax,
+      import_capacity = import_capacity,
+      export_capacity = export_capacity,
+      place_slice = function(LF, time_horizon, LS, LFmax, import_capacity,
+                             export_capacity, energy_ratio, cumsum_min) {
+        demand_grid_v2g_window(
+          G = G,
+          LF = LF,
+          LS = LS,
+          direction = direction,
+          time_horizon = time_horizon,
+          LFmax = LFmax,
+          import_capacity = import_capacity,
+          export_capacity = export_capacity,
+          lambda = lambda,
+          energy_ratio = energy_ratio,
+          cumsum_min = cumsum_min,
+          # Charge-only: the placement puts back the slice's energy and never
+          # discharges the rest of the fleet (which would reshape slots within
+          # the caps). Any discharge the breach needs is already in the slice.
+          LFmin = 0
+        )
+      },
+      energy_ratio = energy_ratio,
+      cumsum_min = cumsum_min,
+      LFmin = pmin(pmax(-LFmax, discharge_floor), 0),
+      headroom = headroom
+    )
+  }
+
+  if (is.null(cumsum_target)) {
+    return(plan(
+      energy_ratio,
+      cumsum_min,
+      NULL,
+      import_capacity,
+      export_capacity
+    ))
+  }
+  G <- round(as.numeric(G), 2)
+  LS <- round(as.numeric(LS), 2)
+  # What the rest of the site already imports beyond the cap, and exports
+  # beyond it with the uncontrolled fleet (see
+  # solve_optimization_window_v2g())
+  import_own <- pmax(import_capacity, LS - G)
+  export_own <- pmax(export_capacity, G - LS - round(as.numeric(LF), 2))
+  breach <- function(O, import_cap, export_cap) {
+    net <- LS + O - G
+    sum(pmax(net - import_cap, 0) + pmax(-net - export_cap, 0))
+  }
+  O_target <- plan(
+    c(1, 1),
+    cumsum_target,
+    headroom,
+    import_capacity,
+    export_capacity
   )
+  if (breach(O_target, import_own, export_own) < 0.01) {
+    return(O_target)
+  }
+  O_target <- plan(c(1, 1), cumsum_target, headroom, import_own, export_own)
+  if (breach(O_target, import_own, export_own) < 0.01) {
+    return(O_target)
+  }
+  message_once(
+    "\u26A0\uFE0F V2G optimisation warning: the grid capacities cannot fit the energy of every session in some windows. Those sessions leave below their departure level, as little as the capacities allow."
+  )
+  plan(energy_ratio, cumsum_min, NULL, import_own, export_own)
 }
 
 
@@ -1051,6 +1149,9 @@ capacity_v2g_window <- function(
 #'   and combined objectives) and `capacity_v2g_window()` pass
 #'   `v2g_discharge_floor()`, so the fleet never discharges where that only
 #'   adds export.
+#' @param cumsum_target,headroom numeric vectors or `NULL` (default): the
+#'   departure deadlines with every session's energy due, and the cumulative
+#'   headroom of the sessions. See `solve_optimization_window_v2g()`.
 #'
 #' @keywords internal
 #'
@@ -1066,7 +1167,9 @@ demand_grid_v2g_window <- function(
   lambda = 0,
   energy_ratio = c(1, 1),
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  cumsum_target = NULL,
+  headroom = NULL
 ) {
   time_slots <- length(LF)
   identityMat <- diag(time_slots)
@@ -1087,7 +1190,9 @@ demand_grid_v2g_window <- function(
     q,
     energy_ratio,
     cumsum_min,
-    LFmin
+    LFmin,
+    cumsum_target = cumsum_target,
+    headroom = headroom
   )
 }
 
@@ -1123,6 +1228,7 @@ demand_grid_v2g_window <- function(
 #'   spread covers the losses (see `solve_optimization_window_v2g()`).
 #' @param discharge_cost numeric, cost per kWh discharged to the grid
 #'   (default 0), on top of the tie-break price.
+#' @inheritParams demand_grid_v2g_window
 #'
 #' @return numeric vector, the optimized load
 #' @keywords internal
@@ -1145,7 +1251,9 @@ demand_cost_v2g_window <- function(
   cumsum_min = NULL,
   LFmin = NULL,
   discharge_eff = 1,
-  discharge_cost = 0
+  discharge_cost = 0,
+  cumsum_target = NULL,
+  headroom = NULL
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1185,7 +1293,10 @@ demand_cost_v2g_window <- function(
     energy_ratio,
     cumsum_min,
     LFmin,
-    discharge_eff = discharge_eff
+    discharge_eff = discharge_eff,
+    cumsum_target = cumsum_target,
+    headroom = headroom,
+    headroom_tiebreak = tiebreak
   )
 }
 
@@ -1232,7 +1343,9 @@ demand_combined_v2g_window <- function(
   cumsum_min = NULL,
   LFmin = NULL,
   discharge_eff = 1,
-  discharge_cost = 0
+  discharge_cost = 0,
+  cumsum_target = NULL,
+  headroom = NULL
 ) {
   time_slots <- length(LF)
   PI <- rep_len(as.numeric(PI), time_slots)
@@ -1277,7 +1390,10 @@ demand_combined_v2g_window <- function(
     energy_ratio,
     cumsum_min,
     LFmin,
-    discharge_eff = discharge_eff
+    discharge_eff = discharge_eff,
+    cumsum_target = cumsum_target,
+    headroom = headroom,
+    headroom_tiebreak = (1 - w) * v2g_discharge_tiebreak(c(PI, PE, PTD, PTU))
   )
 }
 
@@ -1303,6 +1419,41 @@ v2g_discharge_tiebreak <- function(prices) {
 }
 
 
+#' Grid capacities the connected V2G vehicles can reach
+#'
+#' A cap can ask for more than the connected vehicles can give (an import cap
+#' of -20 kW with 15 kW of vehicles plugged in, or any cap before the first
+#' arrival). Each cap is raised only as far as the fleet's physical reach
+#' (`LFmax` in both directions), so the setpoint still gets as close to it as
+#' the vehicles allow.
+#'
+#' @param G,LS,LFmax,import_capacity,export_capacity numeric vectors of the
+#'   window (see `solve_optimization_window_v2g()`)
+#'
+#' @return list with `import_cap` and `export_cap`, or `NULL` when every cap
+#'   is within reach
+#' @keywords internal
+#'
+v2g_reach_caps <- function(G, LS, LFmax, import_capacity, export_capacity) {
+  time_slots <- length(G)
+  LFmax <- rep_len(as.numeric(LFmax), time_slots)
+  if (!any(is.finite(LFmax))) {
+    return(NULL)
+  }
+  import_cap <- rep_len(as.numeric(import_capacity), time_slots)
+  export_cap <- rep_len(as.numeric(export_capacity), time_slots)
+  import_reach <- pmax(import_cap, LS - G - LFmax)
+  export_reach <- pmax(export_cap, G - LS - LFmax)
+  unreachable <- (import_reach > import_cap) | (export_reach > export_cap)
+  if (!any(unreachable, na.rm = TRUE)) {
+    return(NULL)
+  }
+  list(import_cap = import_reach, export_cap = export_reach)
+}
+
+v2g_reach_message <- "\u26A0\uFE0F V2G optimisation warning: the connected vehicles cannot reach the grid capacity in some slots. Approaching it as far as their power allows."
+
+
 solve_optimization_window_v2g <- function(
   G,
   LF,
@@ -1318,7 +1469,11 @@ solve_optimization_window_v2g <- function(
   cumsum_min = NULL,
   LFmin = NULL,
   discharge_eff = 1,
-  discharge_slots = NULL
+  discharge_slots = NULL,
+  cumsum_target = NULL,
+  headroom = NULL,
+  headroom_tiebreak = 0,
+  plan = NULL
 ) {
   G <- round(G, 2)
   LF <- round(LF, 2)
@@ -1345,9 +1500,9 @@ solve_optimization_window_v2g <- function(
   # those slots by `1 / discharge_eff` in the energy and departure rows, with
   # discharge only (and charge only elsewhere), so it may trim a discharge the
   # losses make not worth it. When the second pass is infeasible the first
-  # plan stands.
+  # plan stands. The second pass keeps the plan of the first (see below).
   if (has_grid_flows && discharge_eff < 1 && is.null(discharge_slots)) {
-    solve_pass <- function(discharge_eff, discharge_slots) {
+    solve_pass <- function(discharge_eff, discharge_slots, plan) {
       solve_optimization_window_v2g(
         G,
         LF,
@@ -1363,15 +1518,19 @@ solve_optimization_window_v2g <- function(
         cumsum_min,
         LFmin,
         discharge_eff = discharge_eff,
-        discharge_slots = discharge_slots
+        discharge_slots = discharge_slots,
+        cumsum_target = cumsum_target,
+        headroom = headroom,
+        headroom_tiebreak = headroom_tiebreak,
+        plan = plan
       )
     }
-    O_lossless <- solve_pass(1, NULL)
+    O_lossless <- solve_pass(1, NULL, NULL)
     discharging <- O_lossless < 0
     if (!any(discharging)) {
       return(O_lossless)
     }
-    O_losses <- solve_pass(discharge_eff, discharging)
+    O_losses <- solve_pass(discharge_eff, discharging, attr(O_lossless, "plan"))
     if (is.null(O_losses)) {
       message_once(
         "\u26A0\uFE0F V2G optimisation warning: the discharge losses do not fit in some windows. Planning them without the losses; the scheduler still charges them back."
@@ -1402,45 +1561,17 @@ solve_optimization_window_v2g <- function(
   }
   energy_lb <- energy_share(energy_ratio[1])
   energy_ub <- energy_share(energy_ratio[2])
-  if (energy_lb < energy_ub) {
-    # The objective improves when load is removed, so a range would be read as
-    # "deliver the minimum". Reward each unit of optimized load kept by more
-    # than the objective can gain from dropping it (see demand_solve_window()):
-    # the solver keeps as much energy as the caps admit and shapes it after.
-    base_bounds <- get_bounds_v2g(
-      time_slots,
-      G,
-      LF,
-      LS,
-      direction,
-      time_horizon,
-      LFmax,
-      import_capacity,
-      export_capacity,
-      cumsum_min,
-      LFmin
-    )
-    reward <- demand_energy_reward(
-      P,
-      q,
-      envelope = max(abs(base_bounds$ub_O[is.finite(base_bounds$ub_O)]), 0) +
-        max(abs(LS - G))
-    )
-    # Rewarded is the energy delivered, as the energy row counts it: in the
-    # second pass of the discharge losses a discharge drains `1 /
-    # discharge_eff`, so a discharge and its recharge earn nothing.
-    if (!is.null(discharge_slots)) {
-      reward <- reward * ifelse(discharge_slots, 1 / discharge_eff, 1)
-    }
-    q[seq_len(time_slots)] <- q[seq_len(time_slots)] - reward
-  }
+  q_on_target <- q
 
   solve_with_caps <- function(
     import_cap,
     export_cap,
     clamp_to_lf = FALSE,
     energy_floor = energy_lb,
-    energy_ceiling = energy_ub
+    energy_ceiling = energy_ub,
+    cumsum_lb = cumsum_min,
+    headroom_cumsum = NULL,
+    q_solve = q
   ) {
     bounds <- get_bounds_v2g(
       time_slots,
@@ -1452,8 +1583,9 @@ solve_optimization_window_v2g <- function(
       LFmax,
       import_cap,
       export_cap,
-      cumsum_min,
-      LFmin
+      cumsum_lb,
+      LFmin,
+      headroom = headroom_cumsum
     )
 
     # Minimal-relaxation retry: guarantee the original profile O = LF is a
@@ -1481,7 +1613,7 @@ solve_optimization_window_v2g <- function(
         G,
         LS,
         P,
-        q,
+        q_solve,
         energy_floor,
         energy_ceiling
       ))
@@ -1500,11 +1632,148 @@ solve_optimization_window_v2g <- function(
 
     solve_osqp(
       P = P,
-      q = q,
+      q = q_solve,
       A = A,
       lb = l_vec,
       ub = u_vec
     )
+  }
+
+  # The objective improves when load is removed, so an energy range would be
+  # read as "deliver the minimum". Reward each unit of optimized load kept by
+  # more than the objective can gain from dropping it (see
+  # demand_solve_window()): the solver keeps as much energy as the caps admit
+  # and shapes it after.
+  rewarded_q <- function(import_cap, export_cap) {
+    base_bounds <- get_bounds_v2g(
+      time_slots,
+      G,
+      LF,
+      LS,
+      direction,
+      time_horizon,
+      LFmax,
+      import_cap,
+      export_cap,
+      cumsum_min,
+      LFmin
+    )
+    reward <- demand_energy_reward(
+      P,
+      q,
+      envelope = max(abs(base_bounds$ub_O[is.finite(base_bounds$ub_O)]), 0) +
+        max(abs(LS - G))
+    )
+    # Rewarded is the energy delivered, as the energy row counts it: in the
+    # second pass of the discharge losses a discharge drains `1 /
+    # discharge_eff`, so a discharge and its recharge earn nothing.
+    if (!is.null(discharge_slots)) {
+      reward <- reward * ifelse(discharge_slots, 1 / discharge_eff, 1)
+    }
+    q[seq_len(time_slots)] <- q[seq_len(time_slots)] - reward
+    q
+  }
+  tol <- optimization_solution_tolerance()
+
+  # The V2G plans (`cumsum_target`, see get_setpoints_v2g()), tried in turn
+  # until one solves:
+  #   1. Every session's energy due at its departure, with its headroom on
+  #      top, under the grid capacities as given. There is no reward for
+  #      energy: the energy row starts at the sessions' energy, so the headroom
+  #      is charged only where the objective gains. A linear objective can be
+  #      indifferent to it (a free export), so the cost and combined
+  #      objectives price each kWh above the energy at their tie-break.
+  #   2. The same, with each cap relaxed only as far as the connected
+  #      vehicles' power cannot reach it (see v2g_reach_caps()).
+  #   3. The same, with the import cap raised to what the rest of the site
+  #      already imports beyond it, and the export cap to what the site
+  #      exports beyond it with the uncontrolled fleet: the vehicles are never
+  #      drained for a breach the site has without them, never take less of
+  #      an export breach than uncontrolled, and still take export and
+  #      discharge into a peak where their objective gains.
+  #   4. Energy dropped as far as those caps force, without headroom: a
+  #      session gives up energy only where its own charge does not fit.
+  # A second pass of the discharge losses solves the plan of the first one
+  # only (`plan`), and returns NULL when it does not solve.
+  if (!is.null(cumsum_target)) {
+    headroom_cumsum <- if (is.null(headroom)) {
+      rep(0, time_slots)
+    } else {
+      round(rep_len(as.numeric(headroom), time_slots), 2)
+    }
+    q_on_target[seq_len(time_slots)] <- q_on_target[seq_len(time_slots)] +
+      headroom_tiebreak
+    planned <- function(plan) {
+      O <- if (plan$on_target) {
+        solve_with_caps(
+          plan$import_cap,
+          plan$export_cap,
+          energy_floor = LF_energy,
+          energy_ceiling = LF_energy + headroom_cumsum[time_slots],
+          cumsum_lb = cumsum_target,
+          headroom_cumsum = headroom_cumsum,
+          q_solve = q_on_target
+        )
+      } else {
+        solve_with_caps(
+          plan$import_cap,
+          plan$export_cap,
+          energy_floor = energy_lb,
+          energy_ceiling = energy_ub,
+          q_solve = rewarded_q(plan$import_cap, plan$export_cap)
+        )
+      }
+      if (demand_highs_is_optimal(O$result)) {
+        structure(round(O$x[seq_len(time_slots)], 2), plan = plan)
+      }
+    }
+    if (!is.null(plan)) {
+      return(planned(plan))
+    }
+
+    plans <- list(list(
+      on_target = TRUE,
+      import_cap = import_capacity,
+      export_cap = export_capacity
+    ))
+    reach <- v2g_reach_caps(G, LS, LFmax, import_capacity, export_capacity)
+    if (!is.null(reach)) {
+      plans <- c(plans, list(list(
+        on_target = TRUE,
+        import_cap = reach$import_cap + tol,
+        export_cap = reach$export_cap + tol,
+        message = v2g_reach_message
+      )))
+    }
+    import_own <- pmax(import_capacity, LS - G) + tol
+    export_own <- pmax(export_capacity, G - LS - LF) + tol
+    plans <- c(plans, list(
+      list(
+        on_target = TRUE,
+        import_cap = import_own,
+        export_cap = export_own,
+        message = "\u26A0\uFE0F V2G optimisation warning: the rest of the site breaks the grid capacity in some windows. The vehicles keep their energy and add nothing to the breach."
+      ),
+      list(
+        on_target = FALSE,
+        import_cap = import_own,
+        export_cap = export_own,
+        message = "\u26A0\uFE0F V2G optimisation warning: the grid capacities cannot fit the energy of every session in some windows. Those sessions leave below their departure level, as little as the capacities allow."
+      )
+    ))
+    for (plan in plans) {
+      O <- planned(plan)
+      if (!is.null(O)) {
+        if (!is.null(plan$message)) {
+          message_once(plan$message)
+        }
+        return(O)
+      }
+    }
+  }
+
+  if (energy_lb < energy_ub) {
+    q <- rewarded_q(import_capacity, export_capacity)
   }
 
   # First solve: keep the original grid limits.
@@ -1528,8 +1797,7 @@ solve_optimization_window_v2g <- function(
   # lifts ub_O to LF when LFmax would otherwise pull it below. The
   # minimum-energy retry tried first is the same construction on the scaled
   # profile (see demand_solve_window()). A small tolerance absorbs the
-  # 2-decimal rounding of the bounds.
-  tol <- optimization_solution_tolerance()
+  # 2-decimal rounding of the bounds (`tol`).
   relax_to <- function(LF_ref, energy) {
     solve_with_caps(
       pmax(import_capacity, LS + LF_ref - G) + tol,
@@ -1540,28 +1808,16 @@ solve_optimization_window_v2g <- function(
     )
   }
 
-  # Reach first: a cap can ask for more than the connected vehicles can give
-  # (an import cap of -20 kW with 15 kW of vehicles plugged in, or any cap
-  # before the first arrival). Relax each cap only as far as the fleet's
-  # physical reach (`LFmax` in both directions), so the setpoint still gets as
-  # close to the cap as the vehicles allow instead of falling back to the
-  # original profile in the whole window. Not feasible by construction (the
-  # energy and departure rows may still conflict), hence the retries below.
-  LFmax_vct <- rep_len(as.numeric(LFmax), time_slots)
-  if (any(is.finite(LFmax_vct))) {
-    import_cap <- rep_len(as.numeric(import_capacity), time_slots)
-    export_cap <- rep_len(as.numeric(export_capacity), time_slots)
-    import_reach <- pmax(import_cap, LS - G - LFmax_vct)
-    export_reach <- pmax(export_cap, G - LS - LFmax_vct)
-    unreachable <- (import_reach > import_cap) | (export_reach > export_cap)
-    if (any(unreachable, na.rm = TRUE)) {
-      O <- solve_with_caps(import_reach + tol, export_reach + tol)
-      if (demand_highs_is_optimal(O$result)) {
-        message_once(
-          "\u26A0\uFE0F V2G optimisation warning: the connected vehicles cannot reach the grid capacity in some slots. Approaching it as far as their power allows."
-        )
-        return(round(O$x[seq_len(time_slots)], 2))
-      }
+  # Reach first (see v2g_reach_caps()), so the setpoint still gets as close to
+  # the cap as the vehicles allow instead of falling back to the original
+  # profile in the whole window. Not feasible by construction (the energy and
+  # departure rows may still conflict), hence the retries below.
+  reach <- v2g_reach_caps(G, LS, LFmax, import_capacity, export_capacity)
+  if (!is.null(reach)) {
+    O <- solve_with_caps(reach$import_cap + tol, reach$export_cap + tol)
+    if (demand_highs_is_optimal(O$result)) {
+      message_once(v2g_reach_message)
+      return(round(O$x[seq_len(time_slots)], 2))
     }
   }
 
@@ -1720,7 +1976,12 @@ solve_grid_flows_v2g <- function(
     A = A,
     P = P,
     q = q,
-    has_grid_flows = TRUE
+    has_grid_flows = TRUE,
+    # HiGHS's default relative gap (1e-4) is measured against the whole
+    # window's cost, the site's fixed import included, and lets a round trip
+    # that earns nothing through (a discharge and its recharge at a flat
+    # price): the tie-break that rules it out is smaller than the gap.
+    mip_rel_gap = 0
   )
   solve_window_problem <- demand_select_window_solver(solver_data)
   solve_window_problem(
@@ -1803,10 +2064,15 @@ get_bounds_v2g <- function(
   import_capacity,
   export_capacity,
   cumsum_min = NULL,
-  LFmin = NULL
+  LFmin = NULL,
+  headroom = NULL
 ) {
   identityMat <- diag(time_slots)
   cumsumMat <- triangulate_matrix(matrix(1, time_slots, time_slots), "l")
+  # The headroom the sessions arrived by each slot may hold on top of their
+  # energy (see v2g_headroom_cumsum()): `cumsum(O)` may run ahead of
+  # `cumsum(LF)` by that much, forward only.
+  headroom <- if (is.null(headroom)) 0 else rep_len(headroom, time_slots)
 
   # `rep_len`, not `rep`: callers such as capacity_v2g_window pass a per-slot
   # LFmax vector, and `rep(vec, time_slots)` would tile it to length
@@ -1839,7 +2105,7 @@ get_bounds_v2g <- function(
       -time_horizon
     )
 
-    ub_cumsum <- cumsumMat %*% LF
+    ub_cumsum <- cumsumMat %*% LF + headroom
     # Without departure deadlines the load may discharge without limit. With
     # them (`cumsum_min`, see get_flex_envelope()), `cumsum(O)` must stay above
     # the energy owed to the departed sessions minus what the connected ones
@@ -1848,10 +2114,10 @@ get_bounds_v2g <- function(
     lb_cumsum <- if (is.null(cumsum_min)) {
       rep(-Inf, time_slots)
     } else {
-      pmin(rep_len(as.numeric(cumsum_min), time_slots), ub_cumsum)
+      pmin(rep_len(as.numeric(cumsum_min), time_slots), cumsumMat %*% LF)
     }
 
-    ub_shift <- horizonMat_identity %*% LF
+    ub_shift <- horizonMat_identity %*% LF + headroom
     ub_O <- pmin(pmax(ub_shift, lb_O), ub_O)
   } else {
     horizonMat_cumsum <- triangulate_matrix(
@@ -1899,7 +2165,8 @@ schedule_sessions_v2g <- function(
   include_log = FALSE,
   show_progress = FALSE,
   soc_min = 0.2,
-  soc_final_min = NULL
+  soc_final_min = soc_max,
+  soc_max = 1
 ) {
   if (show_progress) {
     cli::cli_h1("Scheduling V2G sessions")
@@ -1928,9 +2195,8 @@ schedule_sessions_v2g <- function(
 
   check_charging_power_min(charging_power_min)
   check_soc_min(soc_min)
-  if (!is.null(soc_final_min)) {
-    check_soc_final_min(soc_final_min, soc_min, soc_max = 1)
-  }
+  check_soc_max(soc_max, soc_min)
+  check_soc_final_min(soc_final_min, soc_min, soc_max)
   if (
     !is.numeric(discharge_eff) ||
       length(discharge_eff) != 1 ||
@@ -1944,13 +2210,16 @@ schedule_sessions_v2g <- function(
   # `Energy` is the net target the session charges towards (`EnergyRequired`,
   # set by `expand_sessions()`), so it stops charging once it has it net of
   # discharge (`EnergyToCharge` grows by the discharged energy grossed up by
-  # `discharge_eff`). `EnergyMinTarget` is the share of it the session must
-  # charge at least, to leave at `soc_final_min` (see v2g_energy_min_ratio()).
+  # `discharge_eff`). Where the import capacity forces it, it leaves with
+  # less, never below its arrival level. `EnergyHeadroom` is what it may hold
+  # above its target where the setpoint asks for more (see v2g_headroom()),
+  # without owing it back: `EnergyToCharge` then goes below 0.
   sessions_sch <- sessions %>%
     set_state_of_charge() %>%
     dplyr::filter(.data$ConnectionStartDateTime %in% setpoint$datetime)
-  sessions_sch$EnergyMinTarget <- v2g_energy_min_ratio(
+  sessions_sch$EnergyHeadroom <- v2g_headroom(
     sessions_sch,
+    soc_max,
     soc_final_min
   )
   sessions_sch <- sessions_sch %>%
@@ -1976,7 +2245,7 @@ schedule_sessions_v2g <- function(
           "FlexibilityHours",
           "StateOfCharge",
           "BatteryCapacity",
-          "EnergyMinTarget"
+          "EnergyHeadroom"
         ))
       ),
       by = "Session"
@@ -1994,7 +2263,9 @@ schedule_sessions_v2g <- function(
       EnergyToCharge = .data$EnergyRequired,
       Flexible = NA,
       Exploited = NA,
-      EnergyInBattery = .data$BatteryCapacity * .data$StateOfCharge
+      EnergyInBattery = .data$BatteryCapacity * .data$StateOfCharge,
+      EnergyCeiling = .data$EnergyInBattery + .data$EnergyRequired +
+        .data$EnergyHeadroom
     )
 
   timeslot_dttm <- NULL
@@ -2005,11 +2276,19 @@ schedule_sessions_v2g <- function(
     )
   }
 
+  # How far the sessions are behind the setpoint's cumulative energy (kW per
+  # slot). They charge into their headroom only up to it: where the scheduler
+  # leaves out a discharge the setpoint planned (one below
+  # `charging_power_min`), the charge that would have put it back must not
+  # end up in the headroom.
+  behind_plan <- 0
+
   for (timeslot in setpoint$datetime) {
     timeslot_dttm <- format(
       lubridate::as_datetime(timeslot, tz = dttm_tz),
       "%d/%m/%Y %H:%M"
     )
+    setpoint_planned <- setpoint$setpoint[setpoint$datetime == timeslot]
 
     if (include_log) {
       log <- c(
@@ -2036,27 +2315,26 @@ schedule_sessions_v2g <- function(
     #     The `PowerTimeslot` is the `PowerNominal` in all time slots,
     #     except when sessions finish charging in the middle of a time slot.
     #   - `EnergyCharged`: energy already charged before this time slot.
-    #   - `MinEnergyToCharge`: minimum energy that must be charged to fulfill
-    #       the minimum energy (`EnergyMinTarget`).
+    #   - `MinEnergyToCharge`: minimum energy that must be charged to leave at
+    #       least at the arrival level (what a discharge took).
     #   - `PossibleEnergyRest`: energy that can be charged at nominal power
     #       during the rest of connection hours (excluding this time slot).
     idx_timeslot <- sessions_expanded$Timeslot == timeslot
     if (!any(idx_timeslot)) {
+      behind_plan <- behind_plan + setpoint_planned
       next
     }
     sessions_timeslot <- sessions_expanded[idx_timeslot, ]
 
     sessions_timeslot <- sessions_timeslot %>%
       mutate(
-        PowerTimeslot = pmin(
-          .data$EnergyToCharge / (resolution / 60),
-          .data$PowerNominal
-        ),
-        EnergyCharged = .data$EnergyRequired - .data$EnergyToCharge,
-        MinEnergyToCharge = pmax(
-          .data$EnergyRequired * .data$EnergyMinTarget - .data$EnergyCharged,
+        # Above its target (headroom) a session has nothing left to charge
+        PowerTimeslot = pmax(
+          pmin(.data$EnergyToCharge / (resolution / 60), .data$PowerNominal),
           0
         ),
+        EnergyCharged = .data$EnergyRequired - .data$EnergyToCharge,
+        MinEnergyToCharge = pmax(-.data$EnergyCharged, 0),
         ChargingPowerMin = pmin(.data$PowerNominal, charging_power_min),
         PossibleEnergyRest = .data$PowerNominal *
           pmax(.data$ConnectionHoursLeft - resolution / 60, 0)
@@ -2178,12 +2456,12 @@ schedule_sessions_v2g <- function(
         # is left:
         #   1. postpone charge (down to 0, or to what the session must charge
         #      now to still reach its full target),
-        #   2. curtail below the full target, down to the minimum energy,
+        #   2. curtail below the full target, down to the arrival level,
         #   3. discharge what the session can still charge back to its full
-        #      target,
-        #   4. discharge below it, down to the minimum energy.
-        # Stages 2 and 4 give up energy (`soc_max` towards `soc_final_min`),
-        # so they go only as far as the import capacity needs (`power_cap`,
+        #      target, and the headroom it holds above it,
+        #   4. discharge below it, down to the arrival level.
+        # Stages 2 and 4 give up energy (below the departure level), so they
+        # go only as far as the import capacity needs (`power_cap`,
         # see smart_v2g_window()). Where the setpoint goes below `power_cap`,
         # the fleet plan discharges there to charge back later under the caps,
         # so stage 3 runs first for that part of the setpoint: a session is
@@ -2402,9 +2680,22 @@ schedule_sessions_v2g <- function(
         }
       }
     } else {
-      # No flexibility required: charge all sessions
-      sessions_timeslot$Power <- sessions_timeslot$PowerTimeslot
+      # No flexibility required: charge all sessions, and into their
+      # headroom where the setpoint asks for more
+      sessions_timeslot$Power <- v2g_charge_headroom(
+        sessions_timeslot,
+        min(
+          -flex_req,
+          behind_plan + setpoint_planned - sessions_timeslot_power
+        ),
+        resolution,
+        charging_power_min
+      )
+      sessions_timeslot$Exploited <- sessions_timeslot$Power >
+        sessions_timeslot$PowerTimeslot
     }
+    behind_plan <- behind_plan + setpoint_planned -
+      sum(sessions_timeslot$Power)
 
     # Set `Exploited` to `NA` if sessions are not `Flexible`
     sessions_timeslot$Exploited[!sessions_timeslot$Flexible] <- NA
@@ -2530,7 +2821,7 @@ schedule_sessions_v2g <- function(
     select("Session", !any_of(names(sessions_segmented))) %>%
     left_join(sessions_segmented, by = "Session") %>%
     select(
-      any_of(setdiff(names(sessions_sch), "EnergyMinTarget")),
+      any_of(setdiff(names(sessions_sch), "EnergyHeadroom")),
       "Flexible",
       "Exploited",
       "EnergyToCharge",
@@ -2541,6 +2832,51 @@ schedule_sessions_v2g <- function(
     sessions = sessions_sch_flex,
     log = log
   )
+}
+
+
+#' Charge V2G sessions into their headroom
+#'
+#' Where the setpoint asks the sessions of a slot for `extra` kW more than
+#' they charge towards their energy (`PowerTimeslot`), they charge it into
+#' their headroom, each in proportion to the room it has: up to its nominal
+#' power, and up to `EnergyCeiling` in its battery. Under a
+#' `charging_power_min`, a session that would start charging below it waits.
+#'
+#' @param sessions_timeslot tibble, the sessions of the slot (see
+#'   `schedule_sessions_v2g()`)
+#' @param extra numeric, kW the setpoint asks for on top (none at or below 0)
+#' @param resolution numeric, slot length in minutes
+#' @param charging_power_min numeric, minimum power in kW
+#'
+#' @return numeric vector, the power of each session in the slot
+#' @keywords internal
+#'
+v2g_charge_headroom <- function(
+  sessions_timeslot,
+  extra,
+  resolution,
+  charging_power_min
+) {
+  power <- sessions_timeslot$PowerTimeslot
+  room <- pmax(
+    pmin(
+      sessions_timeslot$PowerNominal,
+      (sessions_timeslot$EnergyCeiling - sessions_timeslot$EnergyInBattery) /
+        (resolution / 60)
+    ) -
+      power,
+    0
+  )
+  room[room < 0.01] <- 0
+  if (extra < 0.01 || sum(room) == 0) {
+    return(power)
+  }
+  added <- room * min(extra / sum(room), 1)
+  waits <- power == 0 & added < sessions_timeslot$ChargingPowerMin &
+    charging_power_min > 0
+  added[waits] <- 0
+  round(power + added, 8)
 }
 
 
@@ -2698,21 +3034,22 @@ check_soc_final_min <- function(soc_final_min, soc_min, soc_max) {
 }
 
 
-#' Set the arrival State-of-Charge of the V2G sessions from `soc_max`
+#' Set the arrival State-of-Charge of the V2G sessions from `soc_final_min`
 #'
-#' A session's `Energy` is what it charges to reach `soc_max`: with a
+#' A session's `Energy` is what it charges to reach `soc_final_min`: with a
 #' `BatteryCapacity` column and no `StateOfCharge` column, each session arrives
-#' at `soc_max - 100 * Energy / BatteryCapacity`, all in %. A session whose
-#' energy does not fit below `soc_max` (it would arrive below 0) is an error.
+#' at `soc_final_min - 100 * Energy / BatteryCapacity`, all in %. A session
+#' whose energy does not fit below `soc_final_min` (it would arrive below 0) is
+#' an error.
 #'
 #' @param sessions tibble of sessions
-#' @param soc_max numeric, the SoC ceiling in %
+#' @param soc_final_min numeric, the departure level in %
 #'
 #' @return `sessions`, with a `StateOfCharge` column when it has a
 #'   `BatteryCapacity` column and no `StateOfCharge` column
 #' @keywords internal
 #'
-set_v2g_arrival <- function(sessions, soc_max) {
+set_v2g_arrival <- function(sessions, soc_final_min) {
   if (
     !("BatteryCapacity" %in% names(sessions)) ||
       "StateOfCharge" %in% names(sessions)
@@ -2720,13 +3057,13 @@ set_v2g_arrival <- function(sessions, soc_max) {
     return(sessions)
   }
   check_battery_capacity(sessions)
-  soc <- soc_max - 100 * sessions$Energy / sessions$BatteryCapacity
+  soc <- soc_final_min - 100 * sessions$Energy / sessions$BatteryCapacity
   too_big <- soc < -1e-9
   if (any(too_big)) {
     stop(
-      "Error: the `Energy` of some sessions does not fit below `soc_max` ",
-      "(`Energy > soc_max / 100 * BatteryCapacity`, arriving below 0 %). ",
-      "Sessions: ",
+      "Error: the `Energy` of some sessions does not fit below ",
+      "`soc_final_min` (`Energy > soc_final_min / 100 * BatteryCapacity`, ",
+      "arriving below 0 %). Sessions: ",
       paste(unique(sessions$Session[too_big]), collapse = ", ")
     )
   }
@@ -2735,39 +3072,59 @@ set_v2g_arrival <- function(sessions, soc_max) {
 }
 
 
-#' Minimum share of the energy of each V2G session
+#' Headroom of each V2G session
 #'
-#' A session must leave at least at `soc_final_min`: it must charge at least
-#' `(soc_final_min - StateOfCharge) * BatteryCapacity` (nothing when it
-#' arrives above it), out of its `Energy`, which takes it to `soc_max`.
-#' Without a `BatteryCapacity` column the battery is derived from the energy
-#' (see `v2g_battery_capacity()`).
+#' What a session may hold above the level its `Energy` takes it to:
+#' `soc_max - soc_final_min` of its battery, never above `soc_max`. It charges
+#' into it only where its objective gains, and never owes it back.
 #'
 #' @param sessions tibble of sessions, with `StateOfCharge` (fraction)
-#' @param soc_final_min numeric or `NULL`, the minimum final SoC (fraction).
-#'   `NULL`, as [smart_v2g()] passes it when `soc_final_min` is at `soc_max`,
-#'   gives every session all its energy (no rounding of the adapted energy can
-#'   then lower it).
+#' @param soc_max,soc_final_min numeric, the SoC ceiling and the departure
+#'   level (fractions)
 #'
-#' @return numeric vector, one share (between 0 and 1) per session
+#' @return numeric vector, kWh per session (battery-side), at or above 0
 #' @keywords internal
 #'
-v2g_energy_min_ratio <- function(sessions, soc_final_min = NULL) {
-  if (is.null(soc_final_min)) {
-    return(rep(1, nrow(sessions)))
-  }
+v2g_headroom <- function(sessions, soc_max, soc_final_min) {
   capacity <- v2g_battery_capacity(
     sessions$Energy,
     sessions$StateOfCharge,
     sessions[["BatteryCapacity"]]
   )
-  energy_floor <- pmax(soc_final_min - sessions$StateOfCharge, 0) * capacity
-  ratio <- ifelse(
-    sessions$Energy > 0,
-    energy_floor / pmax(sessions$Energy, 1e-9),
+  departure <- sessions$StateOfCharge * capacity + sessions$Energy
+  pmax(
+    pmin((soc_max - soc_final_min) * capacity, soc_max * capacity - departure),
+    0
+  )
+}
+
+
+#' Cumulative headroom of the V2G sessions arrived by each slot
+#'
+#' @param sessions tibble of sessions
+#' @param headroom numeric vector, kWh per session (see `v2g_headroom()`)
+#' @param dttm_seq datetime vector of the window
+#'
+#' @return numeric vector of `length(dttm_seq)`, in the units of the setpoint
+#'   (kW per slot, i.e. kWh divided by the slot length in hours)
+#' @keywords internal
+#'
+v2g_headroom_cumsum <- function(sessions, headroom, dttm_seq) {
+  n_slots <- length(dttm_seq)
+  arrived <- rep(0, n_slots)
+  slot_hours <- timefully::get_time_resolution(dttm_seq, units = "mins") / 60
+  arrival_idx <- pmax(
+    findInterval(
+      as.numeric(sessions$ConnectionStartDateTime),
+      as.numeric(dttm_seq)
+    ),
     1
   )
-  pmin(ratio, 1)
+  for (i in which(headroom > 0 & arrival_idx <= n_slots)) {
+    arrived[arrival_idx[i]] <- arrived[arrival_idx[i]] +
+      headroom[i] / slot_hours
+  }
+  cumsum(arrived)
 }
 
 

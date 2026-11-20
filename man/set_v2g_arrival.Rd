@@ -2,23 +2,24 @@
 % Please edit documentation in R/v2g.R
 \name{set_v2g_arrival}
 \alias{set_v2g_arrival}
-\title{Set the arrival State-of-Charge of the V2G sessions from \code{soc_max}}
+\title{Set the arrival State-of-Charge of the V2G sessions from \code{soc_final_min}}
 \usage{
-set_v2g_arrival(sessions, soc_max)
+set_v2g_arrival(sessions, soc_final_min)
 }
 \arguments{
 \item{sessions}{tibble of sessions}
 
-\item{soc_max}{numeric, the SoC ceiling in \%}
+\item{soc_final_min}{numeric, the departure level in \%}
 }
 \value{
 \code{sessions}, with a \code{StateOfCharge} column when it has a
 \code{BatteryCapacity} column and no \code{StateOfCharge} column
 }
 \description{
-A session's \code{Energy} is what it charges to reach \code{soc_max}: with a
+A session's \code{Energy} is what it charges to reach \code{soc_final_min}: with a
 \code{BatteryCapacity} column and no \code{StateOfCharge} column, each session arrives
-at \code{soc_max - 100 * Energy / BatteryCapacity}, all in \%. A session whose
-energy does not fit below \code{soc_max} (it would arrive below 0) is an error.
+at \code{soc_final_min - 100 * Energy / BatteryCapacity}, all in \%. A session
+whose energy does not fit below \code{soc_final_min} (it would arrive below 0) is
+an error.
 }
 \keyword{internal}

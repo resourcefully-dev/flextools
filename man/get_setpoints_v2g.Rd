@@ -12,8 +12,9 @@ get_setpoints_v2g(
   lambda,
   soc_min = 0.2,
   discharge_eff = 1,
-  soc_final_min = NULL,
-  cycle_cost = 0
+  soc_final_min = soc_max,
+  cycle_cost = 0,
+  soc_max = 1
 )
 }
 \arguments{
@@ -23,9 +24,9 @@ get_setpoints_v2g(
 \item{discharge_eff}{numeric, discharge efficiency of the vehicles, counted
 by the cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}
 
-\item{soc_final_min}{numeric or \code{NULL}, minimum SoC the sessions leave
-with, as a fraction (\code{NULL}: all their energy). See \code{\link[=smart_v2g]{smart_v2g()}}
-and \code{v2g_energy_min_ratio()}.}
+\item{soc_final_min, soc_max}{numeric, the departure level and the SoC
+ceiling, as fractions: the headroom of each session (see
+\code{v2g_headroom()}). \code{soc_final_min = soc_max} (the default) gives none.}
 
 \item{cycle_cost}{numeric, cost of one full battery cycle, counted by the
 cost and combined objectives per kWh discharged as \code{cycle_cost / BatteryCapacity}. See \code{\link[=smart_v2g]{smart_v2g()}}.}

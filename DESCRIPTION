@@ -20,7 +20,7 @@ Depends:
 Imports: 
     dplyr,
     tidyr,
-    lubridate,
+    lubridate (>= 1.9.0),
     rlang,
     purrr,
     cli,

@@ -1069,11 +1069,21 @@ tank_flex_windows <- function(
     first_start <- full$start[1]
     last_end <- max(full$end)
   } else {
+    # On the clock: the day's date and hour are counted on the local clock
+    # (as UTC, which has no DST), and a start hour in the spring-forward gap
+    # moves to the gap's end
     t0 <- dttm_seq[1]
-    next_start <- lubridate::floor_date(t0, "day") +
-      lubridate::hours(window_start_hour)
+    clock_start <- lubridate::floor_date(lubridate::force_tz(t0, "UTC"), "day") +
+      lubridate::dhours(window_start_hour)
+    to_local <- function(clock) {
+      lubridate::force_tz(
+        clock, lubridate::tz(t0),
+        roll_dst = c("boundary", "pre")
+      )
+    }
+    next_start <- to_local(clock_start)
     if (next_start < t0) {
-      next_start <- next_start + lubridate::days(1)
+      next_start <- to_local(clock_start + lubridate::ddays(1))
     }
     first_start <- 1 + round(
       as.numeric(difftime(next_start, t0, units = "mins")) / resolution

@@ -1,6 +1,6 @@
 Package: flextools
 Title: Tools For Demand-Response Simulations
-Version: 1.22.0
+Version: 1.22.1
 Authors@R: 
     person(given = "Marc", family = "Cañigueral", role = c("aut", "cre"),
            email = "marccanyigueral@gmail.com",
@@ -20,7 +20,7 @@ Depends:
 Imports: 
     dplyr,
     tidyr,
-    lubridate,
+    lubridate (>= 1.9.0),
     rlang,
     purrr,
     cli,

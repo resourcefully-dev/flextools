@@ -2807,9 +2807,10 @@ schedule_sessions_v2g <- function(
     ))) %>%
     dplyr::mutate(
       ConnectionStartDateTime = .data$Timeslot,
-      ConnectionEndDateTime = .data$Timeslot + lubridate::minutes(resolution),
+      # Elapsed time: a clock-time period lands in the spring-forward gap (NA)
+      ConnectionEndDateTime = .data$Timeslot + lubridate::dminutes(resolution),
       ChargingStartDateTime = .data$Timeslot,
-      ChargingEndDateTime = .data$Timeslot + lubridate::minutes(resolution),
+      ChargingEndDateTime = .data$Timeslot + lubridate::dminutes(resolution),
       ConnectionHours = resolution / 60,
       ChargingHours = ifelse(.data$Power != 0, resolution / 60, 0),
       Energy = .data$Power * (.data$ConnectionHours)

@@ -1,3 +1,23 @@
+# flextools 1.22.1
+
+* Fix: `smart_v2g()` and `smart_charging()` returned segments without an
+  end (`NA`) for sessions over the spring-forward night of a time zone with
+  daylight saving time. Each time slot ended `resolution` minutes of clock
+  time after it started, and in `Europe/Amsterdam` the 01:45 slot of
+  2050-03-27 then ends at 02:00, which does not exist. A slot now ends
+  `resolution` minutes of elapsed time later (03:00 CEST). On the fall-back
+  night the slots ended an hour late or early, so a segment could overlap
+  the next one or end before it started; the segments of a session are now
+  contiguous there too.
+* Fix: `smart_charging()` with a time series whose last slot starts in the
+  hour before the spring-forward gap (01:45 in `Europe/Amsterdam`) made no
+  session of the last window responsive: the window's end was `NA`.
+* Fix: `add_tank_optimization()` stopped with "missing value where
+  TRUE/FALSE needed" on a run too short for a full window that starts on a
+  spring-forward day, with `window_start_hour` in the gap (2 in
+  `Europe/Amsterdam`). The leading window now ends at the gap's end.
+* flextools needs lubridate 1.9.0 or later.
+
 # flextools 1.22.0
 
 * Breaking: `smart_v2g()` plans every session's departure at

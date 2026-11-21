@@ -358,7 +358,7 @@ smart_charging <- function(
   # (its charging ended past the window) and charged unmanaged at full power.
   window_boundaries <- c(
     dttm_seq[flex_windows_idx$start],
-    dttm_seq[max(flex_windows_idx$end)] + lubridate::minutes(time_resolution)
+    dttm_seq[max(flex_windows_idx$end)] + lubridate::dminutes(time_resolution)
   )
   sessions <- split_sessions_at_windows(
     sessions,
@@ -770,7 +770,7 @@ set_responsive <- function(
 
   # The window ends one resolution after its last slot.
   end_dttm <- dttm_seq[length(dttm_seq)]
-  max_end_connection_dttm <- end_dttm + minutes(time_resolution)
+  max_end_connection_dttm <- end_dttm + lubridate::dminutes(time_resolution)
 
   # Responsiveness is looked up per (time cycle, profile) of each session, not
   # by the window's dominant time cycle: a Friday session whose connection
@@ -2178,9 +2178,10 @@ schedule_sessions <- function(
     ))) %>%
     mutate(
       ConnectionStartDateTime = .data$Timeslot,
-      ConnectionEndDateTime = .data$Timeslot + minutes(resolution),
+      # Elapsed time: a clock-time period lands in the spring-forward gap (NA)
+      ConnectionEndDateTime = .data$Timeslot + lubridate::dminutes(resolution),
       ChargingStartDateTime = .data$Timeslot,
-      ChargingEndDateTime = .data$Timeslot + minutes(resolution),
+      ChargingEndDateTime = .data$Timeslot + lubridate::dminutes(resolution),
       ConnectionHours = resolution / 60,
       ChargingHours = ifelse(.data$Power > 0, resolution / 60, 0),
       Energy = .data$Power * .data$ChargingHours

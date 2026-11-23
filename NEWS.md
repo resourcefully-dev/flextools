@@ -1,3 +1,46 @@
+# flextools 1.24.0
+
+EV sessions can carry their charging efficiency. Up to now normal charging
+was lossless and V2G counted only a round-trip `discharge_eff` for the whole
+run.
+
+* New: the `sessions` of `smart_charging()`, `schedule_sessions()` and
+  `smart_v2g()` can carry an `Efficiency` column, a fraction in (0, 1] per
+  session (one per charger power class, fixed whatever the power). `Energy`
+  is what reaches the battery and `Power` is drawn from the grid: at `Power`
+  the battery gains `Power * Efficiency`. A session therefore needs
+  `Energy / Efficiency` from the grid and charges for `Energy / (Power *
+  Efficiency)` hours at full power. Without the column every session is
+  lossless and the results are those of 1.23.0. An `Efficiency` that is NA,
+  at or below 0 or above 1 is an error naming the sessions.
+* `smart_charging()` and `schedule_sessions()` (every method): the setpoints
+  and the scheduler work in grid-side power and energy, so the grid
+  capacities, the `energy_min` and `energy_max` shares and the charging time
+  apply to `Energy / Efficiency`. A 10 kW session of 18 kWh at 0.9 draws
+  20 kWh from the grid, for 2 hours instead of 1.8.
+* `smart_v2g()`: the efficiency applies to every charge (the battery gains
+  `Power * Efficiency`) and every discharge (discharging `Power` to the grid
+  takes `Power / Efficiency` from the battery), a round trip of
+  `Efficiency^2`. The SoC tracking, the `soc_min` floor, the departure at
+  `soc_final_min`, the headroom, `cycle_cost` and the `"cost"` and combined
+  setpoints count it per session. A session at 0.9 that discharges 1 kWh to
+  the grid loses 1.11 kWh of battery and charges it back with 1.23 kWh. The
+  setpoint plans each profile as one fleet, so its discharge losses use one
+  round trip per slot: the `Energy`-weighted mean `Efficiency^2` of the
+  sessions connected in it (exact for one efficiency); the scheduler counts
+  each session's own.
+* Deprecated: `smart_v2g(discharge_eff)`, superseded by the `Efficiency`
+  column. It still works for sessions without the column; with the column it
+  must stay 1, otherwise it is an error.
+* New: with an `Efficiency` column, the returned `sessions` are battery-side:
+  every row's `Energy` (negative where it discharged), `EnergyToCharge` and
+  `BatteryCapacity` count the battery. Two new columns carry the row's
+  losses in kWh, both at or above 0: `ChargingLosses` (grid-side energy
+  charged minus what reached the battery) and `DischargeLosses` (what left
+  the battery minus what reached the grid). A row's grid-side energy is
+  `Energy + ChargingLosses + DischargeLosses`. The `setpoints` and `demand`
+  stay grid-side power.
+
 # flextools 1.23.0
 
 Under `opt_objective = "cost"`, a grid capacity the site breaks was not

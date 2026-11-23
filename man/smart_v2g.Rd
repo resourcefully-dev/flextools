@@ -25,7 +25,9 @@ smart_v2g(
 }
 \arguments{
 \item{sessions}{tibble, sessions data set containig the following variables:
-\code{"Session"}, \code{"Timecycle"}, \code{"Profile"}, \code{"ConnectionStartDateTime"}, \code{"ConnectionHours"}, \code{"Power"} and \code{"Energy"}.}
+\code{"Session"}, \code{"Timecycle"}, \code{"Profile"}, \code{"ConnectionStartDateTime"}, \code{"ConnectionHours"}, \code{"Power"} and \code{"Energy"}.
+It can also carry an \code{"Efficiency"} column, the charging efficiency of each
+session (see Details).}
 
 \item{opt_data}{tibble, optimization contextual data.
 The first column must be named \code{datetime} (mandatory) containing the
@@ -110,7 +112,11 @@ uncontrolled, never discharges, and the setpoint carries its load as
 fixed. Up to version 1.12.0 a value below 1 was a share of the nominal
 power; it is now always kW.}
 
-\item{discharge_eff}{numeric, efficiency (0, 1] of a discharge, counted as
+\item{discharge_eff}{numeric, deprecated since version 1.24.0: superseded
+by the \code{Efficiency} column of \code{sessions} (see Details), which counts the losses
+of every charge and discharge per session. It still works for sessions
+without that column; with the column it must stay 1, and anything else
+is an error. Efficiency (0, 1] of a discharge, counted as
 the round trip grid -> battery -> grid. For every kWh a session discharges
 to the grid, its battery loses \code{1 / discharge_eff} kWh, which it charges
 back from the grid before it leaves (0.9: 1.11 kWh). The sessions'
@@ -169,12 +175,22 @@ every kWh discharged to the grid, so the fleet discharges only when the
 price spread, net of the \code{discharge_eff} losses, pays more than it. A
 combined objective \code{w} counts \code{(1 - w)} of it, the cost side's share. The
 \code{"grid"} and \code{"capacity"} objectives, which carry no prices and discharge
-only to cut import, do not count it.}
+only to cut import, do not count it. With an \code{Efficiency} column, a kWh
+discharged to the grid drains \code{1 / Efficiency} kWh of battery, so the
+penalty per kWh to the grid is \code{cycle_cost / (BatteryCapacity * Efficiency)} (the mean of \code{BatteryCapacity * Efficiency} over the fleet).}
 }
 \value{
 list with setpoints, sessions and demand similar to
-\code{smart_charging()}. Scheduling is still charging-only while
-the V2G-specific session logic is under development.
+\code{smart_charging()}. With an \code{Efficiency} column in \code{sessions}, the
+\code{Energy} of every returned row is what the battery gained (negative
+where it discharged), its \code{EnergyToCharge} and \code{BatteryCapacity} are
+battery-side, and two more columns carry the row's losses in kWh, both at
+or above 0: \code{ChargingLosses}, the grid-side energy charged minus what
+reached the battery (\code{Power * ChargingHours * (1 - Efficiency)} on a
+charging row), and \code{DischargeLosses}, what left the battery minus the
+grid-side energy discharged (\verb{|Power| * ChargingHours * (1 / Efficiency - 1)} on a discharging row). A row's grid-side energy is \code{Energy + ChargingLosses + DischargeLosses}. The \code{setpoints} and \code{demand} are
+grid-side power. Without the column (also with \code{discharge_eff}) the rows
+are grid-side and carry neither loss column, as up to version 1.23.0.
 }
 \description{
 Prototype vehicle-to-grid simulation built on top of \code{smart_charging()}
@@ -200,6 +216,28 @@ it and plans to leave at \code{StateOfCharge + 100 * Energy / BatteryCapacity};
 it must fit in its battery, \code{Energy <= BatteryCapacity * (100 - StateOfCharge) / 100}, or \code{smart_v2g()} stops and names it. When
 \code{BatteryCapacity} is absent, each session's \code{Energy} takes its battery from
 \code{StateOfCharge} to full, so its battery capacity is \code{Energy / (1 - StateOfCharge / 100)} (twice the energy at 50 \%).
+
+It can also carry an \code{Efficiency} column, the charging efficiency of each
+session as a fraction in (0, 1], as in \code{\link[=smart_charging]{smart_charging()}}, applied to every
+charge and every discharge. A session's \code{Energy}, \code{BatteryCapacity} and
+\code{StateOfCharge} are battery-side and its \code{Power} is grid-side: charging at
+\code{P} its battery gains \code{P * Efficiency}, and discharging \code{P} to the grid it
+loses \code{P / Efficiency}, so the round trip is \code{Efficiency^2} (0.81 at 0.9).
+The SoC tracking, the \code{soc_min} floor, the departure at \code{soc_final_min}, the
+headroom and the cost and combined setpoints all count it: a session at 0.9
+that discharges 1 kWh to the grid loses 1.11 kWh of battery and charges it
+back with 1.23 kWh from the grid. Without the column every session is
+lossless, unless the deprecated \code{discharge_eff} is given; giving both is an
+error. An \code{Efficiency} that is NA, at or below 0 or above 1 is an error
+naming the sessions.
+
+The setpoint plans each profile's sessions as one fleet, so it counts the
+discharge losses with one efficiency per time slot: the round trip
+\code{Efficiency^2} of the sessions connected in it, weighted by their \code{Energy}.
+That is exact for a fleet of one efficiency. With mixed efficiencies the
+setpoint's estimate of what a discharge costs to charge back is off by the
+spread between them, while the scheduler always counts each session's own
+losses, so every session still meets its departure level and SoC floor.
 
 Like \code{SOCmin} and \code{SOCmax} of \code{add_battery_optimization()}, \code{soc_min} and
 \code{soc_max} are the floor and the ceiling of the batteries (in \%).

@@ -70,7 +70,8 @@ profile stays feasible.}
 \item{LFmin}{numeric vector or \code{NULL} (default), per-slot floor of the
 optimized load. See \code{demand_grid_v2g_window()}.}
 
-\item{discharge_eff}{numeric, discharge efficiency (0, 1] of the vehicles.
+\item{discharge_eff}{numeric, discharge efficiency (0, 1] of the vehicles,
+one value or one per slot (see \code{v2g_fleet_discharge_eff()}).
 Below 1, every kWh discharged must be charged back as \code{1 / discharge_eff}
 kWh, as the scheduler counts it, so a discharge pays only when the price
 spread covers the losses (see \code{solve_optimization_window_v2g()}).}

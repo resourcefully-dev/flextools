@@ -66,3 +66,9 @@ summed from the exact per-slot powers) and \code{log}
 \description{
 Schedule sessions according to optimal setpoint
 }
+\details{
+The \code{sessions} can carry an \code{Efficiency} column, as in \code{\link[=smart_charging]{smart_charging()}}:
+the setpoint is grid-side power, each session needs \code{Energy / Efficiency}
+from the grid, and the returned sessions are battery-side, with their
+\code{ChargingLosses} and \code{DischargeLosses} in kWh.
+}

@@ -22,7 +22,8 @@ get_setpoints_v2g(
 \code{soc_min} of \code{\link[=smart_v2g]{smart_v2g()}} divided by 100).}
 
 \item{discharge_eff}{numeric, discharge efficiency of the vehicles, counted
-by the cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}.}
+by the cost and combined objectives. See \code{\link[=smart_v2g]{smart_v2g()}}. Ignored when the
+sessions carry an \code{Efficiency} column (see \code{v2g_fleet_discharge_eff()}).}
 
 \item{soc_final_min, soc_max}{numeric, the departure level and the SoC
 ceiling, as fractions: the headroom of each session (see

@@ -1,3 +1,51 @@
+# flextools 1.23.0
+
+Under `opt_objective = "cost"`, a grid capacity the site breaks was not
+lowered by the flexibility that had energy to give: a soft return to the
+start state outranked the capacity, or a window was declared infeasible
+before the capacity's slack could act. Everywhere now, physical limits and
+the comfort floor outrank the grid capacity, which outranks the return to the
+reference state, which outranks the price.
+
+* Fix: `add_battery_optimization()` under `"cost"` left the battery idle for
+  a whole window when one of its slots was over `import_capacity` (or
+  `export_capacity`) by more than the battery could cover. The import and
+  export boxes stopped at the capacity while the capacity rows allowed a
+  slack above it, so the window was infeasible and returned zeros without a
+  word. The boxes now follow the slack (LP, MILP and QP), and a window that
+  still has no solution is a warning naming it.
+* Breaking: `add_battery_optimization()` under `"cost"` solves its windows in
+  order, each starting at the state of charge the previous one ended at, and
+  `SOCini` is the reference each window returns to. The return is soft: a
+  window that breaks a capacity may end below (or, for an export breach,
+  above) `SOCini` to lower the breach, and the next windows charge back to it
+  where the capacities allow. A kWh of the return is priced above any price
+  a stored kWh can earn and below the capacity's penalty, so a window without
+  a breach still ends at `SOCini`, as before. A 40 kWh battery at
+  `SOCini = 80` next to a day at the 100 kW import capacity with an evening
+  20 kW above it lowered the breach by nothing (80 kWh over) and now by its
+  32 kWh (48 kWh over), and is back at 80 % the next day.
+* Fix: `add_tank_optimization()` (every objective) kept a full tank closed
+  through a grid capacity breach and ran the compressor in it. A window ending below its
+  target paid the comfort floor's price (80 x the heat price per kWh at 15
+  minutes) against 10 x per kW of breach. The shortfall now has its own
+  price, twice the dearest compressor heat per kWh (`2 / (cop * dt)` heat
+  prices at the window's lowest COP), above any price and below the
+  capacity.
+* Breaking: `add_tank_optimization()` ends every window at least as full as
+  `Tcap * SOCini / 100` (the reference level), no longer as full as the
+  window started. A tank drained in a breach is filled back by the next
+  windows, and one that ends a window above the reference no longer raises
+  the next window's target. A run whose windows end where they start is
+  unchanged.
+* Fix: `smart_v2g()` gave up on an import breach it could not cover in full:
+  where neither the capacity nor the vehicles' reach could be met, the
+  vehicles added nothing to the breach and, under `"cost"`, took nothing
+  from it. They now hold the import at the lowest uniform level above the
+  capacity that their energy and power sustain (found by bisection over the
+  plan), with a message. A car with 14 kWh of headroom under a 7-hour
+  breach of 10 kW holds it at 28 kW, 70 → 56.6 kWh over the capacity.
+
 # flextools 1.22.1
 
 * Fix: `smart_v2g()` and `smart_charging()` returned segments without an

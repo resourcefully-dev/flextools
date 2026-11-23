@@ -30,7 +30,9 @@ tank_solve_window(
   power_unit = NULL,
   Hcap = 0,
   kh = 1,
-  R0 = 0
+  R0 = 0,
+  S_ref = S0,
+  return_weight = NULL
 )
 }
 \arguments{
@@ -93,6 +95,15 @@ house's demand and the tank's is the heat it passes to the house.}
 
 \item{R0}{numeric, house level before the first slot, within \verb{[0, Hcap]}
 (kWh)}
+
+\item{S_ref}{numeric, the level the window returns to (kWh): it ends at
+least this full, within the band and the room \code{ub_S} leaves at the top.
+Defaults to \code{S0}, the window's own start.}
+
+\item{return_weight}{numeric, the price of a kWh the window ends below
+\code{S_ref}, in units of \code{\link[=tank_heat_price]{tank_heat_price()}}. \code{NULL} (default) is \code{2 / (cop * dt)} at the window's lowest COP (at least 1), between the compressor's
+heat and a missed grid capacity (see the body). \code{20 / dt}, the comfort
+floor's, is the price up to flextools 1.22.1.}
 }
 \value{
 list of the unrounded \code{power}, \code{backup} and \code{gas} (kW), the heat

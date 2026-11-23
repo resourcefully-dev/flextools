@@ -921,3 +921,133 @@ compare_battery_year <- function() {
       legend_width = 200
     )
 }
+
+
+# Grid capacity under "cost" ---------------------------------------------------
+
+# Three days of 15 minutes against a 100 kW import capacity: 50 kW on the
+# first and third day, and on the second 100 kW, exactly at the capacity,
+# with 120 kW from 18:00 to 22:00. A cheap night from 00:00 to 07:00.
+breach_days_dttm <- seq(
+  as.POSIXct("2025-01-01", tz = "UTC"),
+  by = "15 min",
+  length.out = 96 * 3
+)
+breach_days_hour <- as.numeric(format(breach_days_dttm, "%H"))
+breach_days_day <- rep(1:3, each = 96)
+breach_days_data <- function(static) {
+  tibble(
+    datetime = breach_days_dttm,
+    production = 0,
+    static = static,
+    import_capacity = 100,
+    export_capacity = Inf,
+    price_imported = ifelse(breach_days_hour < 7, 0.1, 0.3),
+    price_exported = 0
+  )
+}
+
+test_that("a cost window with one slot over the capacity discharges instead of returning zeros", {
+  # One slot of the first day 30 kW over the capacity, of which the battery
+  # covers 20. Up to flextools 1.22.1 the import box stopped at the capacity,
+  # below the slack the capacity row allows: the window was infeasible and the
+  # battery idle all day.
+  static <- rep(50, 96 * 3)
+  static[19 * 4 + 1] <- 130
+  opt_data <- breach_days_data(static)
+  over <- 19 * 4 + 1
+  for (args in list(
+    list(cycle_cost = 0), # MILP
+    list(cycle_cost = 1), # LP
+    list(lambda = 0.1) # QP
+  )) {
+    B <- suppressMessages(do.call(
+      add_battery_optimization,
+      c(
+        list(opt_data, opt_objective = "cost", Bcap = 40, Bc = 20, Bd = 20),
+        list(SOCmin = 0, SOCmax = 100, SOCini = 50, window_start_hour = 0),
+        args
+      )
+    ))
+    label <- names(args)
+    expect_lte(B[over], -20 + 1e-3, label = label)
+    expect_lte(max((static + B)[-over]), 100 + 1e-3, label = label)
+  }
+})
+
+test_that("a cost window ends below SOCini to lower a breach, and the next one charges back", {
+  # The second day has no room under the capacity to charge, so a window that
+  # had to end where it started (up to flextools 1.22.1) could serve its
+  # evening breach with nothing. Each window now starts where the previous
+  # one ended and returns to SOCini only as far as the capacity allows: the
+  # battery spends its 32 kWh above 0 % on the breach (80 kWh over the
+  # capacity) and the third day charges it back to 80 %.
+  static <- ifelse(
+    breach_days_day == 2,
+    ifelse(breach_days_hour >= 18 & breach_days_hour < 22, 120, 100),
+    50
+  )
+  opt_data <- breach_days_data(static)
+  for (cycle_cost in c(0, 1)) {
+    B <- add_battery_optimization(
+      opt_data,
+      opt_objective = "cost",
+      Bcap = 40, Bc = 20, Bd = 20,
+      SOCmin = 0, SOCmax = 100, SOCini = 80,
+      window_start_hour = 0,
+      cycle_cost = cycle_cost
+    )
+    label <- paste("cycle_cost", cycle_cost)
+    net <- static + B
+    over <- sum(pmax(net - 100, 0)[breach_days_day == 2]) / 4
+    expect_equal(over, 80 - 32, tolerance = 1e-3, label = label)
+    soc <- 80 + 100 * cumsum(B) / (40 * 4)
+    expect_equal(soc[96], 80, tolerance = 1e-6, label = label)
+    expect_equal(soc[96 * 2], 0, tolerance = 1e-6, label = label)
+    expect_equal(soc[96 * 3], 80, tolerance = 1e-6, label = label)
+    # Charging back never breaks the capacity
+    expect_lte(max(net[breach_days_day != 2]), 100 + 1e-6, label = label)
+  }
+})
+
+test_that("a cost window without a breach still ends at SOCini", {
+  # Price alone never moves a window's end: a dear evening and a cheap night
+  # do not leave the battery empty at midnight.
+  opt_data <- breach_days_data(rep(50, 96 * 3))
+  for (cycle_cost in c(0, 1)) {
+    B <- add_battery_optimization(
+      opt_data,
+      opt_objective = "cost",
+      Bcap = 40, Bc = 20, Bd = 20,
+      SOCmin = 0, SOCmax = 100, SOCini = 80,
+      window_start_hour = 12,
+      cycle_cost = cycle_cost
+    )
+    soc <- 80 + 100 * cumsum(B) / (40 * 4)
+    window_ends <- which(breach_days_hour == 11 & seq_along(B) %% 4 == 0)
+    expect_equal(soc[window_ends], rep(80, length(window_ends)), tolerance = 1e-6)
+  }
+})
+
+test_that("a cost window without a solution is a warning naming it", {
+  local_mocked_bindings(
+    highs_solve = function(...) list(status_message = "Infeasible"),
+    .package = "highs"
+  )
+  opt_data <- breach_days_data(rep(50, 96 * 3))
+  warnings <- capture_warnings(
+    B <- add_battery_optimization(
+      opt_data,
+      opt_objective = "cost",
+      Bcap = 40, Bc = 20, Bd = 20,
+      SOCini = 50, window_start_hour = 0
+    )
+  )
+  expect_length(warnings, 3)
+  expect_match(
+    warnings,
+    "battery window starting 2025-01-0[123] 00:00:00 UTC was not solved \\(Infeasible\\)"
+  )
+  expect_match(warnings[2], "2025-01-02")
+  expect_equal(B, rep(0, 96 * 3))
+})

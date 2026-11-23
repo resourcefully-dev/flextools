@@ -1321,9 +1321,12 @@ test_that("the scaled level gives the schedule the level in kWh gave", {
     # OSQP stops within 1e-6 of the optimum, but not every solve gets there:
     # with the level in kWh, the combined objective on the 30 kWh tank stopped
     # 1.7e-5 kW off it (the scaled level, 1e-7), and on the soft floor, whose
-    # price dwarfs the grid term, both stop up to 1e-4 kW off it.
+    # price dwarfs the grid term, both stop up to 1e-4 kW off it. With the
+    # end shortfall priced apart from the floor (flextools 1.23.0), the two
+    # formulations of the combined soft window `peak_soft_w05 2` stop 1.6e-5
+    # kW apart.
     tol <- if (isTRUE(args$soft)) {
-      1e-5
+      2e-5
     } else if (startsWith(key, "evening_w05_30")) {
       2e-5
     } else {
@@ -1417,4 +1420,70 @@ test_that("without a house the runs of 1.20.0 are unchanged", {
       }
     }
   }
+})
+
+
+# Grid capacity under "cost" ---------------------------------------------------
+
+# Three days of 15 minutes: 2 kW of heat at a COP of 3 from a 20 kWh tank and
+# a 4 kW compressor, next to 10 kW of static load against a 14 kW import
+# capacity, and 15 kW on the first evening from 18:00 to midnight: 6 kWh over
+# the capacity before the heat pump runs, 10 kWh with its 4 kWh for the
+# evening's heat.
+breach_tank_data <- function() {
+  datetime <- seq(as.POSIXct("2024-01-01", tz = "UTC"), by = "15 min", length.out = 96 * 3)
+  h <- (seq_along(datetime) - 1) / 4
+  tibble(
+    datetime = datetime,
+    production = 0,
+    static = ifelse(h >= 18 & h < 24, 15, 10),
+    heat_demand = 2,
+    cop = 3,
+    flexible = 2 / 3,
+    import_capacity = 14,
+    export_capacity = Inf,
+    price_imported = ifelse(h %% 24 < 6, 0.1, 0.3),
+    price_exported = 0
+  )
+}
+breach_tank_run <- function(d) {
+  suppressMessages(add_tank_optimization(
+    d, "cost",
+    Tcap = 20, Pc = 4, SOCmin = 0, SOCmax = 100, SOCini = 100
+  ))
+}
+
+test_that("a full tank is drawn during a breach and filled back to SOCini after", {
+  # Up to flextools 1.22.1 the end-of-window shortfall shared the comfort
+  # floor's price, 80 x the heat price per kWh at 15 minutes against 10 x per
+  # kW of breach: the tank stayed full and the compressor ran through the
+  # breach. And the next window's target was its own start, so a drained tank
+  # was never filled back.
+  d <- breach_tank_data()
+  P <- as.numeric(breach_tank_run(d))
+  breach <- seq(18 * 4 + 1, 24 * 4)
+  level <- tank_path(P, d, init = 20, resolution = 15)
+  expect_lte(sum(P[breach]) / 4, 0.01)
+  expect_equal(sum(pmax(d$static + P - 14, 0)[1:96]) / 4, 6, tolerance = 1e-2)
+  expect_equal(level[96 + 1], 8, tolerance = 1e-2)
+  # Filled back by the end of the second day, within the capacity
+  expect_gte(level[2 * 96 + 1], 20 - 0.05)
+  expect_lte(max((d$static + P)[-breach]), 14 + 1e-6)
+})
+
+test_that("the end shortfall at the floor's price on the window's start is the schedule of 1.22.1", {
+  # `return_weight = 20 / dt` and `S_ref = S0` are the end condition up to
+  # flextools 1.22.1: the compressor runs its 4 kWh through the breach
+  real_window <- tank_solve_window
+  local_mocked_bindings(tank_solve_window = function(...) {
+    args <- list(...)
+    args$S_ref <- args$S0
+    args$return_weight <- 20 / args$dt
+    do.call(real_window, args)
+  })
+  d <- breach_tank_data()
+  P <- as.numeric(breach_tank_run(d))
+  breach <- seq(18 * 4 + 1, 24 * 4)
+  expect_equal(sum(P[breach]) / 4, 4, tolerance = 1e-2)
+  expect_equal(sum(pmax(d$static + P - 14, 0)[1:96]) / 4, 10, tolerance = 1e-2)
 })

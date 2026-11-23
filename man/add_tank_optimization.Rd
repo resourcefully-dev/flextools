@@ -58,8 +58,9 @@ the top. For a mixed tank of \code{V} litres between the inlet temperature
 \item{SOCmax}{numeric, maximum State-of-Charge (\%).}
 
 \item{SOCini}{numeric, State-of-Charge (\%) at the start of the run, within
-\verb{[SOCmin, SOCmax]}. \code{NULL} (default) means \code{SOCmax}, unlike the battery: a
-tank starting at its floor has no reserve for its first window.}
+\verb{[SOCmin, SOCmax]}, and the reference level every window ends at least
+as full as. \code{NULL} (default) means \code{SOCmax}, unlike the battery: a tank
+starting at its floor has no reserve for its first window.}
 
 \item{window_days}{integer, optimization window length in days.}
 
@@ -156,7 +157,8 @@ water temperature (level 0, \code{SOC = 0}) and \code{k = (1 - loss/100)^dt}:
 \item \verb{0 <= P[t] <= Pc}, and \code{P[t] = 0} where \code{cop[t] = 0}
 \item \verb{0 <= B[t] <= Pb}, also where \code{cop[t] = 0}
 \item \verb{0 <= H[t] <= Pg}, also where \code{cop[t] = 0}
-\item every window ends at least as full as it started.
+\item every window ends at least as full as \code{Tcap * SOCini/100}, the reference
+level (or as full as its top allows).
 }
 
 \code{B} (the backup heater) is a variable only with \code{Pb > 0}, and \code{H} (the gas
@@ -178,7 +180,10 @@ partial windows the run cuts at both ends: when the first slot is not a
 window start, the slots up to the first window start form a \strong{leading
 window}, and the slots after the last full window a \strong{trailing window},
 both optimised like any other window (the leading one from \code{SOCini}, both
-with the end-of-window rule at their last slot). Only the first
+with the end-of-window rule at their last slot). Where a window cannot
+meet a grid capacity, the tank may end it below the reference level, at a
+price above any compressor heat and below the capacity's, and the next
+windows fill it back. Only the first
 \code{flex_window_hours} of every window are optimised, so with
 \code{flex_window_hours = 24 * window_days} every slot is optimised. The slots
 past \code{flex_window_hours} run the \code{flexible} schedule, without backup.

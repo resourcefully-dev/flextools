@@ -467,7 +467,9 @@ battery_solve_cost_unified_window <- function(
   discharge_eff = 1,
   cycle_cost = 0,
   P_B = NULL,
-  q_B = NULL
+  q_B = NULL,
+  SOCref = SOCini,
+  window = NULL
 ) {
   G <- round(G, 2)
   L <- round(L, 2)
@@ -487,19 +489,6 @@ battery_solve_cost_unified_window <- function(
   # pmax(., 0), without which the variable box becomes inconsistent
   # ("Col N has inconsistent bounds [0, -100]") and the whole window is
   # abandoned - and is enforced on the net flow by the capacity rows below.
-  import_mode_ub <- pmax(L - G + Bc, 0)
-  export_mode_ub <- pmax(G - L + Bd, 0)
-  import_mode_ub[import_mode_ub < 1e-9] <- 0
-  export_mode_ub[export_mode_ub < 1e-9] <- 0
-  import_mode_ub[is.finite(import_capacity)] <- pmin(
-    import_mode_ub[is.finite(import_capacity)],
-    pmax(import_capacity[is.finite(import_capacity)], 0)
-  )
-  export_mode_ub[is.finite(export_capacity)] <- pmin(
-    export_mode_ub[is.finite(export_capacity)],
-    pmax(export_capacity[is.finite(export_capacity)], 0)
-  )
-
   # How far each capacity may be missed (see optimization_slack_ceiling()).
   tol <- optimization_solution_tolerance()
   slack_import_max <- optimization_slack_ceiling(import_capacity, L - G)
@@ -509,6 +498,17 @@ battery_solve_cost_unified_window <- function(
     slack_import_max[slack_import_max > 0] + tol
   slack_export_max[slack_export_max > 0] <-
     slack_export_max[slack_export_max > 0] + tol
+
+  # The I and E boxes follow the capacity rows below, slack included: a box at
+  # the capacity alone contradicts the slack in a slot whose static net flow
+  # already exceeds it, and the whole window became infeasible (the battery
+  # was off for the day, including the slots where it could discharge).
+  import_limit <- pmax(import_capacity, 0) + slack_import_max
+  export_limit <- pmax(export_capacity, 0) + slack_export_max
+  import_mode_ub <- pmin(pmax(L - G + Bc, 0), import_limit)
+  export_mode_ub <- pmin(pmax(G - L + Bd, 0), export_limit)
+  import_mode_ub[import_mode_ub < 1e-9] <- 0
+  export_mode_ub[export_mode_ub < 1e-9] <- 0
 
   # Explicit rows on the net flow are needed only when a capacity can be
   # missed, or is negative and so cannot be expressed as a one-sided box. With
@@ -521,6 +521,35 @@ battery_solve_cost_unified_window <- function(
   penalty <- optimization_slack_penalty(
     c(pmax(import_capacity, L - G), pmax(export_capacity, G - L))
   )
+
+  # The window ends at `SOCref`. That is a hard row where the window starts
+  # there and meets its capacities, so such a window is solved as it always
+  # was. Otherwise the row is soft: a window that misses a capacity may end
+  # below (or, for an export breach, above) the reference, and one that
+  # starts away from it returns as far as it can. Each kWh of deviation is
+  # priced above what a stored kWh can earn (charging it back costs at most
+  # max|price| / charge_eff), so price alone never moves the end level, and
+  # below the capacity penalty, so the grid capacity outranks the return.
+  target_delta <- (SOCref - SOCini) / 100 * Bcap
+  if (abs(target_delta) < tol) {
+    target_delta <- 0
+  }
+  soft_return <- soft_caps || target_delta != 0
+  n_return <- if (soft_return) 2 else 0
+  # The end level cannot move further than the storage band allows.
+  return_ub <- (SOCmax - SOCmin) / 100 * Bcap + abs(target_delta)
+  return_price <- min(
+    2 * max(abs(c(PI, PE))) / charge_eff + 1,
+    0.5 * discharge_eff * penalty
+  )
+  # [short, over] on the energy row: sum(stored) + short - over = target.
+  return_columns <- function(nrows, energy_row) {
+    cols <- matrix(0, nrows, n_return)
+    if (soft_return) {
+      cols[energy_row, ] <- c(1, -1)
+    }
+    cols
+  }
 
   # I_t - E_t - s_i,t <= import_capacity_t   (net import, soft)
   # E_t - I_t - s_e,t <= export_capacity_t   (net export, soft)
@@ -553,7 +582,8 @@ battery_solve_cost_unified_window <- function(
   #
   # Balance:             B_c - B_d - I + E = G - L
   # SOC evolution:       cumsum(\u03b7_c * B_c - (1/\u03b7_d) * B_d) in [lb_soc, ub_soc]
-  # Energy conservation: sum(\u03b7_c * B_c - (1/\u03b7_d) * B_d) = 0
+  # Return to reference:  sum(\u03b7_c * B_c - (1/\u03b7_d) * B_d) = target_delta
+  #                       (soft, see return_columns())
 
   A_balance <- cbind(diag(n), -diag(n), -diag(n), diag(n))
   A_soc <- cbind(
@@ -568,8 +598,9 @@ battery_solve_cost_unified_window <- function(
   )
 
   A_vars <- rbind(A_balance, A_soc, A_energy)
-  lb_vars <- c(G - L, lb_soc, 0)
-  ub_vars <- c(G - L, ub_soc, 0)
+  lb_vars <- c(G - L, lb_soc, target_delta)
+  ub_vars <- c(G - L, ub_soc, target_delta)
+  energy_row <- 2 * n + 1
 
   # Penalise each kW\u00b7slot of discharge: 1 kW\u00b7slot / Bcap = one full-cycle fraction.
   cycle_coef <- cycle_cost / Bcap
@@ -598,7 +629,7 @@ battery_solve_cost_unified_window <- function(
       ub_I <- import_mode_ub
       ub_E <- export_mode_ub
 
-      nv <- 5 * n + n_slack
+      nv <- 5 * n + n_slack + n_return
       idx_Bc <- seq_len(n)
       idx_Bd <- seq(n + 1, 2 * n)
       idx_I <- seq(2 * n + 1, 3 * n)
@@ -619,9 +650,13 @@ battery_solve_cost_unified_window <- function(
       P_5n <- (P_5n + Matrix::t(P_5n)) / 2
 
       if (n_slack > 0) {
-        idx_slack <- seq(5 * n + 1, nv)
+        idx_slack <- seq(5 * n + 1, 5 * n + n_slack)
         # Ridge on the slack block keeps the objective strictly convex.
         P_5n[idx_slack, idx_slack] <- (1e-6 * penalty) * diag(n_slack)
+      }
+      if (n_return > 0) {
+        idx_return <- 5 * n + n_slack + seq_len(n_return)
+        P_5n[idx_return, idx_return] <- (1e-6 * return_price) * diag(n_return)
       }
 
       # Balance: B_c_t - B_d_t - I_t + E_t = G_t - L_t
@@ -648,11 +683,11 @@ battery_solve_cost_unified_window <- function(
         dims = c(n, nv)
       )
 
-      # Energy conservation: S_n = 0 (battery returns to initial SOC)
+      # Return to reference: S_n (+ short - over) = target_delta
       A_energy_5n <- Matrix::sparseMatrix(
-        i = 1L,
-        j = idx_S[n],
-        x = 1.0,
+        i = rep(1L, 1 + n_return),
+        j = c(idx_S[n], 5 * n + n_slack + seq_len(n_return)),
+        x = c(1.0, c(1, -1)[seq_len(n_return)]),
         dims = c(1, nv)
       )
 
@@ -669,9 +704,10 @@ battery_solve_cost_unified_window <- function(
         rep(0, n),
         lb_soc,
         slack_lb,
+        rep(0, n_return),
         G - L,
         rep(0, n),
-        0
+        target_delta
       )
       upper_osqp <- c(
         rep(Bc, n),
@@ -680,13 +716,19 @@ battery_solve_cost_unified_window <- function(
         ub_E,
         ub_soc,
         slack_ub,
+        rep(return_ub, n_return),
         G - L,
         rep(0, n),
-        0
+        target_delta
       )
 
       if (capacity_rows) {
-        A_osqp <- rbind(A_osqp, Matrix::Matrix(capacity_row_block(5 * n)))
+        A_osqp <- rbind(
+          A_osqp,
+          Matrix::Matrix(
+            cbind(capacity_row_block(5 * n), matrix(0, 2 * n, n_return))
+          )
+        )
         lower_osqp <- c(lower_osqp, rep(-Inf, 2 * n))
         upper_osqp <- c(upper_osqp, capacity_rhs)
       }
@@ -698,7 +740,8 @@ battery_solve_cost_unified_window <- function(
         PI,
         -PE_clipped,
         rep(0, n),
-        rep(penalty, n_slack)
+        rep(penalty, n_slack),
+        rep(return_price, n_return)
       )
       obj_scale <- max(max(abs(P_5n@x)), max(abs(q_osqp)), 1e-6)
       sol <- solve_osqp(
@@ -732,6 +775,8 @@ battery_solve_cost_unified_window <- function(
       rhs_lp <- c(rhs_lp, capacity_rhs)
     }
 
+    A_lp <- cbind(A_lp, return_columns(nrow(A_lp), energy_row))
+
     result <- highs::highs_solve(
       Q = NULL,
       L = c(
@@ -739,20 +784,29 @@ battery_solve_cost_unified_window <- function(
         rep(cycle_coef, n) + q_Bd,
         PI,
         -PE,
-        rep(penalty, n_slack)
+        rep(penalty, n_slack),
+        rep(return_price, n_return)
       ),
-      lower = c(rep(0, n), rep(0, n), rep(0, n), rep(0, n), slack_lb),
+      lower = c(
+        rep(0, n),
+        rep(0, n),
+        rep(0, n),
+        rep(0, n),
+        slack_lb,
+        rep(0, n_return)
+      ),
       upper = c(
         rep(Bc, n),
         rep(Bd, n),
-        pmin(pmax(import_capacity, 0), import_mode_ub),
-        pmin(pmax(export_capacity, 0), export_mode_ub),
-        slack_ub
+        import_mode_ub,
+        export_mode_ub,
+        slack_ub,
+        rep(return_ub, n_return)
       ),
       A = A_lp,
       lhs = lhs_lp,
       rhs = rhs_lp,
-      types = rep(1L, 4 * n + n_slack),
+      types = rep(1L, 4 * n + n_slack + n_return),
       control = optimization_highs_options()
     )
   } else {
@@ -785,6 +839,7 @@ battery_solve_cost_unified_window <- function(
       lhs_full <- c(lhs_full, rep(-Inf, 2 * n))
       rhs_full <- c(rhs_full, capacity_rhs)
     }
+    A_full <- cbind(A_full, return_columns(nrow(A_full), energy_row))
 
     result <- highs::highs_solve(
       Q = NULL,
@@ -794,7 +849,8 @@ battery_solve_cost_unified_window <- function(
         PI,
         -PE,
         rep(0, n),
-        rep(penalty, n_slack)
+        rep(penalty, n_slack),
+        rep(return_price, n_return)
       ),
       lower = c(
         rep(0, n),
@@ -802,24 +858,27 @@ battery_solve_cost_unified_window <- function(
         rep(0, n),
         rep(0, n),
         rep(0, n),
-        slack_lb
+        slack_lb,
+        rep(0, n_return)
       ),
       upper = c(
         rep(Bc, n),
         rep(Bd, n),
-        # pmax(., 0) only: keeping the box otherwise untouched leaves the
-        # unconstrained problem bit-for-bit identical to the pre-slack solver,
-        # which matters because the MILP has ties and a tighter (still valid)
-        # box makes HiGHS pick a different optimum of equal cost.
-        pmax(import_capacity, 0),
-        pmax(export_capacity, 0),
+        # The capacity plus its slack only: keeping the box otherwise
+        # untouched leaves the unconstrained problem bit-for-bit identical to
+        # the pre-slack solver, which matters because the MILP has ties and a
+        # tighter (still valid) box makes HiGHS pick a different optimum of
+        # equal cost.
+        import_limit,
+        export_limit,
         rep(1, n),
-        slack_ub
+        slack_ub,
+        rep(return_ub, n_return)
       ),
       A = A_full,
       lhs = lhs_full,
       rhs = rhs_full,
-      types = c(rep(1L, 4 * n), rep(2L, n), rep(1L, n_slack)),
+      types = c(rep(1L, 4 * n), rep(2L, n), rep(1L, n_slack + n_return)),
       control = optimization_highs_options(include_mip_gap = TRUE)
     )
   }
@@ -836,6 +895,14 @@ battery_solve_cost_unified_window <- function(
     return(round(B_c * charge_eff - B_d / discharge_eff, 10))
   }
 
+  warning(
+    "\u26a0\ufe0f Optimization warning: the battery window",
+    if (!is.null(window)) paste0(" starting ", window),
+    " was not solved (",
+    result$status_message,
+    "). The battery is idle in it.",
+    call. = FALSE
+  )
   rep(0, n)
 }
 
@@ -857,7 +924,9 @@ battery_cost_window <- function(
   lambda = 0,
   charge_eff = 1,
   discharge_eff = 1,
-  cycle_cost = 0
+  cycle_cost = 0,
+  SOCref = SOCini,
+  window = NULL
 ) {
   n <- length(G)
 
@@ -885,7 +954,9 @@ battery_cost_window <- function(
     discharge_eff = discharge_eff,
     cycle_cost = cycle_cost,
     P_B = P_B,
-    q_B = if (!is.null(P_B)) rep(0, n) else NULL
+    q_B = if (!is.null(P_B)) rep(0, n) else NULL,
+    SOCref = SOCref,
+    window = window
   )
 }
 
@@ -1103,6 +1174,12 @@ battery_combined_window <- function(
 #' @param SOCmin numeric, minimum State-of-Charge (%)
 #' @param SOCmax numeric, maximum State-of-Charge (%)
 #' @param SOCini numeric, initial State-of-Charge (%). Defaults to `SOCmin`.
+#'   Every window starts and ends at `SOCini`, except under `"cost"`: there
+#'   each window starts where the previous one ended and `SOCini` is the
+#'   reference it returns to. A window that cannot meet `import_capacity` or
+#'   `export_capacity` may end below (or above) it to lower the breach, and the
+#'   next windows charge (or discharge) back to it where they can. Meeting the
+#'   capacities outranks the return, which outranks the energy price.
 #' @param window_days integer, optimization window length in days.
 #' @param window_start_hour integer, start hour of each optimization window.
 #' @param flex_window_hours numeric, flexibility window length (hours).
@@ -1249,9 +1326,14 @@ add_battery_optimization <- function(
       )
     )
   } else if (opt_objective == "cost") {
-    B_windows <- map(
-      windows_data,
-      ~ battery_cost_window(
+    # Each window starts where the previous one ended and returns to SOCini
+    # where it can (see battery_solve_cost_unified_window()), so energy a
+    # breach window draws below SOCini is charged back by the next windows.
+    B_windows <- vector("list", length(windows_data))
+    SOC_start <- SOCini
+    for (w in seq_along(windows_data)) {
+      .x <- windows_data[[w]]
+      B_windows[[w]] <- battery_cost_window(
         G = .x$production,
         L = .x$static,
         PI = .x$price_imported,
@@ -1261,15 +1343,22 @@ add_battery_optimization <- function(
         Bd = Bd,
         SOCmin = SOCmin,
         SOCmax = SOCmax,
-        SOCini = SOCini,
+        SOCini = SOC_start,
         import_capacity = .x$import_capacity,
         export_capacity = .x$export_capacity,
         lambda = lambda,
         charge_eff = charge_eff,
         discharge_eff = discharge_eff,
-        cycle_cost = cycle_cost
+        cycle_cost = cycle_cost,
+        SOCref = SOCini,
+        window = format(.x$datetime[1], "%Y-%m-%d %H:%M:%S %Z")
       )
-    )
+      SOC_start <- SOC_start + 100 * sum(B_windows[[w]]) / Bcap_scaled
+      SOC_start <- min(max(SOC_start, SOCmin), SOCmax)
+      if (abs(SOC_start - SOCini) < 1e-6) {
+        SOC_start <- SOCini
+      }
+    }
   } else if (is.numeric(opt_objective)) {
     B_windows <- map(
       windows_data,

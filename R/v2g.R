@@ -1685,6 +1685,8 @@ solve_optimization_window_v2g <- function(
   #      objectives price each kWh above the energy at their tie-break.
   #   2. The same, with each cap relaxed only as far as the connected
   #      vehicles' power cannot reach it (see v2g_reach_caps()).
+  #   2b. Where 2 does not solve, the import breach lowered as far as the
+  #      vehicles can: see below.
   #   3. The same, with the import cap raised to what the rest of the site
   #      already imports beyond it, and the export cap to what the site
   #      exports beyond it with the uncontrolled fleet: the vehicles are never
@@ -1747,7 +1749,52 @@ solve_optimization_window_v2g <- function(
     }
     import_own <- pmax(import_capacity, LS - G) + tol
     export_own <- pmax(export_capacity, G - LS - LF) + tol
-    plans <- c(plans, list(
+    for (plan in plans) {
+      O <- planned(plan)
+      if (!is.null(O)) {
+        if (!is.null(plan$message)) {
+          message_once(plan$message)
+        }
+        return(O)
+      }
+    }
+
+    # 2b. Where the vehicles cannot cover the whole import breach, they still
+    #     lower it: the import held at the lowest uniform level `z` above the
+    #     cap that their energy and power sustain, found by bisection, and
+    #     never above what the rest of the site imports.
+    cap_vec <- rep_len(as.numeric(import_capacity), time_slots)
+    breach <- pmax(LS - G - cap_vec, 0)
+    breach[!is.finite(breach)] <- 0
+    if (any(breach > tol)) {
+      level_plan <- function(z) {
+        list(
+          on_target = TRUE,
+          import_cap = pmin(pmax(cap_vec, LS - G), cap_vec + z) + tol,
+          export_cap = export_own,
+          message = "\u26A0\uFE0F V2G optimisation warning: the grid capacity cannot be met in some windows. The vehicles hold the import at the lowest level their energy and power can sustain."
+        )
+      }
+      lo <- 0
+      hi <- max(breach)
+      best <- planned(level_plan(hi))
+      if (!is.null(best)) {
+        for (i in seq_len(10)) {
+          mid <- (lo + hi) / 2
+          O_mid <- planned(level_plan(mid))
+          if (is.null(O_mid)) {
+            lo <- mid
+          } else {
+            best <- O_mid
+            hi <- mid
+          }
+        }
+        message_once(attr(best, "plan")$message)
+        return(best)
+      }
+    }
+
+    plans <- list(
       list(
         on_target = TRUE,
         import_cap = import_own,
@@ -1760,7 +1807,7 @@ solve_optimization_window_v2g <- function(
         export_cap = export_own,
         message = "\u26A0\uFE0F V2G optimisation warning: the grid capacities cannot fit the energy of every session in some windows. Those sessions leave below their departure level, as little as the capacities allow."
       )
-    ))
+    )
     for (plan in plans) {
       O <- planned(plan)
       if (!is.null(O)) {

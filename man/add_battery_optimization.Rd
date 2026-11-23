@@ -74,7 +74,13 @@ minimise the peak itself.}
 
 \item{SOCmax}{numeric, maximum State-of-Charge (\%)}
 
-\item{SOCini}{numeric, initial State-of-Charge (\%). Defaults to \code{SOCmin}.}
+\item{SOCini}{numeric, initial State-of-Charge (\%). Defaults to \code{SOCmin}.
+Every window starts and ends at \code{SOCini}, except under \code{"cost"}: there
+each window starts where the previous one ended and \code{SOCini} is the
+reference it returns to. A window that cannot meet \code{import_capacity} or
+\code{export_capacity} may end below (or above) it to lower the breach, and the
+next windows charge (or discharge) back to it where they can. Meeting the
+capacities outranks the return, which outranks the energy price.}
 
 \item{window_days}{integer, optimization window length in days.}
 

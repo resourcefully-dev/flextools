@@ -503,3 +503,24 @@ test_that("a v2g session is not cut for a cap another one's discharge makes room
   expect_true(all(site <= 20 + 0.05))
   expect_true(all(abs(results$sessions$Power) <= 11 + 1e-6))
 })
+
+test_that("a v2g fleet that cannot cover the whole breach still lowers it", {
+  # The site imports 30 kW against 20 kW from 14:00 to the car's departure at
+  # 21:00, 70 kWh over the capacity. The car's 14 kWh of headroom covers a
+  # fifth of it: no plan meets the capacity, and up to flextools 1.22.1 the
+  # car then added nothing to the breach and took nothing from it under
+  # "cost". It now holds the import at the lowest level its energy sustains,
+  # 28 kW (14 kWh over 7 hours).
+  opt_data <- mutate(
+    final_flat,
+    static = ifelse(final_hour >= 14 & final_hour < 21, 30, 5),
+    import_capacity = 20
+  )
+  results <- run_final("cost", opt_data = opt_data)
+  net <- opt_data$static + results$demand$Fleet
+  breach <- final_hour >= 14 & final_hour < 21
+  expect_lte(sum(pmax(net - 20, 0)) * 15 / 60, 70 - 13)
+  expect_lte(median(net[breach]), 28 + 0.05)
+  expect_lte(max(net[!breach]), 20 + 1e-6)
+  expect_equal(final_departure(results), 80, tolerance = 1)
+})

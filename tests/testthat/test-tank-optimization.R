@@ -246,7 +246,7 @@ test_that("`SOCini = NULL` is `SOCmax`, and inputs out of range stop", {
     add_tank_optimization(d, Tcap = 3, Pc = 3, SOCmin = 50, SOCini = 20),
     "SOCini"
   )
-  expect_error(add_tank_optimization(d, Tcap = 0, Pc = 3), "Tcap")
+  expect_error(add_tank_optimization(d, Tcap = -1, Pc = 3), "Tcap")
   expect_error(add_tank_optimization(d, Tcap = 3, Pc = -1), "Pc")
   expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, SOCmax = 120), "SOCmax")
   expect_error(
@@ -1117,7 +1117,7 @@ test_that("`get_tank_unmet_heat()` follows its definition and validates its inpu
     ),
     c(0, 0)
   )
-  expect_error(get_tank_unmet_heat(0, 1, 3, init = 0, Tcap = 0, SOCmin = 0), "Tcap")
+  expect_error(get_tank_unmet_heat(0, 1, 3, init = 0, Tcap = -1, SOCmin = 0), "Tcap")
   expect_error(get_tank_unmet_heat(0, 1, 3, init = 0, Tcap = 3, SOCmin = 120), "SOCmin")
   expect_error(
     get_tank_unmet_heat(c(0, 0), 1, 3, init = 0, Tcap = 3, SOCmin = 0, backup = c(1, 1, 1)),

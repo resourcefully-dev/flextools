@@ -40,9 +40,11 @@ tank_solve_window(
 
 \item{L}{numeric vector, static load (kW)}
 
-\item{Q}{numeric vector, heat demand (kW thermal)}
+\item{Q}{numeric vector, heat demand (kW thermal), or a matrix with one
+column per store}
 
-\item{cop}{numeric vector, coefficient of performance}
+\item{cop}{numeric vector, coefficient of performance, or a matrix with one
+column per store}
 
 \item{PI, PE}{numeric vectors, import and export prices (EUR/kWh); unused for
 \code{"grid"}}
@@ -52,9 +54,10 @@ capacities (kW)}
 
 \item{S0}{numeric, level before the first slot, inside the band (kWh)}
 
-\item{Smin, Smax}{numeric, band (kWh)}
+\item{Smin, Smax}{numeric, band (kWh). \code{Smax = 0} is a store that holds
+nothing: its heat in equals its heat out in every slot.}
 
-\item{Pc}{numeric, compressor cap (kW)}
+\item{Pc}{numeric, compressor cap (kW), shared by the stores}
 
 \item{k}{numeric, per-slot retention}
 
@@ -62,7 +65,8 @@ capacities (kW)}
 
 \item{objective}{\code{"grid"}, \code{"cost"} or a number strictly between 0 and 1}
 
-\item{lambda}{numeric, ramping penalty weight}
+\item{lambda}{numeric, ramping penalty weight on the stores' summed
+compressor power}
 
 \item{Pb}{numeric, backup heater cap (kW); 0 means no backup heater}
 
@@ -79,13 +83,15 @@ may miss its import / export capacity (kW), from
 \item{level_unit}{numeric, the kWh that one unit of the solver's level
 stands for. \code{NULL} (default) is \code{Smax} on OSQP, so the solver sees the
 level between 0 and 1 whatever the tank's size, and 1 (kWh) on HiGHS.
-1 is the formulation in kWh that OSQP used up to flextools 1.18.1.}
+1 is the formulation in kWh that OSQP used up to flextools 1.18.1. A
+store with \code{Smax = 0} takes \code{power_unit * dt}.}
 
 \item{power_unit}{numeric, the kW that one unit of the solver's power
 stands for, and the kW of one unit of its rows in kW. \code{NULL} (default)
 is \code{Pc} on OSQP, or the power that fills the band in one slot (\code{Smax / dt}) when smaller, so the solver sees the compressor on the same scale
 whatever the heat pump's size, and 1 (kW) on HiGHS. 1 is the formulation
-in kW that OSQP used up to flextools 1.19.4.}
+in kW that OSQP used up to flextools 1.19.4. A store with \code{Smax = 0}
+takes \code{Pc}. The rows shared by the stores take the largest.}
 
 \item{Hcap}{numeric, the house's capacity behind the tank (kWh); 0 means
 no house, and \code{Q} is then the tank's demand. With a house, \code{Q} is the
@@ -109,9 +115,16 @@ floor's, is the price up to flextools 1.22.1.}
 list of the unrounded \code{power}, \code{backup} and \code{gas} (kW), the heat
 from the tank to the house \code{house} (kW, \code{NULL} without a house) and the
 \code{status}; when the window has no solution, \code{power} is \code{NULL} and \code{status}
-says why (see \code{tank_failure()})
+says why (see \code{tank_failure()}). With more than one store, \code{power},
+\code{backup}, \code{gas} and \code{house} are matrices with one column per store
+(\code{house} 0 in the columns of stores without one).
 }
 \description{
-Solve one tank window
+One compressor behind one or more stores. Every per-store argument (\code{Q},
+\code{cop}, \code{S0}, \code{Smin}, \code{Smax}, \code{k}, \code{Pb}, \code{Pg}, \code{Hcap}, \code{kh}, \code{R0}, \code{S_ref},
+\code{return_weight}, \code{level_unit}, \code{power_unit}) takes one value per store
+(\code{Q} and \code{cop} one column per store), and a single store is given as
+vectors and numbers, as without \code{stores}. The stores share \code{Pc}:
+their compressor powers sum to at most it in every slot.
 }
 \keyword{internal}

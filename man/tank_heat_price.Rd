@@ -11,15 +11,17 @@ tank_heat_price(L, G, cop, Pc, Pb, objective, lambda, price, scale)
 
 \item{G}{numeric vector, production (kW)}
 
-\item{cop}{numeric vector, coefficient of performance}
+\item{cop}{numeric vector, coefficient of performance, or a matrix with one
+column per store}
 
-\item{Pc}{numeric, compressor cap (kW)}
+\item{Pc}{numeric, compressor cap (kW), shared by the stores}
 
 \item{Pb}{numeric, backup heater cap (kW); 0 means no backup heater}
 
 \item{objective}{\code{"grid"}, \code{"cost"} or a number strictly between 0 and 1}
 
-\item{lambda}{numeric, ramping penalty weight}
+\item{lambda}{numeric, ramping penalty weight on the stores' summed
+compressor power}
 
 \item{price}{numeric, highest absolute electricity price of the window}
 

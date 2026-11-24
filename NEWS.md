@@ -1,3 +1,38 @@
+# flextools 1.25.0
+
+A heat pump's hot-water cylinder and heating buffer share one compressor.
+Up to now each store was optimised as its own heat pump, so together they
+could draw up to twice the compressor's nameplate.
+
+* New: `add_tank_optimization(stores = )`, a character vector of store names
+  behind one compressor (each matching `^[a-z][a-z0-9_]*$`). `opt_data` then
+  carries `heat_demand_<store>`, `cop_<store>` and `flexible_<store>` per
+  store (the unsuffixed columns are refused next to `stores`), and `Tcap`,
+  `SOCmin`, `SOCmax`, `SOCini`, `loss`, `Pb`, `Pg`, `Hcap` and `Hloss` take
+  one value per store (one value is recycled). Each store keeps its own
+  balance, band, backup, house and unmet heat, and one schedule is solved for
+  all of them with `sum(P_s) <= Pc` in every slot: the valve shares the
+  compressor's time within the slot. The objective sees every store's
+  compressor and backup heater, and `lambda` penalises changes of the summed
+  compressor power. The value is the compressor's total power, at or below
+  `Pc` after rounding, and every attribute is a named list with one vector
+  per store: `power_kw`, `level_kwh`, `backup_kw`, `unmet_heat_kw`, and
+  `gas_backup_kw`, `house_heat_kw` and `house_level_kwh` for the stores that
+  have them. One store in this form gives the results of the form without
+  `stores`, and the form without `stores` is unchanged.
+* New: `Tcap = 0` is a store that holds nothing, in both forms. Its heat in
+  equals its heat out: without a house the compressor follows the demand up
+  to `Pc` and the rest is unmet heat, and with a house it heats the house
+  directly, pre-heating it ahead of a price peak. `SOCmin`, `SOCmax`, `SOCini`
+  and `loss` are not read there (with `stores`, `NA` is accepted for them on
+  such a store). Its rounded power keeps the level within half a rounding
+  step of heat of 0. `get_tank_unmet_heat()` takes `Tcap = 0` too.
+* With `stores`, the stores' `flexible_<store>` summing above `Pc + 0.01` in
+  a slot is an error naming the first such `datetime`; a store-shaped argument
+  of another length, `Pb` and `Pg` both above 0 on one store, or an `NA` in
+  the band of a store that holds something is an error naming the argument
+  and the store.
+
 # flextools 1.24.0
 
 EV sessions can carry their charging efficiency. Up to now normal charging

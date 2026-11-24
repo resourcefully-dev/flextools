@@ -27,9 +27,11 @@ kWh)}
 
 \item{init}{numeric, level before the first slot (in kWh, not \%)}
 
-\item{Tcap}{numeric, tank capacity (kWh thermal, > 0), as in
+\item{Tcap}{numeric, tank capacity (kWh thermal, >= 0), as in
 \code{\link[=add_tank_optimization]{add_tank_optimization()}}: the heat between the inlet water temperature
-and the top of the tank}
+and the top of the tank. At 0 (and \code{init = 0}), the unmet heat is the
+heat demand the compressor and the backup do not serve in the slot, up to
+the rounding carried as above.}
 
 \item{SOCmin}{numeric, comfort floor (\%, between 0 and 100)}
 

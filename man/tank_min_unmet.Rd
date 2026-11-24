@@ -7,9 +7,11 @@
 tank_min_unmet(Q, cop, S0, k, dt, Smax, ub_P, ub_B, ub_total, ub_H = 0)
 }
 \arguments{
-\item{Q}{numeric vector, heat demand (kW thermal)}
+\item{Q}{numeric vector, heat demand (kW thermal), or a matrix with one
+column per store}
 
-\item{cop}{numeric vector, coefficient of performance}
+\item{cop}{numeric vector, coefficient of performance, or a matrix with one
+column per store}
 
 \item{S0}{numeric, level before the first slot, inside the band (kWh)}
 

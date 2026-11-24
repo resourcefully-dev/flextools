@@ -4,7 +4,7 @@
 \alias{tank_check_number}
 \title{Check a single number argument}
 \usage{
-tank_check_number(x, name, min = -Inf, max = Inf, min_open = FALSE)
+tank_check_number(x, name, min = -Inf, max = Inf, min_open = FALSE, where = "")
 }
 \description{
 Check a single number argument

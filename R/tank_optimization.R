@@ -34,6 +34,14 @@
 # The level carries from one window to the next, so windows are solved in
 # order, and every slot no window optimises runs the static `flexible`
 # schedule.
+#
+# One compressor may serve several stores (a hot-water cylinder and a heating
+# buffer behind a diverter valve), each with its own balance, band, backup
+# and house as above, sharing the compressor's cap within every slot:
+#
+#   sum_s P_s[t] <= Pc
+#
+# A store of capacity 0 holds nothing: its heat in equals its heat out.
 
 
 #' Tank level path (unrounded)
@@ -129,52 +137,178 @@ tank_round_power <- function(
   out <- numeric(n)
   s <- init
   for (t in seq_len(n)) {
-    need <- target[t] - k * s + (heat_demand[t] - backup[t]) * dt
-    empty <- !is.null(power) && target[t] <= 1e-9
-    if (cop[t] > 0) {
-      p <- need / (cop[t] * dt)
-      if (empty) {
-        p <- min(p, power[t] + 0.01)
-      }
-      out[t] <- min(max(round(p, 2), 0), p_max)
-      # At its cap (or off) the compressor cannot make up the backup heater's
-      # rounding, so the backup heater tracks the level instead: rounded on
-      # its own, a backup power on a rounding tie in every slot of a peak
-      # drifted a whole step of heat away
-      short <- need - cop[t] * out[t] * dt
-      if (
-        b_max > 0 &&
-          ((out[t] >= p_max && short > 0) || (out[t] <= 0 && short < 0))
-      ) {
-        b <- backup[t] + short / dt
-        if (empty) {
-          b <- min(b, b_raw[t] + 0.01)
-        }
-        backup[t] <- min(max(round(b, 2), 0), b_max)
-      }
-    } else if (b_max > 0) {
-      b <- backup[t] + need / dt
-      if (empty) {
-        b <- min(b, b_raw[t] + 0.01)
-      }
-      backup[t] <- min(max(round(b, 2), 0), b_max)
+    step <- tank_round_step(
+      s, target[t], heat_demand[t], cop[t], backup[t], b_raw[t],
+      if (is.null(power)) NULL else power[t],
+      k, dt, p_max, b_max, Smax, tol
+    )
+    out[t] <- step$power
+    backup[t] <- step$backup
+    s <- step$level
+  }
+  list(power = out, backup = backup)
+}
+
+
+#' One slot of [tank_round_power()]
+#'
+#' @param s numeric, level at the start of the slot (kWh)
+#' @param target,heat_demand,cop,backup,b_raw,power numbers, the slot's
+#'   values of [tank_round_power()]'s arguments, `backup` rounded and
+#'   `b_raw` not; `power` is `NULL` where [tank_round_power()]'s is
+#' @param k,dt,Smax as in [tank_round_power()]
+#' @param p_max,b_max numeric, the 2-decimal caps of the compressor and the
+#'   backup (kW)
+#' @param tol numeric, the level below 0 kept as rounding (kWh)
+#'
+#' @return list of the slot's rounded `power` and `backup` (kW), the
+#'   unrounded power the level asks for, `raw` (`NA` where the COP is 0), and
+#'   the `level` at the end of the slot (kWh)
+#' @keywords internal
+#'
+tank_round_step <- function(
+  s,
+  target,
+  heat_demand,
+  cop,
+  backup,
+  b_raw,
+  power,
+  k,
+  dt,
+  p_max,
+  b_max,
+  Smax,
+  tol
+) {
+  out <- 0
+  raw <- NA_real_
+  need <- target - k * s + (heat_demand - backup) * dt
+  empty <- !is.null(power) && target <= 1e-9
+  if (cop > 0) {
+    p <- need / (cop * dt)
+    if (empty) {
+      p <- min(p, power + 0.01)
     }
-    # Rounding to the nearest step may take the level above the top, by up to
-    # half a step of heat (0.0175 kWh for 0.01 kW at COP 7 and 15 minutes):
-    # there the compressor, then the backup heater, rounds down instead
-    room <- Smax - k * s + heat_demand[t] * dt
-    if (cop[t] * out[t] + backup[t] > room / dt + 1e-9) {
-      if (cop[t] > 0) {
-        out[t] <- max(floor((room / dt - backup[t]) / cop[t] * 100 + 1e-9) / 100, 0)
+    raw <- p
+    out <- min(max(round(p, 2), 0), p_max)
+    # At its cap (or off) the compressor cannot make up the backup heater's
+    # rounding, so the backup heater tracks the level instead: rounded on
+    # its own, a backup power on a rounding tie in every slot of a peak
+    # drifted a whole step of heat away
+    short <- need - cop * out * dt
+    if (
+      b_max > 0 &&
+        ((out >= p_max && short > 0) || (out <= 0 && short < 0))
+    ) {
+      b <- backup + short / dt
+      if (empty) {
+        b <- min(b, b_raw + 0.01)
       }
-      if (cop[t] * out[t] + backup[t] > room / dt + 1e-9) {
-        backup[t] <- max(floor((room / dt - cop[t] * out[t]) * 100 + 1e-9) / 100, 0)
-      }
+      backup <- min(max(round(b, 2), 0), b_max)
     }
-    s <- k * s + (cop[t] * out[t] + backup[t] - heat_demand[t]) * dt
-    # A level below 0 by more than rounding is demand the tank did not serve
-    if (s < -tol) {
-      s <- 0
+  } else if (b_max > 0) {
+    b <- backup + need / dt
+    if (empty) {
+      b <- min(b, b_raw + 0.01)
+    }
+    backup <- min(max(round(b, 2), 0), b_max)
+  }
+  # Rounding to the nearest step may take the level above the top, by up to
+  # half a step of heat (0.0175 kWh for 0.01 kW at COP 7 and 15 minutes):
+  # there the compressor, then the backup heater, rounds down instead
+  room <- Smax - k * s + heat_demand * dt
+  if (cop * out + backup > room / dt + 1e-9) {
+    if (cop > 0) {
+      out <- max(floor((room / dt - backup) / cop * 100 + 1e-9) / 100, 0)
+    }
+    if (cop * out + backup > room / dt + 1e-9) {
+      backup <- max(floor((room / dt - cop * out) * 100 + 1e-9) / 100, 0)
+    }
+  }
+  s <- k * s + (cop * out + backup - heat_demand) * dt
+  # A level below 0 by more than rounding is demand the tank did not serve
+  if (s < -tol) {
+    s <- 0
+  }
+  list(power = out, backup = backup, raw = raw, level = s)
+}
+
+
+#' Round the compressor power of several stores sharing one compressor
+#'
+#' [tank_round_power()] for each store, slot by slot, and one rule more:
+#' where the stores' rounded powers sum above `Pc` (at 2 decimals), one store
+#' rounds down by 0.01 kW in that slot, until the sum is within `Pc`: a store
+#' whose level that step of heat leaves at or above its floor, and among them
+#' (or among all, when none can) the one with the largest rounding remainder,
+#' its rounded power above the power its level asks for. That store's backup
+#' tracks the level in its place, as at the compressor's cap, and its level
+#' is made up in the next slots as any rounding is.
+#'
+#' @param target,heat_demand,cop,backup,power numeric matrices, one column per
+#'   store, as the vectors of [tank_round_power()]
+#' @param init,k,Pb,Smax numeric vectors, one value per store
+#' @param Smin numeric vector, each store's floor (kWh)
+#' @inheritParams tank_round_power
+#'
+#' @return list of the rounded `power` and `backup` (kW), matrices with one
+#'   column per store
+#' @keywords internal
+#'
+tank_round_stores <- function(
+  target,
+  heat_demand,
+  cop,
+  init,
+  k,
+  dt,
+  Pc,
+  backup,
+  Pb,
+  power,
+  Smax,
+  Smin
+) {
+  n <- nrow(target)
+  m <- ncol(target)
+  p_max <- floor(Pc * 100 + 1e-9) / 100
+  b_max <- floor(Pb * 100 + 1e-9) / 100
+  b_raw <- backup
+  out <- matrix(0, n, m)
+  tol <- numeric(m)
+  for (s in seq_len(m)) {
+    tol[s] <- 0.005 * max(cop[, s], 1) * dt + 1e-9
+    backup[, s] <- pmin(pmax(round(backup[, s], 2), 0), b_max[s])
+  }
+  level <- init
+  for (t in seq_len(n)) {
+    round_store <- function(s, cap) {
+      tank_round_step(
+        level[s], target[t, s], heat_demand[t, s], cop[t, s], backup[t, s],
+        b_raw[t, s], power[t, s], k[s], dt, cap, b_max[s], Smax[s], tol[s]
+      )
+    }
+    steps <- lapply(seq_len(m), round_store, cap = p_max)
+    powers <- vapply(steps, `[[`, numeric(1), "power")
+    while (sum(powers) > p_max + 1e-9) {
+      remainder <- powers - vapply(steps, `[[`, numeric(1), "raw")
+      remainder[is.na(remainder) | powers <= 0] <- -Inf
+      # A store with heat to spare above its floor gives the step first: the
+      # others would leave it unmet
+      spare <- vapply(steps, `[[`, numeric(1), "level") - 0.01 * cop[t, ] * dt >=
+        Smin - 1e-9
+      if (any(spare & is.finite(remainder))) {
+        remainder[!spare] <- -Inf
+      }
+      s <- which.max(remainder)
+      steps[[s]] <- round_store(s, round(powers[s] - 0.01, 2))
+      powers[s] <- steps[[s]]$power
+    }
+    for (s in seq_len(m)) {
+      out[t, s] <- steps[[s]]$power
+      backup[t, s] <- steps[[s]]$backup
+      level[s] <- steps[[s]]$level
     }
   }
   list(power = out, backup = backup)
@@ -382,21 +516,32 @@ tank_failure <- function(status) {
 
 #' Solve one tank window
 #'
+#' One compressor behind one or more stores. Every per-store argument (`Q`,
+#' `cop`, `S0`, `Smin`, `Smax`, `k`, `Pb`, `Pg`, `Hcap`, `kh`, `R0`, `S_ref`,
+#' `return_weight`, `level_unit`, `power_unit`) takes one value per store
+#' (`Q` and `cop` one column per store), and a single store is given as
+#' vectors and numbers, as without `stores`. The stores share `Pc`:
+#' their compressor powers sum to at most it in every slot.
+#'
 #' @param G numeric vector, production (kW)
 #' @param L numeric vector, static load (kW)
-#' @param Q numeric vector, heat demand (kW thermal)
-#' @param cop numeric vector, coefficient of performance
+#' @param Q numeric vector, heat demand (kW thermal), or a matrix with one
+#'   column per store
+#' @param cop numeric vector, coefficient of performance, or a matrix with one
+#'   column per store
 #' @param PI,PE numeric vectors, import and export prices (EUR/kWh); unused for
 #'   `"grid"`
 #' @param import_capacity,export_capacity numeric vectors, net grid flow
 #'   capacities (kW)
 #' @param S0 numeric, level before the first slot, inside the band (kWh)
-#' @param Smin,Smax numeric, band (kWh)
-#' @param Pc numeric, compressor cap (kW)
+#' @param Smin,Smax numeric, band (kWh). `Smax = 0` is a store that holds
+#'   nothing: its heat in equals its heat out in every slot.
+#' @param Pc numeric, compressor cap (kW), shared by the stores
 #' @param k numeric, per-slot retention
 #' @param dt numeric, slot length (hours)
 #' @param objective `"grid"`, `"cost"` or a number strictly between 0 and 1
-#' @param lambda numeric, ramping penalty weight
+#' @param lambda numeric, ramping penalty weight on the stores' summed
+#'   compressor power
 #' @param Pb numeric, backup heater cap (kW); 0 means no backup heater
 #' @param Pg numeric, gas backup cap (kW thermal); 0 means no gas backup. Its
 #'   heat enters the tank's balance only: not the net flow, nor the capacities.
@@ -408,13 +553,15 @@ tank_failure <- function(status) {
 #' @param level_unit numeric, the kWh that one unit of the solver's level
 #'   stands for. `NULL` (default) is `Smax` on OSQP, so the solver sees the
 #'   level between 0 and 1 whatever the tank's size, and 1 (kWh) on HiGHS.
-#'   1 is the formulation in kWh that OSQP used up to flextools 1.18.1.
+#'   1 is the formulation in kWh that OSQP used up to flextools 1.18.1. A
+#'   store with `Smax = 0` takes `power_unit * dt`.
 #' @param power_unit numeric, the kW that one unit of the solver's power
 #'   stands for, and the kW of one unit of its rows in kW. `NULL` (default)
 #'   is `Pc` on OSQP, or the power that fills the band in one slot (`Smax /
 #'   dt`) when smaller, so the solver sees the compressor on the same scale
 #'   whatever the heat pump's size, and 1 (kW) on HiGHS. 1 is the formulation
-#'   in kW that OSQP used up to flextools 1.19.4.
+#'   in kW that OSQP used up to flextools 1.19.4. A store with `Smax = 0`
+#'   takes `Pc`. The rows shared by the stores take the largest.
 #' @param Hcap numeric, the house's capacity behind the tank (kWh); 0 means
 #'   no house, and `Q` is then the tank's demand. With a house, `Q` is the
 #'   house's demand and the tank's is the heat it passes to the house.
@@ -433,7 +580,9 @@ tank_failure <- function(status) {
 #' @return list of the unrounded `power`, `backup` and `gas` (kW), the heat
 #'   from the tank to the house `house` (kW, `NULL` without a house) and the
 #'   `status`; when the window has no solution, `power` is `NULL` and `status`
-#'   says why (see `tank_failure()`)
+#'   says why (see `tank_failure()`). With more than one store, `power`,
+#'   `backup`, `gas` and `house` are matrices with one column per store
+#'   (`house` 0 in the columns of stores without one).
 #' @keywords internal
 #'
 tank_solve_window <- function(
@@ -467,6 +616,20 @@ tank_solve_window <- function(
   return_weight = NULL
 ) {
   n <- length(G)
+  Q <- matrix(as.numeric(Q), nrow = n)
+  m <- ncol(Q)
+  cop <- matrix(as.numeric(cop), nrow = n, ncol = m)
+  per_store <- function(x) rep_len(as.numeric(x), m)
+  S_ref <- per_store(S_ref)
+  S0 <- per_store(S0)
+  Smin <- per_store(Smin)
+  Smax <- per_store(Smax)
+  k <- per_store(k)
+  Pb <- per_store(Pb)
+  Pg <- per_store(Pg)
+  Hcap <- per_store(Hcap)
+  kh <- per_store(kh)
+  R0 <- per_store(R0)
   import_capacity <- as.numeric(rep_len(import_capacity, n))
   export_capacity <- as.numeric(rep_len(export_capacity, n))
   slack_import_max <- as.numeric(rep_len(slack_import_max, n))
@@ -479,47 +642,56 @@ tank_solve_window <- function(
   # and `Q` is the house's
   with_house <- Hcap > 0
   soft_caps <- any(slack_import_max > 0) || any(slack_export_max > 0)
+  # One store and no backup heater bound the heat pump's load by a box on
+  # `P`; otherwise a row on the load bounds it (the stores' `P + B` summed)
+  load_row <- !soft_caps && (any(with_backup) || m > 1)
+  cap_P <- ifelse(cop > 0, Pc, 0)
+  zeros <- matrix(0, n, m)
 
-  # The net flow `L + P + B - G` must stay within the capacities, which for
-  # non-negative loads is a box on `P + B`. A negative capacity is an
+  # The net flow `L + sum(P + B) - G` must stay within the capacities, which
+  # for non-negative loads is a box on `sum(P + B)`. A negative capacity is an
   # obligation to flow the other way and moves the box the same way.
   lb_load <- pmax(0, G - L - export_capacity)
   ub_load <- G - L + import_capacity
-  if (soft_caps) {
-    # Soft capacities: the heat pump's load may miss them by up to the slack
-    # ceilings, through explicit rows on `P + B` with penalised slack (below).
-    # The boxes take the relaxed envelope.
-    cap_lb <- G - L - export_capacity
-    cap_ub <- ub_load
-    lb_load <- pmax(0, cap_lb - slack_export_max)
-    ub_load <- ub_load + slack_import_max
-    lb_P <- rep(0, n)
-    ub_P <- pmax(pmin(ifelse(cop > 0, Pc, 0), ub_load), 0)
-    ub_B <- if (with_backup) pmax(pmin(Pb, ub_load), 0) else rep(0, n)
-    if (any(lb_load > pmin(ub_load, ub_P + ub_B) + 1e-9)) {
+  if (soft_caps || load_row) {
+    if (soft_caps) {
+      # Soft capacities: the heat pump's load may miss them by up to the
+      # slack ceilings, through explicit rows on `P + B` with penalised slack
+      # (below). The boxes take the relaxed envelope.
+      cap_lb <- G - L - export_capacity
+      cap_ub <- ub_load
+      lb_load <- pmax(0, cap_lb - slack_export_max)
+      ub_load <- ub_load + slack_import_max
+    }
+    lb_P <- zeros
+    ub_P <- pmax(pmin(cap_P, ub_load), 0)
+    ub_B <- zeros
+    for (s in which(with_backup)) {
+      ub_B[, s] <- pmax(pmin(Pb[s], ub_load), 0)
+    }
+    # The stores share the compressor's `Pc`
+    ub_heat_load <- if (m == 1) ub_P[, 1] + ub_B[, 1] else pmin(Pc, rowSums(ub_P)) + rowSums(ub_B)
+    if (any(lb_load > pmin(ub_load, ub_heat_load) + 1e-9)) {
       return(tank_failure("the heat pump's load cannot meet the grid capacities"))
     }
-    lb_total <- lb_load
-    ub_total <- pmax(pmin(ub_load, ub_P + ub_B), lb_load)
-  } else if (with_backup) {
-    lb_P <- rep(0, n)
-    ub_P <- pmax(pmin(ifelse(cop > 0, Pc, 0), ub_load), 0)
-    ub_B <- pmax(pmin(Pb, ub_load), 0)
-    if (any(lb_load > pmin(ub_load, ub_P + ub_B) + 1e-9)) {
-      return(tank_failure("the heat pump's load cannot meet the grid capacities"))
+    if (soft_caps) {
+      lb_total <- lb_load
+      ub_total <- pmax(pmin(ub_load, ub_heat_load), lb_load)
+    } else {
+      ub_load <- pmax(pmin(ub_load, ub_heat_load), lb_load)
+      lb_total <- lb_load
+      ub_total <- ub_load
     }
-    ub_load <- pmax(pmin(ub_load, ub_P + ub_B), lb_load)
-    lb_total <- lb_load
-    ub_total <- ub_load
   } else {
-    lb_P <- lb_load
-    ub_P <- pmin(ifelse(cop > 0, Pc, 0), ub_load)
+    lb_P <- matrix(lb_load, n, 1)
+    ub_P <- pmin(cap_P, ub_load)
     if (any(lb_P > ub_P + 1e-9)) {
       return(tank_failure("the heat pump's load cannot meet the grid capacities"))
     }
     ub_P <- pmax(ub_P, lb_P)
-    lb_total <- lb_P
-    ub_total <- ub_P
+    ub_B <- zeros
+    lb_total <- lb_P[, 1]
+    ub_total <- ub_P[, 1]
   }
 
   # The power is rounded to 2 decimals afterwards, which moves the level by up
@@ -527,44 +699,57 @@ tank_solve_window <- function(
   # the rounded level stays within the band. Where the tank cannot get down
   # to that room yet (it starts at the top with no demand to draw it), the
   # top is the lowest level it can reach: there the heat pump runs at its
-  # least power, which needs no rounding.
-  heat_least <- lb_total * if (with_backup) pmax(cop, 1) else cop
-  reach <- S0
-  ub_S <- numeric(n)
-  for (t in seq_len(n)) {
-    reach <- k * reach + (heat_least[t] - Q[t]) * dt
-    ub_S[t] <- min(max(Smax - 0.005 * max(cop[t], 1) * dt, Smin, reach), Smax)
+  # least power, which needs no rounding. With several stores the least load
+  # is no store's in particular, and each store's reach is its own decay.
+  ub_S <- zeros
+  S_end <- numeric(m)
+  for (s in seq_len(m)) {
+    heat_least <- if (m > 1) {
+      0
+    } else {
+      lb_total * if (with_backup[s]) pmax(cop[, s], 1) else cop[, s]
+    }
+    heat_least <- rep_len(heat_least, n)
+    reach <- S0[s]
+    for (t in seq_len(n)) {
+      reach <- k[s] * reach + (heat_least[t] - Q[t, s]) * dt
+      ub_S[t, s] <- min(
+        max(Smax[s] - 0.005 * max(cop[t, s], 1) * dt, Smin[s], reach),
+        Smax[s]
+      )
+    }
+    # End condition: the window ends at least as full as the reference level
+    # (or at the floor, when that is below it), within that room
+    S_end[s] <- min(max(Smin[s], S_ref[s]), ub_S[n, s])
   }
-  # End condition: the window ends at least as full as the reference level
-  # (or at the floor, when that is below it), within that room
-  S_end <- min(max(Smin, S_ref), ub_S[n])
   # With a house, the rule is on the heat in both stores
-  end_total <- if (with_house) S_end + R0 else S_end
+  end_total <- ifelse(with_house, S_end + R0, S_end)
+  # The least unmet heat with a house, or with stores sharing the compressor,
+  # is solved for once the rows are built (below)
+  least_lp <- soft && (any(with_house) || m > 1)
   if (soft) {
     # Soft comfort floor: the level may go down to the inlet temperature
     # (level 0), with the depth below the floor `D` penalised, and the end
     # condition missed by `R`, penalised too. Unmet heat is only the heat the
     # tank cannot give at the inlet temperature.
-    lb_S <- rep(0, n)
-    if (with_house) {
-      # The least unmet heat with a house is solved for once the rows are
-      # built (below)
+    lb_S <- zeros
+    if (least_lp) {
       U_cap <- Inf
     } else {
       U_max <- tank_min_unmet(
-        Q, cop, S0, k, dt,
-        Smax = ub_S,
-        ub_P = ub_P,
-        ub_B = if (with_backup) ub_B else rep(0, n),
+        Q[, 1], cop[, 1], S0, k, dt,
+        Smax = ub_S[, 1],
+        ub_P = ub_P[, 1],
+        ub_B = ub_B[, 1],
         ub_total = ub_total,
         ub_H = Pg
       )
       U_cap <- sum(U_max) + 1e-6
     }
   } else {
-    lb_S <- rep(Smin, n)
-    if (!with_house) {
-      lb_S[n] <- S_end
+    lb_S <- matrix(rep(Smin, each = n), n, m)
+    for (s in which(!with_house)) {
+      lb_S[n, s] <- S_end[s]
     }
   }
 
@@ -578,10 +763,9 @@ tank_solve_window <- function(
   # is in that unit, and so is the price of `D` and `R`. The heat (`P`, `B`,
   # `H`, `U`) is in `power_unit` (below). The power is the solution; the level
   # in kWh follows from it on the exact dynamics below. HiGHS keeps kWh.
+  # A store that holds nothing (`Smax = 0`) takes the heat of `power_unit`
+  # over one slot.
   use_highs <- identical(objective, "cost") && lambda == 0
-  if (is.null(level_unit)) {
-    level_unit <- if (use_highs) 1 else Smax
-  }
   # The powers enter OSQP in units of `power_unit` kW, and so do the rows in
   # kW. With the level scaled and the powers in kW, OSQP failed on a 2 MW
   # heat pump with a 2624 kWh tank ("maximum iterations reached", and
@@ -592,142 +776,173 @@ tank_solve_window <- function(
   # by the cap, the 0.58 kWh tank of a 4 kW heat pump stalled OSQP's
   # adaptive step size again.
   if (is.null(power_unit)) {
-    power_unit <- if (use_highs) 1 else min(Pc, Smax / dt)
+    power_unit <- if (use_highs) 1 else ifelse(Smax > 0, pmin(Pc, Smax / dt), Pc)
   }
+  power_unit <- per_store(power_unit)
+  if (is.null(level_unit)) {
+    level_unit <- if (use_highs) 1 else ifelse(Smax > 0, Smax, power_unit * dt)
+  }
+  level_unit <- per_store(level_unit)
+  # The rows shared by the stores (the balance, the capacities, the shared
+  # compressor and the cap on `U`) take the largest store's unit
+  row_power_unit <- max(power_unit)
   # The house's level enters OSQP in units of its capacity, as the tank's
   # does in units of its top: a house holds tens of kWh behind a tank that
   # may hold one
-  house_unit <- if (use_highs || !with_house) 1 else Hcap
+  house_unit <- ifelse(use_highs | !with_house, 1, Hcap)
 
   with_flows <- !identical(objective, "grid")
-  idx_P <- seq_len(n)
-  idx_S <- n + seq_len(n)
-  nv <- 2 * n
-  idx_B <- integer(0)
-  idx_U <- integer(0)
-  if (with_backup) {
-    idx_B <- nv + seq_len(n)
-    nv <- nv + n
+  # Per store: `P`, `S`, then `B` with a backup heater, `H` with a gas
+  # backup, `F` and `W` with a house. Then per store `U`, `D` and `R` with a
+  # soft floor, and the slack and the flows, shared.
+  idx_P <- idx_S <- idx_B <- idx_H <- idx_F <- idx_W <- vector("list", m)
+  idx_U <- idx_D <- idx_R <- rep(list(integer(0)), m)
+  nv <- 0
+  take <- function(size) {
+    idx <- nv + seq_len(size)
+    nv <<- nv + size
+    idx
   }
-  idx_H <- integer(0)
-  if (with_gas) {
-    idx_H <- nv + seq_len(n)
-    nv <- nv + n
-  }
-  idx_F <- integer(0)
-  idx_W <- integer(0)
-  if (with_house) {
+  for (s in seq_len(m)) {
+    idx_P[[s]] <- take(n)
+    idx_S[[s]] <- take(n)
+    idx_B[[s]] <- if (with_backup[s]) take(n) else integer(0)
+    idx_H[[s]] <- if (with_gas[s]) take(n) else integer(0)
     # `F`, the heat from the tank to the house, and `W`, the house's level
-    idx_F <- nv + seq_len(n)
-    idx_W <- nv + n + seq_len(n)
-    nv <- nv + 2 * n
+    idx_F[[s]] <- if (with_house[s]) take(n) else integer(0)
+    idx_W[[s]] <- if (with_house[s]) take(n) else integer(0)
   }
-  idx_D <- integer(0)
-  idx_R <- integer(0)
   if (soft) {
-    idx_U <- nv + seq_len(n)
-    idx_D <- nv + n + seq_len(n)
-    idx_R <- nv + 2 * n + 1
-    nv <- nv + 2 * n + 1
+    for (s in seq_len(m)) {
+      idx_U[[s]] <- take(n)
+      idx_D[[s]] <- take(n)
+      idx_R[[s]] <- take(1)
+    }
   }
   idx_si <- integer(0)
   idx_se <- integer(0)
   if (soft_caps) {
-    idx_si <- nv + seq_len(n)
-    idx_se <- nv + n + seq_len(n)
-    nv <- nv + 2 * n
+    idx_si <- take(n)
+    idx_se <- take(n)
   }
   idx_I <- integer(0)
   idx_E <- integer(0)
   if (with_flows) {
-    idx_I <- nv + seq_len(n)
-    idx_E <- nv + n + seq_len(n)
-    nv <- nv + 2 * n
+    idx_I <- take(n)
+    idx_E <- take(n)
   }
+  all_P <- unlist(idx_P)
+  all_B <- unlist(idx_B)
+  all_U <- unlist(idx_U)
 
-  # Dynamics: S_t - k * S_{t-1} - dt * (cop_t * P_t + B_t + H_t + U_t) =
-  # -Q_t * dt (+ k * S0 at t = 1), divided by `level_unit`. With a house, the
-  # tank gives `F_t` in place of `Q_t`.
-  A_dyn <- Matrix::sparseMatrix(
-    i = c(
-      seq_len(n),
-      seq_len(n),
-      seq_len(n - 1) + 1,
-      if (with_backup) seq_len(n),
-      if (with_gas) seq_len(n),
-      if (with_house) seq_len(n),
-      if (soft) seq_len(n)
-    ),
-    j = c(idx_S, idx_P, idx_S[seq_len(n - 1)], idx_B, idx_H, idx_F, idx_U),
-    x = c(
-      rep(1, n),
-      -cop * dt / level_unit,
-      rep(-k, n - 1),
-      if (with_backup) rep(-dt / level_unit, n),
-      if (with_gas) rep(-dt / level_unit, n),
-      if (with_house) rep(dt / level_unit, n),
-      if (soft) rep(-dt / level_unit, n)
-    ),
-    dims = c(n, nv)
-  )
-  rhs_dyn <- if (with_house) numeric(n) else -Q * dt
-  rhs_dyn[1] <- rhs_dyn[1] + k * S0
-  rhs_dyn <- rhs_dyn / level_unit
-
-  A <- rbind(Matrix::Diagonal(nv), A_dyn)
-  if (with_house) {
-    # House: W_t - kh * W_{t-1} - dt * F_t = -Q_t * dt (+ kh * R0 at t = 1),
-    # divided by `house_unit`
-    A_house <- Matrix::sparseMatrix(
-      i = c(seq_len(n), seq_len(n - 1) + 1, seq_len(n)),
-      j = c(idx_W, idx_W[seq_len(n - 1)], idx_F),
-      x = c(rep(1, n), rep(-kh, n - 1), rep(-dt / house_unit, n)),
+  A <- Matrix::Diagonal(nv)
+  rhs_dyn <- numeric(0)
+  for (s in seq_len(m)) {
+    lu <- level_unit[s]
+    # Dynamics: S_t - k * S_{t-1} - dt * (cop_t * P_t + B_t + H_t + U_t) =
+    # -Q_t * dt (+ k * S0 at t = 1), divided by `level_unit`. With a house,
+    # the tank gives `F_t` in place of `Q_t`.
+    A_dyn <- Matrix::sparseMatrix(
+      i = c(
+        seq_len(n),
+        seq_len(n),
+        seq_len(n - 1) + 1,
+        if (with_backup[s]) seq_len(n),
+        if (with_gas[s]) seq_len(n),
+        if (with_house[s]) seq_len(n),
+        if (soft) seq_len(n)
+      ),
+      j = c(
+        idx_S[[s]], idx_P[[s]], idx_S[[s]][seq_len(n - 1)],
+        idx_B[[s]], idx_H[[s]], idx_F[[s]], idx_U[[s]]
+      ),
+      x = c(
+        rep(1, n),
+        -cop[, s] * dt / lu,
+        rep(-k[s], n - 1),
+        if (with_backup[s]) rep(-dt / lu, n),
+        if (with_gas[s]) rep(-dt / lu, n),
+        if (with_house[s]) rep(dt / lu, n),
+        if (soft) rep(-dt / lu, n)
+      ),
       dims = c(n, nv)
     )
-    rhs_house <- -Q * dt
-    rhs_house[1] <- rhs_house[1] + kh * R0
-    rhs_dyn <- c(rhs_dyn, rhs_house / house_unit)
-    A <- rbind(A, A_house)
+    rhs <- if (with_house[s]) numeric(n) else -Q[, s] * dt
+    rhs[1] <- rhs[1] + k[s] * S0[s]
+    rhs_dyn <- c(rhs_dyn, rhs / lu)
+    A <- rbind(A, A_dyn)
+    if (with_house[s]) {
+      # House: W_t - kh * W_{t-1} - dt * F_t = -Q_t * dt (+ kh * R0 at t = 1),
+      # divided by `house_unit`
+      A_house <- Matrix::sparseMatrix(
+        i = c(seq_len(n), seq_len(n - 1) + 1, seq_len(n)),
+        j = c(idx_W[[s]], idx_W[[s]][seq_len(n - 1)], idx_F[[s]]),
+        x = c(rep(1, n), rep(-kh[s], n - 1), rep(-dt / house_unit[s], n)),
+        dims = c(n, nv)
+      )
+      rhs_house <- -Q[, s] * dt
+      rhs_house[1] <- rhs_house[1] + kh[s] * R0[s]
+      rhs_dyn <- c(rhs_dyn, rhs_house / house_unit[s])
+      A <- rbind(A, A_house)
+    }
   }
-  lower <- c(lb_P, lb_S / level_unit)
-  upper <- c(ub_P, ub_S / level_unit)
-  if (with_backup) {
-    lower <- c(lower, rep(0, n))
-    upper <- c(upper, ub_B)
-  }
-  if (with_gas) {
-    lower <- c(lower, rep(0, n))
-    upper <- c(upper, rep(Pg, n))
-  }
-  if (with_house) {
-    # F: no slot passes more than its demand plus filling the whole house,
-    # which has no cap of its own. W: between the setpoint and the top, the
-    # floor hard.
-    lower <- c(lower, rep(0, n), rep(0, n))
-    upper <- c(upper, Q + Hcap / dt, rep(Hcap, n) / house_unit)
+
+  lower <- numeric(0)
+  upper <- numeric(0)
+  for (s in seq_len(m)) {
+    lower <- c(lower, lb_P[, s], lb_S[, s] / level_unit[s])
+    upper <- c(upper, ub_P[, s], ub_S[, s] / level_unit[s])
+    if (with_backup[s]) {
+      lower <- c(lower, rep(0, n))
+      upper <- c(upper, ub_B[, s])
+    }
+    if (with_gas[s]) {
+      lower <- c(lower, rep(0, n))
+      upper <- c(upper, rep(Pg[s], n))
+    }
+    if (with_house[s]) {
+      # F: no slot passes more than its demand plus filling the whole house,
+      # which has no cap of its own. W: between the setpoint and the top, the
+      # floor hard.
+      lower <- c(lower, rep(0, n), rep(0, n))
+      upper <- c(upper, Q[, s] + Hcap[s] / dt, rep(Hcap[s], n) / house_unit[s])
+    }
   }
   if (soft) {
-    # U: no slot needs more than its demand plus refilling the whole band
-    # (and the house). D: at most the floor. R: at most the end level.
-    lower <- c(lower, rep(0, n), rep(0, n), 0)
-    upper <- c(
-      upper,
-      if (with_house) Q + (Smax + Hcap) / dt else Q + Smax / dt,
-      rep(Smin, n) / level_unit,
-      end_total / level_unit
-    )
+    for (s in seq_len(m)) {
+      # U: no slot needs more than its demand plus refilling the whole band
+      # (and the house). D: at most the floor. R: at most the end level.
+      lower <- c(lower, rep(0, n), rep(0, n), 0)
+      upper <- c(
+        upper,
+        if (with_house[s]) Q[, s] + (Smax[s] + Hcap[s]) / dt else Q[, s] + Smax[s] / dt,
+        rep(Smin[s], n) / level_unit[s],
+        end_total[s] / level_unit[s]
+      )
+    }
   }
   if (soft_caps) {
     lower <- c(lower, rep(0, 2 * n))
     upper <- c(upper, slack_import_max, slack_export_max)
   }
 
+  # The heat pump's electric load in each slot: every store's `P` and `B`
+  load_rows <- function(sign = 1, offset = 0) {
+    cols <- c(all_P, all_B)
+    list(
+      i = offset + rep(seq_len(n), length(cols) / n),
+      j = cols,
+      x = rep(sign, length(cols))
+    )
+  }
+
   if (with_flows) {
-    # Balance: I_t - E_t - P_t - B_t = L_t - G_t
+    # Balance: I_t - E_t - sum(P_t + B_t) = L_t - G_t
+    load <- load_rows(-1)
     A_bal <- Matrix::sparseMatrix(
-      i = c(rep(seq_len(n), 3), if (with_backup) seq_len(n)),
-      j = c(idx_I, idx_E, idx_P, idx_B),
-      x = c(rep(1, n), rep(-1, n), rep(-1, n), if (with_backup) rep(-1, n)),
+      i = c(rep(seq_len(n), 2), load$i),
+      j = c(idx_I, idx_E, load$j),
+      x = c(rep(1, n), rep(-1, n), load$x),
       dims = c(n, nv)
     )
     A <- rbind(A, A_bal)
@@ -752,37 +967,26 @@ tank_solve_window <- function(
   }
 
   if (soft_caps) {
-    # P_t + B_t - s_i,t <= G_t - L_t + C_imp,t   import capacity, soft
-    # P_t + B_t + s_e,t >= G_t - L_t - C_exp,t   export capacity, soft
+    # sum(P_t + B_t) - s_i,t <= G_t - L_t + C_imp,t   import capacity, soft
+    # sum(P_t + B_t) + s_e,t >= G_t - L_t - C_exp,t   export capacity, soft
+    imp <- load_rows()
+    ex <- load_rows(offset = n)
     A_cap <- Matrix::sparseMatrix(
-      i = c(
-        seq_len(n),
-        if (with_backup) seq_len(n),
-        seq_len(n),
-        n + seq_len(n),
-        if (with_backup) n + seq_len(n),
-        n + seq_len(n)
-      ),
-      j = c(idx_P, idx_B, idx_si, idx_P, idx_B, idx_se),
-      x = c(
-        rep(1, n),
-        if (with_backup) rep(1, n),
-        rep(-1, n),
-        rep(1, n),
-        if (with_backup) rep(1, n),
-        rep(1, n)
-      ),
+      i = c(imp$i, seq_len(n), ex$i, n + seq_len(n)),
+      j = c(imp$j, idx_si, ex$j, idx_se),
+      x = c(imp$x, rep(-1, n), ex$x, rep(1, n)),
       dims = c(2 * n, nv)
     )
     A <- rbind(A, A_cap)
     lower <- c(lower, rep(-Inf, n), cap_lb)
     upper <- c(upper, cap_ub, rep(Inf, n))
-  } else if (with_backup) {
-    # Capacity box on the heat pump's total load: lb <= P_t + B_t <= ub
+  } else if (load_row) {
+    # Capacity box on the heat pump's total load: lb <= sum(P_t + B_t) <= ub
+    load <- load_rows()
     A_load <- Matrix::sparseMatrix(
-      i = rep(seq_len(n), 2),
-      j = c(idx_P, idx_B),
-      x = rep(1, 2 * n),
+      i = load$i,
+      j = load$j,
+      x = load$x,
       dims = c(n, nv)
     )
     A <- rbind(A, A_load)
@@ -790,40 +994,70 @@ tank_solve_window <- function(
     upper <- c(upper, ub_load)
   }
 
-  if (soft) {
-    # S_t + D_t >= Smin            depth below the comfort floor
-    # S_n + R >= S_end             end condition, soft
-    # sum(U) <= the least unmet heat any schedule needs
-    # With a house, the end condition is S_n + W_n + R >= S_end + R0
-    A_soft <- Matrix::sparseMatrix(
-      i = c(seq_len(n), seq_len(n), n + 1, n + 1, rep(n + 2, n), if (with_house) n + 1),
-      j = c(idx_S, idx_D, idx_S[n], idx_R, idx_U, if (with_house) idx_W[n]),
-      x = c(rep(1, 3 * n + 2), if (with_house) house_unit / level_unit),
-      dims = c(n + 2, nv)
+  if (m > 1) {
+    # The one compressor: sum(P_t) <= Pc, the valve sharing its time between
+    # the stores within the slot
+    A_pc <- Matrix::sparseMatrix(
+      i = rep(seq_len(n), m),
+      j = all_P,
+      x = rep(1, n * m),
+      dims = c(n, nv)
     )
-    A <- rbind(A, A_soft)
-    lower <- c(lower, rep(Smin, n) / level_unit, end_total / level_unit, 0)
-    upper <- c(upper, rep(Inf, n), Inf, U_cap)
-  } else if (with_house) {
-    # S_n + W_n >= S_end + R0: the window ends with at least the heat it
-    # started with, in the tank and the house together
-    A_end <- Matrix::sparseMatrix(
-      i = c(1, 1),
-      j = c(idx_S[n], idx_W[n]),
-      x = c(1, house_unit / level_unit),
-      dims = c(1, nv)
-    )
-    A <- rbind(A, A_end)
-    lower <- c(lower, end_total / level_unit)
-    upper <- c(upper, Inf)
+    A <- rbind(A, A_pc)
+    lower <- c(lower, rep(0, n))
+    upper <- c(upper, rep(Pc, n))
   }
 
-  if (soft && with_house) {
-    # The least unmet heat with a house: the greedy schedule of
-    # `tank_min_unmet()` has a second store to choose for, so solve for it on
-    # the same rows (an LP on HiGHS), and cap `U` at it
+  if (soft) {
+    # Per store:
+    # S_t + D_t >= Smin            depth below the comfort floor
+    # S_n + R >= S_end             end condition, soft
+    # With a house, the end condition is S_n + W_n + R >= S_end + R0
+    # Then, over every store: sum(U) <= the least unmet heat any schedule
+    # needs
+    for (s in seq_len(m)) {
+      A_soft <- Matrix::sparseMatrix(
+        i = c(seq_len(n), seq_len(n), n + 1, n + 1, if (with_house[s]) n + 1),
+        j = c(idx_S[[s]], idx_D[[s]], idx_S[[s]][n], idx_R[[s]], if (with_house[s]) idx_W[[s]][n]),
+        x = c(rep(1, 2 * n + 2), if (with_house[s]) house_unit[s] / level_unit[s]),
+        dims = c(n + 1, nv)
+      )
+      A <- rbind(A, A_soft)
+      lower <- c(lower, rep(Smin[s], n) / level_unit[s], end_total[s] / level_unit[s])
+      upper <- c(upper, rep(Inf, n), Inf)
+    }
+    A_unmet <- Matrix::sparseMatrix(
+      i = rep(1, n * m),
+      j = all_U,
+      x = rep(1, n * m),
+      dims = c(1, nv)
+    )
+    A <- rbind(A, A_unmet)
+    lower <- c(lower, 0)
+    upper <- c(upper, U_cap)
+  } else {
+    for (s in which(with_house)) {
+      # S_n + W_n >= S_end + R0: the window ends with at least the heat it
+      # started with, in the tank and the house together
+      A_end <- Matrix::sparseMatrix(
+        i = c(1, 1),
+        j = c(idx_S[[s]][n], idx_W[[s]][n]),
+        x = c(1, house_unit[s] / level_unit[s]),
+        dims = c(1, nv)
+      )
+      A <- rbind(A, A_end)
+      lower <- c(lower, end_total[s] / level_unit[s])
+      upper <- c(upper, Inf)
+    }
+  }
+
+  if (least_lp) {
+    # The least unmet heat with a house, or with stores sharing the
+    # compressor: the greedy schedule of `tank_min_unmet()` has a second store
+    # to choose for, so solve for it on the same rows (an LP on HiGHS), and
+    # cap `U` at it
     lin <- numeric(nv)
-    lin[idx_U] <- 1
+    lin[all_U] <- 1
     least <- highs::highs_solve(
       Q = NULL,
       L = lin,
@@ -840,7 +1074,7 @@ tank_solve_window <- function(
     ) {
       return(tank_failure(paste0("HiGHS: ", least$status_message)))
     }
-    U_least <- sum(pmax(least$primal_solution[idx_U], 0))
+    U_least <- sum(pmax(least$primal_solution[all_U], 0))
     upper[length(upper)] <- U_least * (1 + 1e-6) + 1e-6
   }
 
@@ -857,24 +1091,25 @@ tank_solve_window <- function(
   # cool below its floor. The gas backup pays the backup heater's price
   # without its electricity, which it does not draw: the gas itself is not
   # priced. The demand the tank cannot serve at the inlet temperature (`U`)
-  # is capped at the least any schedule leaves instead of priced.
-  if (with_backup || with_gas || soft || soft_caps) {
+  # is capped at the least any schedule leaves instead of priced. The heat
+  # price takes every store's COP and backup heater.
+  if (any(with_backup) || any(with_gas) || soft || soft_caps) {
     heat_price <- tank_heat_price(
       L,
       G,
-      cop,
+      as.numeric(cop),
       Pc,
-      Pb,
+      sum(Pb),
       objective,
       lambda,
       price = if (with_flows) max(abs(c(PI, PE_clipped))) else 0,
       scale = scale
     )
   }
-  c_B <- if (with_backup) 2 * heat_price else 0
-  c_H <- if (with_gas) 2 * heat_price else 0
+  c_B <- if (any(with_backup)) 2 * heat_price else 0
+  c_H <- if (any(with_gas)) 2 * heat_price else 0
   c_U <- 0
-  c_D <- if (soft) 20 * heat_price / dt * level_unit else 0
+  c_D <- if (soft) 20 * heat_price / dt * level_unit else rep(0, m)
   # Missing the end condition costs twice the dearest compressor heat per kWh
   # (`heat_price / (cop * dt)`), so price alone never leaves the tank below
   # its reference level, and less than missing a grid capacity: a kWh drawn
@@ -882,12 +1117,15 @@ tank_solve_window <- function(
   # `c_S / (cop * dt)`, five times as much where the COP varies less than
   # fivefold in the window. Sharing the floor's `c_D` instead (80 x
   # `heat_price` per kWh at 15 minutes) kept a full tank closed through a
-  # breach.
+  # breach. Each store takes its own lowest COP.
   if (soft && is.null(return_weight)) {
-    cop_low <- if (any(cop > 0)) max(1, min(cop[cop > 0])) else 1
-    return_weight <- 2 / (cop_low * dt)
+    return_weight <- numeric(m)
+    for (s in seq_len(m)) {
+      cop_low <- if (any(cop[, s] > 0)) max(1, min(cop[cop[, s] > 0, s])) else 1
+      return_weight[s] <- 2 / (cop_low * dt)
+    }
   }
-  c_R <- if (soft) return_weight * heat_price * level_unit else 0
+  c_R <- if (soft) per_store(return_weight) * heat_price * level_unit else rep(0, m)
   c_S <- if (soft_caps) 10 * heat_price else 0
 
   lambdaMat <- if (lambda > 0) get_lambda_matrix(n) else NULL
@@ -895,11 +1133,13 @@ tank_solve_window <- function(
   if (use_highs) {
     # Pure LP on HiGHS
     lin <- numeric(nv)
-    lin[idx_B] <- c_B
-    lin[idx_H] <- c_H
-    lin[idx_U] <- c_U
-    lin[idx_D] <- c_D
-    lin[idx_R] <- c_R
+    lin[all_B] <- c_B
+    lin[unlist(idx_H)] <- c_H
+    lin[all_U] <- c_U
+    for (s in seq_len(m)) {
+      lin[idx_D[[s]]] <- c_D[s]
+      lin[idx_R[[s]]] <- c_R[s]
+    }
     lin[c(idx_si, idx_se)] <- c_S
     lin[idx_I] <- PI
     lin[idx_E] <- -PE_clipped
@@ -924,53 +1164,68 @@ tank_solve_window <- function(
     P_quad <- Matrix::Matrix(0, nv, nv, sparse = TRUE)
     q <- numeric(nv)
     if (identical(objective, "grid")) {
-      # min sum((L - G + P + B)^2) + lambda * sum((P_t - P_{t-1})^2)
+      # min sum((L - G + sum(P + B))^2) + lambda * sum((sum P_t - sum P_{t-1})^2)
       w_flow <- 1
-      P_block <- 2 * diag(n)
-      if (lambda > 0) {
-        P_block <- P_block + 2 * lambda * lambdaMat
-      }
-      q[idx_P] <- 2 * (L - G)
+      q_flow <- 2 * (L - G)
     } else {
       w <- if (identical(objective, "cost")) 0 else objective
       w_flow <- w * scale
-      P_block <- 2 * w * scale * diag(n)
-      if (lambda > 0) {
-        P_block <- P_block + 2 * lambda * (lambdaMat + 1e-6 * diag(n))
-      }
-      q[idx_P] <- 2 * w * scale * (L - G)
+      q_flow <- 2 * w * scale * (L - G)
       q[idx_I] <- (1 - w) * PI
       q[idx_E] <- -(1 - w) * PE_clipped
     }
-    P_quad[idx_P, idx_P] <- P_block
-    if (with_backup) {
-      # The backup heater's load enters the squared net flow like `P`'s
-      flow_block <- 2 * w_flow * diag(n)
-      P_quad[idx_P, idx_B] <- flow_block
-      P_quad[idx_B, idx_P] <- flow_block
-      P_quad[idx_B, idx_B] <- flow_block
-      q[idx_B] <- 2 * w_flow * (L - G) + c_B
+    # The squared net flow couples every electric load (each store's `P` and
+    # `B`), and the ramping penalty every store's `P`
+    flow_block <- 2 * w_flow * diag(n)
+    for (s in seq_len(m)) {
+      for (r in seq_len(m)) {
+        P_block <- flow_block
+        if (lambda > 0) {
+          P_block <- P_block + 2 * lambda * if (identical(objective, "grid") || s != r) {
+            lambdaMat
+          } else {
+            lambdaMat + 1e-6 * diag(n)
+          }
+        }
+        P_quad[idx_P[[s]], idx_P[[r]]] <- P_block
+        if (with_backup[r]) {
+          # The backup heater's load enters the squared net flow like `P`'s
+          P_quad[idx_P[[s]], idx_B[[r]]] <- flow_block
+          P_quad[idx_B[[r]], idx_P[[s]]] <- flow_block
+        }
+        if (with_backup[s] && with_backup[r]) {
+          P_quad[idx_B[[s]], idx_B[[r]]] <- flow_block
+        }
+      }
+      q[idx_P[[s]]] <- q_flow
+      if (with_backup[s]) {
+        q[idx_B[[s]]] <- 2 * w_flow * (L - G) + c_B
+      }
+      q[idx_D[[s]]] <- c_D[s]
+      q[idx_R[[s]]] <- c_R[s]
     }
     # The gas backup is no electric load: its price only
-    q[idx_H] <- c_H
-    q[idx_U] <- c_U
-    q[idx_D] <- c_D
-    q[idx_R] <- c_R
+    q[unlist(idx_H)] <- c_H
+    q[all_U] <- c_U
     q[c(idx_si, idx_se)] <- c_S
 
-    # Every power in units of `power_unit`: its column, its bound and the
-    # rows in kW (the balance, the capacities and the cap on `U`) are divided
-    # by it. The level's rows (dynamics, floor, end) are in `level_unit`.
+    # Every power in units of its store's `power_unit`: its column, its bound
+    # and the rows in kW (the balance, the capacities, the shared compressor
+    # and the cap on `U`) are divided by it. The level's rows (dynamics,
+    # floor, end) are in `level_unit`.
     col_unit <- rep(1, nv)
-    col_unit[c(idx_P, idx_B, idx_H, idx_F, idx_U, idx_si, idx_se, idx_I, idx_E)] <- power_unit
+    for (s in seq_len(m)) {
+      col_unit[c(idx_P[[s]], idx_B[[s]], idx_H[[s]], idx_F[[s]], idx_U[[s]])] <- power_unit[s]
+    }
+    col_unit[c(idx_si, idx_se, idx_I, idx_E)] <- row_power_unit
     row_unit <- c(
       col_unit,
-      rep(1, n),
-      if (with_house) rep(1, n),
-      if (with_flows) rep(power_unit, n),
-      if (soft_caps) rep(power_unit, 2 * n) else if (with_backup) rep(power_unit, n),
-      if (soft) c(rep(1, n + 1), power_unit),
-      if (with_house && !soft) 1
+      unlist(lapply(seq_len(m), function(s) rep(1, if (with_house[s]) 2 * n else n))),
+      if (with_flows) rep(row_power_unit, n),
+      if (soft_caps) rep(row_power_unit, 2 * n) else if (load_row) rep(row_power_unit, n),
+      if (m > 1) rep(row_power_unit, n),
+      if (soft) c(rep(1, m * (n + 1)), row_power_unit),
+      if (!soft) rep(1, sum(with_house))
     )
     A <- Matrix::Diagonal(x = 1 / row_unit) %*% A %*% Matrix::Diagonal(x = col_unit)
     lower <- lower / row_unit
@@ -982,7 +1237,10 @@ tank_solve_window <- function(
     # `power_unit` kWh, so the price of `D` and `R` per unit of `level_unit`
     # does not set it
     q_ref <- q
-    q_ref[c(idx_D, idx_R)] <- q_ref[c(idx_D, idx_R)] / level_unit * power_unit
+    for (s in seq_len(m)) {
+      idx_DR <- c(idx_D[[s]], idx_R[[s]])
+      q_ref[idx_DR] <- q_ref[idx_DR] / level_unit[s] * power_unit[s]
+    }
     obj_scale <- max(max(abs(P_quad)), max(abs(q_ref)), 1e-6)
     sol <- solve_osqp(P_quad / obj_scale, q / obj_scale, A, lower, upper)
     if (
@@ -1003,50 +1261,69 @@ tank_solve_window <- function(
     x <- as.numeric(sol$x) * col_unit
   }
 
-  if (with_backup || soft_caps) {
-    P <- pmin(pmax(x[idx_P], 0), ub_P)
-    B <- if (with_backup) pmin(pmax(x[idx_B], 0), ub_B) else rep(0, n)
-  } else {
-    P <- pmin(pmax(x[idx_P], lb_P), ub_P)
-    B <- rep(0, n)
-  }
-  H <- if (with_gas) pmin(pmax(x[idx_H], 0), Pg) else rep(0, n)
-  # The tank's demand: the heat it passes to the house, or else `Q`
-  F_house <- if (with_house) pmax(x[idx_F], 0) else NULL
-  tank_out <- if (with_house) F_house else Q
-
-  # OSQP declares an infeasible problem as such, but its accuracy is absolute,
-  # so check the power it returns against the band once more on the exact
-  # dynamics before trusting it.
-  # The level stops at the inlet temperature: the heat `U` the solver lets in
-  # there is demand the tank does not serve. On the path it stops there once
-  # it would go below by more than half a rounding step, and is kept as
-  # rounding within that, so a soft floor has no lower bound left to check: a
-  # tank drained from the rounding room below its top lands exactly half a
-  # step below 0.
-  # OSQP's accuracy is relative on rows scaled by `Smax`, so its overshoot
-  # grows with the tank: the check allows 1e-4 of the top (0.01 % SOC, the
-  # smallest step of the reported SOC) and at least 0.001 kWh.
-  # The house's level is checked the same way, against its own capacity.
-  level <- tank_level_path(P, tank_out, cop, S0, k, dt, backup = B + H)[-1]
-  tol <- max(1e-3, 1e-4 * Smax)
-  if (
-    (!soft && any(level < Smin - tol)) ||
-      any(level > Smax + tol) ||
-      (!soft && !with_house && level[n] < S_end - tol)
-  ) {
-    return(tank_failure("the solution leaves the tank's band on the exact dynamics"))
-  }
-  if (with_house) {
-    house <- tank_house_path(F_house, Q, R0, kh, dt)[-1]
-    tol_house <- max(1e-3, 1e-4 * Hcap)
-    if (
-      any(house < -tol_house) ||
-        any(house > Hcap + tol_house) ||
-        (!soft && level[n] + house[n] < end_total - tol - tol_house)
-    ) {
-      return(tank_failure("the solution leaves the house's band on the exact dynamics"))
+  P <- zeros
+  B <- zeros
+  H <- zeros
+  F_house <- zeros
+  for (s in seq_len(m)) {
+    P[, s] <- pmin(pmax(x[idx_P[[s]]], lb_P[, s]), ub_P[, s])
+    if (with_backup[s]) {
+      B[, s] <- pmin(pmax(x[idx_B[[s]]], 0), ub_B[, s])
     }
+    if (with_gas[s]) {
+      H[, s] <- pmin(pmax(x[idx_H[[s]]], 0), Pg[s])
+    }
+    # The tank's demand: the heat it passes to the house, or else `Q`
+    if (with_house[s]) {
+      F_house[, s] <- pmax(x[idx_F[[s]]], 0)
+    }
+    tank_out <- if (with_house[s]) F_house[, s] else Q[, s]
+
+    # OSQP declares an infeasible problem as such, but its accuracy is
+    # absolute, so check the power it returns against the band once more on
+    # the exact dynamics before trusting it.
+    # The level stops at the inlet temperature: the heat `U` the solver lets
+    # in there is demand the tank does not serve. On the path it stops there
+    # once it would go below by more than half a rounding step, and is kept as
+    # rounding within that, so a soft floor has no lower bound left to check:
+    # a tank drained from the rounding room below its top lands exactly half a
+    # step below 0.
+    # OSQP's accuracy is relative on rows scaled by `Smax`, so its overshoot
+    # grows with the tank: the check allows 1e-4 of the top (0.01 % SOC, the
+    # smallest step of the reported SOC) and at least 0.001 kWh.
+    # The house's level is checked the same way, against its own capacity.
+    level <- tank_level_path(
+      P[, s], tank_out, cop[, s], S0[s], k[s], dt,
+      backup = B[, s] + H[, s]
+    )[-1]
+    tol <- max(1e-3, 1e-4 * Smax[s])
+    if (
+      (!soft && any(level < Smin[s] - tol)) ||
+        any(level > Smax[s] + tol) ||
+        (!soft && !with_house[s] && level[n] < S_end[s] - tol)
+    ) {
+      return(tank_failure("the solution leaves the tank's band on the exact dynamics"))
+    }
+    if (with_house[s]) {
+      house <- tank_house_path(F_house[, s], Q[, s], R0[s], kh[s], dt)[-1]
+      tol_house <- max(1e-3, 1e-4 * Hcap[s])
+      if (
+        any(house < -tol_house) ||
+          any(house > Hcap[s] + tol_house) ||
+          (!soft && level[n] + house[n] < end_total[s] - tol - tol_house)
+      ) {
+        return(tank_failure("the solution leaves the house's band on the exact dynamics"))
+      }
+    }
+  }
+  if (m == 1) {
+    return(list(
+      power = P[, 1],
+      backup = B[, 1],
+      gas = H[, 1],
+      house = if (with_house) F_house[, 1] else NULL,
+      status = "optimal"
+    ))
   }
   list(power = P, backup = B, gas = H, house = F_house, status = "optimal")
 }
@@ -1147,7 +1424,14 @@ tank_flex_windows <- function(
 
 #' Check a single number argument
 #' @keywords internal
-tank_check_number <- function(x, name, min = -Inf, max = Inf, min_open = FALSE) {
+tank_check_number <- function(
+  x,
+  name,
+  min = -Inf,
+  max = Inf,
+  min_open = FALSE,
+  where = ""
+) {
   ok <- is.numeric(x) && length(x) == 1 && !is.na(x) && is.finite(x) &&
     x <= max && (if (min_open) x > min else x >= min)
   if (!ok) {
@@ -1156,7 +1440,7 @@ tank_check_number <- function(x, name, min = -Inf, max = Inf, min_open = FALSE) 
       min,
       if (is.finite(max)) paste0(" and at most ", max) else ""
     )
-    stop(sprintf("Error: `%s` must be a number %s.", name, range), call. = FALSE)
+    stop(sprintf("Error: `%s` must be a number %s%s.", name, range, where), call. = FALSE)
   }
   invisible(x)
 }
@@ -1202,7 +1486,9 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' conversion. The backup heater turns `B` kW of electricity into `B` kW of heat.
 #' The gas backup (a hybrid heat pump's boiler) adds `H` kW of heat that is not
 #' electricity. A space-heating tank may have the house it heats behind it, as
-#' a second, lossy store (see *The house behind the tank*).
+#' a second, lossy store (see *The house behind the tank*). One compressor may
+#' serve several stores, such as a hot-water cylinder and a heating buffer
+#' (see *Stores behind one compressor*).
 #'
 #' Per slot of `dt` hours, with `S` the level in kWh thermal above the inlet
 #' water temperature (level 0, `SOC = 0`) and `k = (1 - loss/100)^dt`:
@@ -1265,6 +1551,57 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' without a house. The slots that run `flexible` never heat the house: it
 #' serves the demand while it is above its setpoint, and the tank gives the
 #' rest.
+#'
+#' @section A store that holds nothing:
+#' `Tcap = 0` is a heat pump without a tank (or a store without a buffer): its
+#' level is 0 in every slot and `SOCmin`, `SOCmax`, `SOCini` and `loss` have
+#' nothing to act on. Its heat in equals its heat out in every slot. Without
+#' a house the compressor follows the demand, `cop * P + B + H = heat_demand -
+#' U`, up to what `Pc` delivers, and the rest is unmet heat `U`. With a house
+#' it heats the house directly, `cop * P + B + H = F`, which is how a heat
+#' pump without a buffer pre-heats a building; the house keeps its floor at
+#' its setpoint, and what it cannot get is unmet heat. Its 2-decimal power
+#' keeps the level within half a rounding step of heat of 0 (`0.005 * cop *
+#' dt` kWh, above or below), as a tank keeps it at its floor, so the rounding
+#' leaves no heat unmet.
+#'
+#' @section Stores behind one compressor:
+#' With `stores`, a character vector of store names (each matching
+#' `^[a-z][a-z0-9_]*$`; flextools gives them no meaning), the compressor
+#' serves one store per name, through a valve that serves one at a time and
+#' shares its time within the slot. Each store has its own balance as above
+#' (its heat demand, COP, band, loss, backup, house and unmet heat), and the
+#' stores share the compressor:
+#'
+#' - `S_s[t] = k_s * S_s[t-1] + (cop_s[t] * P_s[t] + B_s[t] + H_s[t] -
+#'   heat_demand_s[t]) * dt` for every store `s`
+#' - `sum_s P_s[t] <= Pc`, the one compressor's nameplate; the backups are
+#'   not part of it.
+#'
+#' `opt_data` then carries `heat_demand_<store>`, `cop_<store>` and
+#' `flexible_<store>` for every store, and not `heat_demand`, `cop` or
+#' `flexible`. `flexible_<store>` is that store's static compressor power,
+#' without its backup; the stores' `flexible_<store>` must not sum above
+#' `Pc + 0.01` in any slot.
+#'
+#' `Tcap`, `SOCmin`, `SOCmax`, `SOCini`, `loss`, `Pb`, `Pg`, `Hcap` and
+#' `Hloss` take one value per store, in the order of `stores`, or one value
+#' for all of them. `NA` in `Pb` or `Pg` is no such backup on that store, `NA`
+#' in both `Hcap` and `Hloss` no house behind it, and `SOCmin`, `SOCmax`,
+#' `SOCini` and `loss` may be `NA` where `Tcap` is 0, and only there. `Pc`
+#' stays one number.
+#'
+#' The objective sees the heat pump's electric load, every store's compressor
+#' and backup heater, `sum_s (P_s + B_s)`; `lambda` penalises changes of
+#' `sum_s P_s`. The heat price `h` (below) takes the lowest positive COP of
+#' every store, and `Pc + sum(Pb)` in its `"grid"` form. Windows, the levels
+#' they carry, `on_failure` and the slots that run `flexible` work per store;
+#' in a slot that runs `flexible`, each store runs its own `flexible_<store>`
+#' and stops at its own top. One store in this form gives the results of the
+#' form without `stores`.
+#'
+#' The unmet heat of every store counts alike: where the compressor cannot
+#' serve every store, the solver may leave either short.
 #'
 #' @section Compressor first, backup heater second, unmet heat last:
 #' The backup heater's electricity is part of the load the objective sees, like
@@ -1346,6 +1683,9 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' - `flexible`: the static electric schedule of the heat pump (kW, >= 0),
 #'   returned wherever the function does not optimise
 #'
+#' With `stores`, these three columns once per store instead, suffixed with
+#' its name: `heat_demand_<store>`, `cop_<store>` and `flexible_<store>`.
+#'
 #' Optional columns, as in [add_battery_optimization()]: `static`, `production`,
 #' `import_capacity`, `export_capacity`, `price_imported`, `price_exported`.
 #' @param opt_objective character or numeric. `"grid"` (default), `"cost"`, or a
@@ -1353,13 +1693,14 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #'   pure cost. `"grid"` minimises the squared net grid flow
 #'   `static + P + B - production`; `"cost"` minimises the energy cost of it.
 #'   `"capacity"` has no tank form and stops with an error.
-#' @param Tcap numeric, tank capacity (kWh thermal, > 0): the heat between the
+#' @param Tcap numeric, tank capacity (kWh thermal, >= 0): the heat between the
 #'   inlet water temperature (`SOC = 0`, where the tank gives no more heat) and
-#'   the top. For a mixed tank of `V` litres between the inlet temperature
+#'   the top. 0 is no tank (see *A store that holds nothing*). For a mixed tank of `V` litres between the inlet temperature
 #'   `T_in` and its top temperature `T_max` (degrees C), it is
 #'   `V * 4.186 / 3600 * (T_max - T_in)`, and a comfort floor at `T_floor` is
 #'   `SOCmin = 100 * (T_floor - T_in) / (T_max - T_in)`.
-#' @param Pc numeric, compressor cap (kW electric, > 0).
+#' @param Pc numeric, compressor cap (kW electric, > 0). With `stores`, the
+#'   one compressor's nameplate, which the stores share.
 #' @param SOCmin numeric, minimum State-of-Charge (%), the comfort floor.
 #' @param SOCmax numeric, maximum State-of-Charge (%).
 #' @param SOCini numeric, State-of-Charge (%) at the start of the run, within
@@ -1394,6 +1735,9 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' @param Hloss numeric, loss of the house's heat above its setpoint (% per
 #'   hour, >= 0 and < 100). A house of time constant `tau` hours loses
 #'   `100 * (1 - exp(-1 / tau))`. Given with `Hcap` or not at all.
+#' @param stores character vector, the names of the stores behind the one
+#'   compressor (see *Stores behind one compressor*). `NULL` (default) is one
+#'   tank, with the unsuffixed columns and one value per argument.
 #'
 #' @return numeric vector, the compressor's electric power (kW), one value per
 #'   `opt_data` row, rounded to 2 decimals: the optimised power in optimised
@@ -1428,6 +1772,24 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' exactly from it, from 0: `R[t] = kh * R[t-1] + (house_heat_kw[t] -
 #' heat_demand[t]) * dt`, nothing cut off, so the heat the house loses over the
 #' run is `(1 - kh)` times the sum of `R` at the start of every slot.
+#'
+#' With `stores`, the value is the compressor's total power `sum_s P_s` (kW
+#' electric), rounded to 2 decimals and at or below `Pc` in every row, and
+#' every attribute is a named list with one numeric vector per store, keyed
+#' by its name:
+#'
+#' - `power_kw`: every store. The store's compressor power (kW electric),
+#'   rounded to 2 decimals; they sum to the value. Where the stores' rounded
+#'   powers would sum above `Pc`, one store rounds down by 0.01 kW in that
+#'   slot: one whose level keeps that heat above its floor, and among them
+#'   the one rounded up the most.
+#' - `level_kwh`: every store. The store's level at the start of the slot
+#'   (kWh thermal), rounded to 2 decimals: what [get_tank_level()] gives from
+#'   the store's attributes, so within half a rounding step of heat of 0
+#'   where `Tcap` is 0.
+#' - `backup_kw`, `unmet_heat_kw`: every store, as above.
+#' - `gas_backup_kw`: the stores with `Pg > 0`, as above.
+#' - `house_heat_kw`, `house_level_kwh`: the stores with a house, as above.
 #'
 #' @export
 #'
@@ -1472,7 +1834,8 @@ add_tank_optimization <- function(
   Pg = NULL,
   Hcap = NULL,
   Hloss = NULL,
-  on_failure = c("flexible", "error")
+  on_failure = c("flexible", "error"),
+  stores = NULL
 ) {
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.", call. = FALSE)
@@ -1480,7 +1843,44 @@ add_tank_optimization <- function(
   if (!("datetime" %in% names(opt_data))) {
     stop("Error: `datetime` variable must exist in `opt_data`", call. = FALSE)
   }
-  for (col in c("heat_demand", "cop", "flexible")) {
+  tank_columns <- c("heat_demand", "cop", "flexible")
+  if (is.null(stores)) {
+    m <- 1L
+    columns <- matrix(tank_columns, nrow = 1)
+  } else {
+    if (
+      !is.character(stores) || !length(stores) || anyNA(stores) ||
+        !all(grepl("^[a-z][a-z0-9_]*$", stores))
+    ) {
+      stop(
+        "Error: `stores` must be a character vector of store names, each matching `^[a-z][a-z0-9_]*$`.",
+        call. = FALSE
+      )
+    }
+    if (anyDuplicated(stores)) {
+      stop(
+        sprintf(
+          "Error: `stores` names each store once; `%s` is repeated.",
+          stores[anyDuplicated(stores)]
+        ),
+        call. = FALSE
+      )
+    }
+    unsuffixed <- intersect(tank_columns, names(opt_data))
+    if (length(unsuffixed)) {
+      stop(
+        sprintf(
+          "Error: with `stores`, `opt_data` takes one `%s_<store>` column per store, not `%s`.",
+          unsuffixed[1],
+          unsuffixed[1]
+        ),
+        call. = FALSE
+      )
+    }
+    m <- length(stores)
+    columns <- outer(stores, tank_columns, function(s, col) paste0(col, "_", s))
+  }
+  for (col in t(columns)) {
     tank_check_column(opt_data, col)
   }
   for (col in intersect(c("static", "production"), names(opt_data))) {
@@ -1511,13 +1911,53 @@ add_tank_optimization <- function(
     )
   }
 
-  tank_check_number(Tcap, "Tcap", 0, min_open = TRUE)
+  # With `stores`, every tank argument takes one value per store (one for
+  # all of them is recycled), and `NA` is no backup or no house on that
+  # store, or a band a store that holds nothing does not read
+  where <- if (is.null(stores)) rep("", m) else sprintf(" (store `%s`)", stores)
+  per_store <- function(x, name) {
+    if (is.null(stores) || is.null(x)) {
+      return(x)
+    }
+    if (!(length(x) %in% c(1, m))) {
+      stop(
+        sprintf(
+          "Error: `%s` takes one value per store in `stores` (%d), or one for all of them.",
+          name,
+          m
+        ),
+        call. = FALSE
+      )
+    }
+    rep_len(x, m)
+  }
+  Tcap <- per_store(Tcap, "Tcap")
+  SOCmin <- per_store(SOCmin, "SOCmin")
+  SOCmax <- per_store(SOCmax, "SOCmax")
+  SOCini <- per_store(SOCini, "SOCini")
+  loss <- per_store(loss, "loss")
+  Pb <- per_store(Pb, "Pb")
+  Pg <- per_store(Pg, "Pg")
+  Hcap <- per_store(Hcap, "Hcap")
+  Hloss <- per_store(Hloss, "Hloss")
+
+  if (is.null(stores)) {
+    tank_check_number(Tcap, "Tcap", 0)
+  } else {
+    for (s in seq_len(m)) {
+      tank_check_number(Tcap[s], "Tcap", 0, where = where[s])
+    }
+  }
   tank_check_number(Pc, "Pc", 0, min_open = TRUE)
   if (is.null(Pb)) {
-    Pb <- 0
+    Pb <- rep(0, m)
   }
   if (is.null(Pg)) {
-    Pg <- 0
+    Pg <- rep(0, m)
+  }
+  if (!is.null(stores)) {
+    Pb[is.na(Pb)] <- 0
+    Pg[is.na(Pg)] <- 0
   }
   if (identical(on_failure, c("flexible", "error"))) {
     on_failure <- "flexible"
@@ -1532,26 +1972,64 @@ add_tank_optimization <- function(
       call. = FALSE
     )
   }
-  tank_check_number(Pb, "Pb", 0)
-  tank_check_number(Pg, "Pg", 0)
-  if (Pb > 0 && Pg > 0) {
-    stop(
-      "Error: a tank has one backup: `Pb` (resistive) and `Pg` (gas) cannot both be above 0.",
-      call. = FALSE
-    )
+  if (is.null(stores)) {
+    tank_check_number(Pb, "Pb", 0)
+    tank_check_number(Pg, "Pg", 0)
   }
-  tank_check_number(SOCmin, "SOCmin", 0, 100)
-  tank_check_number(SOCmax, "SOCmax", 0, 100)
-  if (SOCmin >= SOCmax) {
-    stop("Error: `SOCmin` must be lower than `SOCmax`.", call. = FALSE)
+  if (is.null(stores)) {
+    # One value each, as up to flextools 1.24.0
+    for (arg in c("SOCmin", "SOCmax", "SOCini", "loss")) {
+      value <- get(arg)
+      if (!is.null(value) && length(value) != 1) {
+        tank_check_number(value, arg)
+      }
+    }
   }
   if (is.null(SOCini)) {
     SOCini <- SOCmax
   }
-  tank_check_number(SOCini, "SOCini", SOCmin, SOCmax)
-  tank_check_number(loss, "loss", 0, 100)
-  if (loss >= 100) {
-    stop("Error: `loss` must be lower than 100 (%/hour).", call. = FALSE)
+  for (s in seq_len(m)) {
+    if (!is.null(stores)) {
+      tank_check_number(Pb[s], "Pb", 0, where = where[s])
+      tank_check_number(Pg[s], "Pg", 0, where = where[s])
+    }
+    if (Pb[s] > 0 && Pg[s] > 0) {
+      stop(
+        paste0(
+          "Error: a tank has one backup: `Pb` (resistive) and `Pg` (gas) cannot both be above 0",
+          where[s],
+          "."
+        ),
+        call. = FALSE
+      )
+    }
+    # A store that holds nothing has no band to read
+    if (Tcap[s] == 0) {
+      if (is.na(SOCmin[s])) SOCmin[s] <- 0
+      if (is.na(SOCmax[s])) SOCmax[s] <- 100
+      if (is.na(SOCini[s])) SOCini[s] <- SOCmax[s]
+      if (is.na(loss[s])) loss[s] <- 0
+    }
+    tank_check_number(SOCmin[s], "SOCmin", 0, 100, where = where[s])
+    tank_check_number(SOCmax[s], "SOCmax", 0, 100, where = where[s])
+    if (Tcap[s] > 0 && SOCmin[s] >= SOCmax[s]) {
+      stop(
+        paste0("Error: `SOCmin` must be lower than `SOCmax`", where[s], "."),
+        call. = FALSE
+      )
+    }
+    if (Tcap[s] > 0) {
+      tank_check_number(SOCini[s], "SOCini", SOCmin[s], SOCmax[s], where = where[s])
+    } else {
+      tank_check_number(SOCini[s], "SOCini", 0, 100, where = where[s])
+    }
+    tank_check_number(loss[s], "loss", 0, 100, where = where[s])
+    if (loss[s] >= 100) {
+      stop(
+        paste0("Error: `loss` must be lower than 100 (%/hour)", where[s], "."),
+        call. = FALSE
+      )
+    }
   }
   tank_check_number(lambda, "lambda", 0)
   if (is.null(Hcap) != is.null(Hloss)) {
@@ -1564,13 +2042,60 @@ add_tank_optimization <- function(
       call. = FALSE
     )
   }
-  house <- !is.null(Hcap)
-  if (house) {
-    tank_check_number(Hcap, "Hcap", 0, min_open = TRUE)
-    tank_check_number(Hloss, "Hloss", 0, 100)
-    if (Hloss >= 100) {
-      stop("Error: `Hloss` must be lower than 100 (%/hour).", call. = FALSE)
+  house <- rep(!is.null(Hcap), m)
+  if (house[1] && !is.null(stores)) {
+    house <- !is.na(Hcap)
+    for (s in which(is.na(Hcap) != is.na(Hloss))) {
+      stop(
+        sprintf(
+          "Error: `%s` needs `%s`: a house behind the tank takes `Hcap` and `Hloss` together%s.",
+          if (is.na(Hcap[s])) "Hloss" else "Hcap",
+          if (is.na(Hcap[s])) "Hcap" else "Hloss",
+          where[s]
+        ),
+        call. = FALSE
+      )
     }
+  }
+  for (s in which(house)) {
+    if (is.null(stores)) {
+      tank_check_number(Hcap, "Hcap", 0, min_open = TRUE)
+      tank_check_number(Hloss, "Hloss", 0, 100)
+    }
+    tank_check_number(Hcap[s], "Hcap", 0, min_open = TRUE, where = where[s])
+    tank_check_number(Hloss[s], "Hloss", 0, 100, where = where[s])
+    if (Hloss[s] >= 100) {
+      stop(
+        paste0("Error: `Hloss` must be lower than 100 (%/hour)", where[s], "."),
+        call. = FALSE
+      )
+    }
+  }
+
+  column_matrix <- function(j) {
+    matrix(
+      unlist(lapply(columns[, j], function(col) opt_data[[col]]), use.names = FALSE),
+      ncol = m
+    )
+  }
+  Q <- column_matrix(1)
+  cop <- column_matrix(2)
+  flexible <- column_matrix(3)
+  if (!is.null(stores)) {
+    # One compressor's static schedule cannot pass its nameplate (up to the
+    # rounding of the stores' schedules)
+    over <- which(rowSums(flexible) > Pc + 0.01 + 1e-9)
+    if (length(over)) {
+      stop(
+        sprintf(
+          "Error: the stores' `flexible_<store>` sum above `Pc` (%s kW) at %s.",
+          Pc,
+          format(opt_data$datetime[over[1]], "%Y-%m-%d %H:%M:%S %Z")
+        ),
+        call. = FALSE
+      )
+    }
+    opt_data$flexible <- rowSums(flexible)
   }
 
   opt_data <- check_optimization_data(opt_data, opt_objective)
@@ -1582,11 +2107,22 @@ add_tank_optimization <- function(
   k <- (1 - loss / 100)^dt
   Smin <- Tcap * SOCmin / 100
   Smax <- Tcap * SOCmax / 100
-  kh <- if (house) (1 - Hloss / 100)^dt else 1
+  if (!any(house)) {
+    Hcap <- rep(0, m)
+    Hloss <- rep(0, m)
+  }
+  Hcap[!house] <- 0
+  Hloss[!house] <- 0
+  kh <- ifelse(house, (1 - Hloss / 100)^dt, 1)
+  # The top the 2-decimal power keeps the level under. A store that holds
+  # nothing has no room below its top for the rounding, which then could only
+  # round down and leave a step of heat unmet in every other slot: it may
+  # hold half a rounding step of heat, above or below 0, as a tank may at its
+  # floor
+  rounding_top <- function(s, idx) {
+    if (Smax[s] > 0) Smax[s] else 0.005 * max(cop[idx, s], 1) * dt
+  }
 
-  Q <- opt_data$heat_demand
-  cop <- opt_data$cop
-  flexible <- opt_data$flexible
   G <- opt_data$production
   L <- opt_data$static
   if (is.null(opt_data$price_imported)) {
@@ -1607,53 +2143,69 @@ add_tank_optimization <- function(
 
   reset_message_once()
 
+  # One column per store
   P_out <- round(flexible, 2)
-  B_out <- numeric(n_rows)
-  H_out <- numeric(n_rows)
+  if (m > 1) {
+    # The stores' static schedules may pass `Pc` by their rounding: the
+    # largest gives the excess back
+    p_max <- floor(Pc * 100 + 1e-9) / 100
+    for (t in which(rowSums(P_out) > p_max + 1e-9)) {
+      s <- which.max(P_out[t, ])
+      P_out[t, s] <- round(P_out[t, s] - (sum(P_out[t, ]) - p_max), 2)
+    }
+  }
+  B_out <- matrix(0, n_rows, m)
+  H_out <- matrix(0, n_rows, m)
   # The tank's demand: with a house, the heat it passes to the house
   F_out <- Q
   level <- Tcap * SOCini / 100 # level at the start of slot `pos`
-  house_level <- 0 # the house's, which starts the run at its setpoint
+  house_level <- numeric(m) # the house's, which starts the run at its setpoint
   pos <- 1L
 
   advance <- function(level, idx) {
     if (!length(idx)) {
       return(level)
     }
-    if (house) {
-      path <- tank_house_path(F_out[idx], Q[idx], house_level, kh, dt)
-      house_level <<- path[length(path)]
+    for (s in seq_len(m)) {
+      if (house[s]) {
+        path <- tank_house_path(F_out[idx, s], Q[idx, s], house_level[s], kh[s], dt)
+        house_level[s] <<- path[length(path)]
+      }
+      path <- tank_level_path(
+        P_out[idx, s],
+        F_out[idx, s],
+        cop[idx, s],
+        level[s],
+        k[s],
+        dt,
+        backup = B_out[idx, s] + H_out[idx, s]
+      )
+      level[s] <- path[length(path)]
     }
-    path <- tank_level_path(
-      P_out[idx],
-      F_out[idx],
-      cop[idx],
-      level,
-      k,
-      dt,
-      backup = B_out[idx] + H_out[idx]
-    )
-    path[length(path)]
+    level
   }
 
   # Slots that run `flexible` keep the tank below its top too: the compressor
   # stops as a thermostat would, at the 2-decimal power that keeps the level
   # at the top. Below, the tank cools down to the inlet temperature at most.
   # They never heat the house: it serves the demand while it is above its
-  # setpoint, and the tank gives the rest.
+  # setpoint, and the tank gives the rest. Each store runs its own.
   run_flexible <- function(level, idx) {
     for (t in idx) {
-      if (house) {
-        F_out[t] <<- max(ceiling((Q[t] - kh * house_level / dt) * 100 - 1e-9) / 100, 0)
-        house_level <<- kh * house_level + (F_out[t] - Q[t]) * dt
+      for (s in seq_len(m)) {
+        if (house[s]) {
+          F_out[t, s] <<- max(ceiling((Q[t, s] - kh[s] * house_level[s] / dt) * 100 - 1e-9) / 100, 0)
+          house_level[s] <<- kh[s] * house_level[s] + (F_out[t, s] - Q[t, s]) * dt
+        }
+        top <- rounding_top(s, t)
+        s_next <- k[s] * level[s] + (cop[t, s] * P_out[t, s] - F_out[t, s]) * dt
+        if (s_next > top + 1e-9 && cop[t, s] > 0) {
+          p_fit <- (top - k[s] * level[s] + F_out[t, s] * dt) / (cop[t, s] * dt)
+          P_out[t, s] <<- max(floor(p_fit * 100 + 1e-9) / 100, 0)
+          s_next <- k[s] * level[s] + (cop[t, s] * P_out[t, s] - F_out[t, s]) * dt
+        }
+        level[s] <- if (s_next < -1e-9) 0 else s_next
       }
-      s_next <- k * level + (cop[t] * P_out[t] - F_out[t]) * dt
-      if (s_next > Smax + 1e-9 && cop[t] > 0) {
-        p_fit <- (Smax - k * level + F_out[t] * dt) / (cop[t] * dt)
-        P_out[t] <<- max(floor(p_fit * 100 + 1e-9) / 100, 0)
-        s_next <- k * level + (cop[t] * P_out[t] - F_out[t]) * dt
-      }
-      level <- if (s_next < -1e-9) 0 else s_next
     }
     level
   }
@@ -1669,13 +2221,15 @@ add_tank_optimization <- function(
 
     # Every slot keeps the level between the inlet temperature and the top,
     # up to rounding, which the solver does not need to see
-    S0 <- min(max(level, 0), Smax)
+    S0 <- pmin(pmax(level, 0), Smax)
 
+    # One store goes to the solver as vectors and numbers
+    window_cols <- function(x) if (m == 1) x[idx, 1] else x[idx, , drop = FALSE]
     window_args <- list(
       G = G[idx],
       L = L[idx],
-      Q = Q[idx],
-      cop = cop[idx],
+      Q = window_cols(Q),
+      cop = window_cols(cop),
       PI = opt_data$price_imported[idx],
       PE = opt_data$price_exported[idx],
       import_capacity = import_capacity[idx],
@@ -1692,10 +2246,10 @@ add_tank_optimization <- function(
       Pg = Pg,
       S_ref = Tcap * SOCini / 100
     )
-    if (house) {
+    if (any(house)) {
       window_args$Hcap <- Hcap
       window_args$kh <- kh
-      window_args$R0 <- min(max(house_level, 0), Hcap)
+      window_args$R0 <- pmin(pmax(house_level, 0), Hcap)
     }
     sol <- do.call(tank_solve_window, window_args)
 
@@ -1709,7 +2263,7 @@ add_tank_optimization <- function(
       tol <- optimization_solution_tolerance()
       slack_import_max <- optimization_slack_ceiling(
         import_capacity[idx],
-        L[idx] + flexible[idx] - G[idx]
+        L[idx] + rowSums(flexible)[idx] - G[idx]
       )
       slack_export_max <- optimization_slack_ceiling(
         export_capacity[idx],
@@ -1742,48 +2296,76 @@ add_tank_optimization <- function(
       )
       level <- run_flexible(level, idx)
     } else {
-      if (house) {
-        # The heat into the house first: the tank's rounding then tracks its
-        # level with the rounded heat as its demand
-        house_target <- tank_house_path(
-          sol$house, Q[idx], window_args$R0, kh, dt
-        )[-1]
-        F_out[idx] <- tank_round_house(
-          house_target, Q[idx], house_level, kh, dt, Hcap
-        )
-      }
+      n_idx <- length(idx)
+      sol_power <- matrix(sol$power, n_idx, m)
       # The backup heater and the gas backup add heat to the tank alike, and a
       # tank has one of them at most: they are rounded as one backup
-      target <- tank_level_path(
-        sol$power,
-        if (house) sol$house else Q[idx],
-        cop[idx],
-        S0,
-        k,
-        dt,
-        backup = sol$backup + sol$gas
-      )[-1]
-      rounded <- tank_round_power(
-        target,
-        F_out[idx],
-        cop[idx],
-        level,
-        k,
-        dt,
-        Pc,
-        backup = sol$backup + sol$gas,
-        Pb = Pb + Pg,
-        power = sol$power,
-        Smax = Smax
-      )
-      P_out[idx] <- rounded$power
-      if (Pg > 0) {
-        H_out[idx] <- rounded$backup
+      sol_backup <- matrix(sol$backup + sol$gas, n_idx, m)
+      sol_house <- if (any(house)) matrix(sol$house, n_idx, m) else NULL
+      target <- matrix(0, n_idx, m)
+      for (s in seq_len(m)) {
+        if (house[s]) {
+          # The heat into the house first: the tank's rounding then tracks its
+          # level with the rounded heat as its demand
+          house_target <- tank_house_path(
+            sol_house[, s], Q[idx, s], window_args$R0[s], kh[s], dt
+          )[-1]
+          F_out[idx, s] <- tank_round_house(
+            house_target, Q[idx, s], house_level[s], kh[s], dt, Hcap[s]
+          )
+        }
+        target[, s] <- tank_level_path(
+          sol_power[, s],
+          if (house[s]) sol_house[, s] else Q[idx, s],
+          cop[idx, s],
+          S0[s],
+          k[s],
+          dt,
+          backup = sol_backup[, s]
+        )[-1]
+      }
+      if (m == 1) {
+        rounded <- tank_round_power(
+          target[, 1],
+          F_out[idx, 1],
+          cop[idx, 1],
+          level,
+          k,
+          dt,
+          Pc,
+          backup = sol_backup[, 1],
+          Pb = Pb + Pg,
+          power = sol_power[, 1],
+          Smax = rounding_top(1, idx)
+        )
+        rounded <- lapply(rounded, matrix, ncol = 1)
       } else {
-        B_out[idx] <- rounded$backup
+        rounded <- tank_round_stores(
+          target,
+          F_out[idx, , drop = FALSE],
+          cop[idx, , drop = FALSE],
+          level,
+          k,
+          dt,
+          Pc,
+          backup = sol_backup,
+          Pb = Pb + Pg,
+          power = sol_power,
+          Smax = vapply(seq_len(m), rounding_top, numeric(1), idx = idx),
+          Smin = Smin
+        )
+      }
+      P_out[idx, ] <- rounded$power
+      for (s in seq_len(m)) {
+        if (Pg[s] > 0) {
+          H_out[idx, s] <- rounded$backup[, s]
+        } else {
+          B_out[idx, s] <- rounded$backup[, s]
+        }
       }
       # The gas backup is not in the net flow
-      net <- L[idx] + P_out[idx] + B_out[idx] - G[idx]
+      net <- L[idx] + rowSums(P_out[idx, , drop = FALSE]) +
+        rowSums(B_out[idx, , drop = FALSE]) - G[idx]
       if (
         any(net > import_capacity[idx] + 0.01) ||
           any(-net > export_capacity[idx] + 0.01)
@@ -1803,36 +2385,76 @@ add_tank_optimization <- function(
   }
 
   # Unmet heat: the heat that would have kept the tank at its comfort floor
-  U_out <- get_tank_unmet_heat(
-    P_out,
-    F_out,
-    cop,
-    init = Tcap * SOCini / 100,
-    Tcap = Tcap,
-    SOCmin = SOCmin,
-    loss = loss,
-    time_resolution = time_resolution,
-    backup = B_out + H_out
-  )
+  U_out <- matrix(0, n_rows, m)
+  for (s in seq_len(m)) {
+    U_out[, s] <- get_tank_unmet_heat(
+      P_out[, s],
+      F_out[, s],
+      cop[, s],
+      init = Tcap[s] * SOCini[s] / 100,
+      Tcap = Tcap[s],
+      SOCmin = SOCmin[s],
+      loss = loss[s],
+      time_resolution = time_resolution,
+      backup = B_out[, s] + H_out[, s]
+    )
+  }
   if (any(U_out > 0)) {
     message(
       "\u26a0\ufe0f Optimization warning: the tank goes below its comfort floor in some slots. That heat is unmet (attribute `unmet_heat_kw`)."
     )
   }
-
-  attr(P_out, "backup_kw") <- B_out
-  if (Pg > 0) {
-    attr(P_out, "gas_backup_kw") <- H_out
+  house_level_out <- function(s) {
+    round(tank_house_path(F_out[, s], Q[, s], 0, kh[s], dt)[seq_len(n_rows)], 2)
   }
-  if (house) {
-    attr(P_out, "house_heat_kw") <- F_out
-    attr(P_out, "house_level_kwh") <- round(
-      tank_house_path(F_out, Q, 0, kh, dt)[seq_len(n_rows)],
+
+  if (is.null(stores)) {
+    out <- P_out[, 1]
+    attr(out, "backup_kw") <- B_out[, 1]
+    if (Pg > 0) {
+      attr(out, "gas_backup_kw") <- H_out[, 1]
+    }
+    if (house) {
+      attr(out, "house_heat_kw") <- F_out[, 1]
+      attr(out, "house_level_kwh") <- house_level_out(1)
+    }
+    attr(out, "unmet_heat_kw") <- U_out[, 1]
+    return(out)
+  }
+
+  # The stores form: the compressor's total power, and every store's own in
+  # named lists
+  by_store <- function(x, which = seq_len(m)) {
+    if (is.function(x)) {
+      out <- lapply(which, x)
+    } else {
+      out <- lapply(which, function(s) x[, s])
+    }
+    names(out) <- stores[which]
+    out
+  }
+  out <- round(rowSums(P_out), 2)
+  attr(out, "power_kw") <- by_store(P_out)
+  # The level `get_tank_level()` gives from the same power
+  attr(out, "level_kwh") <- by_store(function(s) {
+    round(
+      tank_level_path(
+        P_out[, s], F_out[, s], cop[, s], Tcap[s] * SOCini[s] / 100, k[s], dt,
+        backup = B_out[, s] + H_out[, s]
+      )[seq_len(n_rows)],
       2
     )
+  })
+  attr(out, "backup_kw") <- by_store(B_out)
+  if (any(Pg > 0)) {
+    attr(out, "gas_backup_kw") <- by_store(H_out, which(Pg > 0))
   }
-  attr(P_out, "unmet_heat_kw") <- U_out
-  P_out
+  attr(out, "unmet_heat_kw") <- by_store(U_out)
+  if (any(house)) {
+    attr(out, "house_heat_kw") <- by_store(F_out, which(house))
+    attr(out, "house_level_kwh") <- by_store(house_level_out, which(house))
+  }
+  out
 }
 
 
@@ -1933,9 +2555,11 @@ get_tank_level <- function(
 #' the level wiggling by a rounding step around the floor is not.
 #'
 #' @inheritParams get_tank_level
-#' @param Tcap numeric, tank capacity (kWh thermal, > 0), as in
+#' @param Tcap numeric, tank capacity (kWh thermal, >= 0), as in
 #'   [add_tank_optimization()]: the heat between the inlet water temperature
-#'   and the top of the tank
+#'   and the top of the tank. At 0 (and `init = 0`), the unmet heat is the
+#'   heat demand the compressor and the backup do not serve in the slot, up to
+#'   the rounding carried as above.
 #' @param SOCmin numeric, comfort floor (%, between 0 and 100)
 #'
 #' @return numeric vector of the unmet heat (kW thermal), one value per slot,
@@ -1977,7 +2601,7 @@ get_tank_unmet_heat <- function(
     stop("Error: `power` must be numeric without NA.", call. = FALSE)
   }
   tank_check_number(init, "init")
-  tank_check_number(Tcap, "Tcap", 0, min_open = TRUE)
+  tank_check_number(Tcap, "Tcap", 0)
   tank_check_number(SOCmin, "SOCmin", 0, 100)
   tank_check_number(loss, "loss", 0, 100)
   if (loss >= 100) {

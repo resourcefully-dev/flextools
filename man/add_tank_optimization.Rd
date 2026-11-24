@@ -21,7 +21,8 @@ add_tank_optimization(
   Pg = NULL,
   Hcap = NULL,
   Hloss = NULL,
-  on_failure = c("flexible", "error")
+  on_failure = c("flexible", "error"),
+  stores = NULL
 )
 }
 \arguments{
@@ -35,6 +36,9 @@ the tank in that slot
 returned wherever the function does not optimise
 }
 
+With \code{stores}, these three columns once per store instead, suffixed with
+its name: \verb{heat_demand_<store>}, \verb{cop_<store>} and \verb{flexible_<store>}.
+
 Optional columns, as in \code{\link[=add_battery_optimization]{add_battery_optimization()}}: \code{static}, \code{production},
 \code{import_capacity}, \code{export_capacity}, \code{price_imported}, \code{price_exported}.}
 
@@ -44,14 +48,15 @@ pure cost. \code{"grid"} minimises the squared net grid flow
 \code{static + P + B - production}; \code{"cost"} minimises the energy cost of it.
 \code{"capacity"} has no tank form and stops with an error.}
 
-\item{Tcap}{numeric, tank capacity (kWh thermal, > 0): the heat between the
+\item{Tcap}{numeric, tank capacity (kWh thermal, >= 0): the heat between the
 inlet water temperature (\code{SOC = 0}, where the tank gives no more heat) and
-the top. For a mixed tank of \code{V} litres between the inlet temperature
+the top. 0 is no tank (see \emph{A store that holds nothing}). For a mixed tank of \code{V} litres between the inlet temperature
 \code{T_in} and its top temperature \code{T_max} (degrees C), it is
 \code{V * 4.186 / 3600 * (T_max - T_in)}, and a comfort floor at \code{T_floor} is
 \code{SOCmin = 100 * (T_floor - T_in) / (T_max - T_in)}.}
 
-\item{Pc}{numeric, compressor cap (kW electric, > 0).}
+\item{Pc}{numeric, compressor cap (kW electric, > 0). With \code{stores}, the
+one compressor's nameplate, which the stores share.}
 
 \item{SOCmin}{numeric, minimum State-of-Charge (\%), the comfort floor.}
 
@@ -99,6 +104,10 @@ hour, >= 0 and < 100). A house of time constant \code{tau} hours loses
 \code{"flexible"} (default) runs the \code{flexible} schedule there, as described in
 \emph{Soft grid capacities}, with a message; \code{"error"} stops with an error
 naming the window's first \code{datetime} and the solver status.}
+
+\item{stores}{character vector, the names of the stores behind the one
+compressor (see \emph{Stores behind one compressor}). \code{NULL} (default) is one
+tank, with the unsuffixed columns and one value per argument.}
 }
 \value{
 numeric vector, the compressor's electric power (kW), one value per
@@ -134,6 +143,25 @@ heat is \code{cop} times the power, plus \code{attr(, "backup_kw")} and
 \code{attr(, "house_heat_kw")} as their \code{heat_demand}. The house's level follows
 exactly from it, from 0: \code{R[t] = kh * R[t-1] + (house_heat_kw[t] - heat_demand[t]) * dt}, nothing cut off, so the heat the house loses over the
 run is \code{(1 - kh)} times the sum of \code{R} at the start of every slot.
+
+With \code{stores}, the value is the compressor's total power \verb{sum_s P_s} (kW
+electric), rounded to 2 decimals and at or below \code{Pc} in every row, and
+every attribute is a named list with one numeric vector per store, keyed
+by its name:
+\itemize{
+\item \code{power_kw}: every store. The store's compressor power (kW electric),
+rounded to 2 decimals; they sum to the value. Where the stores' rounded
+powers would sum above \code{Pc}, one store rounds down by 0.01 kW in that
+slot: one whose level keeps that heat above its floor, and among them
+the one rounded up the most.
+\item \code{level_kwh}: every store. The store's level at the start of the slot
+(kWh thermal), rounded to 2 decimals: what \code{\link[=get_tank_level]{get_tank_level()}} gives from
+the store's attributes, so within half a rounding step of heat of 0
+where \code{Tcap} is 0.
+\item \code{backup_kw}, \code{unmet_heat_kw}: every store, as above.
+\item \code{gas_backup_kw}: the stores with \code{Pg > 0}, as above.
+\item \code{house_heat_kw}, \code{house_level_kwh}: the stores with a house, as above.
+}
 }
 \description{
 Optimises the electric power of a heat pump's compressor that charges one
@@ -146,7 +174,9 @@ heat is \code{cop * P}, so there is no conversion efficiency: the COP is the
 conversion. The backup heater turns \code{B} kW of electricity into \code{B} kW of heat.
 The gas backup (a hybrid heat pump's boiler) adds \code{H} kW of heat that is not
 electricity. A space-heating tank may have the house it heats behind it, as
-a second, lossy store (see \emph{The house behind the tank}).
+a second, lossy store (see \emph{The house behind the tank}). One compressor may
+serve several stores, such as a hot-water cylinder and a heating buffer
+(see \emph{Stores behind one compressor}).
 }
 \details{
 Per slot of \code{dt} hours, with \code{S} the level in kWh thermal above the inlet
@@ -213,6 +243,59 @@ needs it. The demand the tank cannot pass to the house is unmet heat, as
 without a house. The slots that run \code{flexible} never heat the house: it
 serves the demand while it is above its setpoint, and the tank gives the
 rest.
+}
+
+\section{A store that holds nothing}{
+
+\code{Tcap = 0} is a heat pump without a tank (or a store without a buffer): its
+level is 0 in every slot and \code{SOCmin}, \code{SOCmax}, \code{SOCini} and \code{loss} have
+nothing to act on. Its heat in equals its heat out in every slot. Without
+a house the compressor follows the demand, \code{cop * P + B + H = heat_demand - U}, up to what \code{Pc} delivers, and the rest is unmet heat \code{U}. With a house
+it heats the house directly, \code{cop * P + B + H = F}, which is how a heat
+pump without a buffer pre-heats a building; the house keeps its floor at
+its setpoint, and what it cannot get is unmet heat. Its 2-decimal power
+keeps the level within half a rounding step of heat of 0 (\code{0.005 * cop * dt} kWh, above or below), as a tank keeps it at its floor, so the rounding
+leaves no heat unmet.
+}
+
+\section{Stores behind one compressor}{
+
+With \code{stores}, a character vector of store names (each matching
+\verb{^[a-z][a-z0-9_]*$}; flextools gives them no meaning), the compressor
+serves one store per name, through a valve that serves one at a time and
+shares its time within the slot. Each store has its own balance as above
+(its heat demand, COP, band, loss, backup, house and unmet heat), and the
+stores share the compressor:
+\itemize{
+\item \code{S_s[t] = k_s * S_s[t-1] + (cop_s[t] * P_s[t] + B_s[t] + H_s[t] - heat_demand_s[t]) * dt} for every store \code{s}
+\item \verb{sum_s P_s[t] <= Pc}, the one compressor's nameplate; the backups are
+not part of it.
+}
+
+\code{opt_data} then carries \verb{heat_demand_<store>}, \verb{cop_<store>} and
+\verb{flexible_<store>} for every store, and not \code{heat_demand}, \code{cop} or
+\code{flexible}. \verb{flexible_<store>} is that store's static compressor power,
+without its backup; the stores' \verb{flexible_<store>} must not sum above
+\code{Pc + 0.01} in any slot.
+
+\code{Tcap}, \code{SOCmin}, \code{SOCmax}, \code{SOCini}, \code{loss}, \code{Pb}, \code{Pg}, \code{Hcap} and
+\code{Hloss} take one value per store, in the order of \code{stores}, or one value
+for all of them. \code{NA} in \code{Pb} or \code{Pg} is no such backup on that store, \code{NA}
+in both \code{Hcap} and \code{Hloss} no house behind it, and \code{SOCmin}, \code{SOCmax},
+\code{SOCini} and \code{loss} may be \code{NA} where \code{Tcap} is 0, and only there. \code{Pc}
+stays one number.
+
+The objective sees the heat pump's electric load, every store's compressor
+and backup heater, \code{sum_s (P_s + B_s)}; \code{lambda} penalises changes of
+\verb{sum_s P_s}. The heat price \code{h} (below) takes the lowest positive COP of
+every store, and \code{Pc + sum(Pb)} in its \code{"grid"} form. Windows, the levels
+they carry, \code{on_failure} and the slots that run \code{flexible} work per store;
+in a slot that runs \code{flexible}, each store runs its own \verb{flexible_<store>}
+and stops at its own top. One store in this form gives the results of the
+form without \code{stores}.
+
+The unmet heat of every store counts alike: where the compressor cannot
+serve every store, the solver may leave either short.
 }
 
 \section{Compressor first, backup heater second, unmet heat last}{

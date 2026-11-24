@@ -9,7 +9,11 @@
 #' untouched.
 #'
 #' @inheritParams smart_charging
-#' @param discharge_eff numeric, efficiency (0, 1] of a discharge, counted as
+#' @param discharge_eff numeric, deprecated since version 1.24.0: superseded
+#'   by the `Efficiency` column of `sessions` (see Details), which counts the losses
+#'   of every charge and discharge per session. It still works for sessions
+#'   without that column; with the column it must stay 1, and anything else
+#'   is an error. Efficiency (0, 1] of a discharge, counted as
 #'   the round trip grid -> battery -> grid. For every kWh a session discharges
 #'   to the grid, its battery loses `1 / discharge_eff` kWh, which it charges
 #'   back from the grid before it leaves (0.9: 1.11 kWh). The sessions'
@@ -92,7 +96,10 @@
 #'   price spread, net of the `discharge_eff` losses, pays more than it. A
 #'   combined objective `w` counts `(1 - w)` of it, the cost side's share. The
 #'   `"grid"` and `"capacity"` objectives, which carry no prices and discharge
-#'   only to cut import, do not count it.
+#'   only to cut import, do not count it. With an `Efficiency` column, a kWh
+#'   discharged to the grid drains `1 / Efficiency` kWh of battery, so the
+#'   penalty per kWh to the grid is `cycle_cost / (BatteryCapacity *
+#'   Efficiency)` (the mean of `BatteryCapacity * Efficiency` over the fleet).
 #'
 #' @details
 #' The `sessions` tibble can carry a `StateOfCharge` column, the State-of-Charge
@@ -113,6 +120,28 @@
 #' `BatteryCapacity` is absent, each session's `Energy` takes its battery from
 #' `StateOfCharge` to full, so its battery capacity is `Energy / (1 -
 #' StateOfCharge / 100)` (twice the energy at 50 %).
+#'
+#' It can also carry an `Efficiency` column, the charging efficiency of each
+#' session as a fraction in (0, 1], as in [smart_charging()], applied to every
+#' charge and every discharge. A session's `Energy`, `BatteryCapacity` and
+#' `StateOfCharge` are battery-side and its `Power` is grid-side: charging at
+#' `P` its battery gains `P * Efficiency`, and discharging `P` to the grid it
+#' loses `P / Efficiency`, so the round trip is `Efficiency^2` (0.81 at 0.9).
+#' The SoC tracking, the `soc_min` floor, the departure at `soc_final_min`, the
+#' headroom and the cost and combined setpoints all count it: a session at 0.9
+#' that discharges 1 kWh to the grid loses 1.11 kWh of battery and charges it
+#' back with 1.23 kWh from the grid. Without the column every session is
+#' lossless, unless the deprecated `discharge_eff` is given; giving both is an
+#' error. An `Efficiency` that is NA, at or below 0 or above 1 is an error
+#' naming the sessions.
+#'
+#' The setpoint plans each profile's sessions as one fleet, so it counts the
+#' discharge losses with one efficiency per time slot: the round trip
+#' `Efficiency^2` of the sessions connected in it, weighted by their `Energy`.
+#' That is exact for a fleet of one efficiency. With mixed efficiencies the
+#' setpoint's estimate of what a discharge costs to charge back is off by the
+#' spread between them, while the scheduler always counts each session's own
+#' losses, so every session still meets its departure level and SoC floor.
 #'
 #' Like `SOCmin` and `SOCmax` of `add_battery_optimization()`, `soc_min` and
 #' `soc_max` are the floor and the ceiling of the batteries (in %).
@@ -193,8 +222,18 @@
 #' losses back on top under every objective.
 #'
 #' @return list with setpoints, sessions and demand similar to
-#'   `smart_charging()`. Scheduling is still charging-only while
-#'   the V2G-specific session logic is under development.
+#'   `smart_charging()`. With an `Efficiency` column in `sessions`, the
+#'   `Energy` of every returned row is what the battery gained (negative
+#'   where it discharged), its `EnergyToCharge` and `BatteryCapacity` are
+#'   battery-side, and two more columns carry the row's losses in kWh, both at
+#'   or above 0: `ChargingLosses`, the grid-side energy charged minus what
+#'   reached the battery (`Power * ChargingHours * (1 - Efficiency)` on a
+#'   charging row), and `DischargeLosses`, what left the battery minus the
+#'   grid-side energy discharged (`|Power| * ChargingHours * (1 / Efficiency -
+#'   1)` on a discharging row). A row's grid-side energy is `Energy +
+#'   ChargingLosses + DischargeLosses`. The `setpoints` and `demand` are
+#'   grid-side power. Without the column (also with `discharge_eff`) the rows
+#'   are grid-side and carry neither loss column, as up to version 1.23.0.
 #' @export
 #'
 smart_v2g <- function(
@@ -257,6 +296,25 @@ smart_v2g <- function(
   soc_max <- soc_max / 100
   check_v2g_battery_fit(sessions)
   sessions <- cap_v2g_departure(sessions, soc_max)
+
+  # Per-session charging efficiency (see Details). The levels above are
+  # battery-side; from here on a session's energy and battery are counted in
+  # the grid-side kWh it takes to charge them (`Energy / Efficiency`, likewise
+  # `BatteryCapacity`), so a charge at `P` adds `P` and a discharge of `P` to
+  # the grid takes `P / Efficiency^2`: the internals' round trip per session
+  # (see schedule_sessions_v2g()). The SoC fractions are unchanged.
+  has_efficiency <- check_sessions_efficiency(sessions)
+  if (has_efficiency) {
+    if (!isTRUE(discharge_eff == 1)) {
+      stop(
+        "Error: `discharge_eff` is superseded by the `Efficiency` column of ",
+        "`sessions`. Give one of them, not both (leave `discharge_eff = 1`)."
+      )
+    }
+    battery_capacity <- sessions[["BatteryCapacity"]]
+    battery_sessions <- sessions$Session
+    sessions <- sessions_to_grid_side(sessions, stocks = "BatteryCapacity")
+  }
 
   if (is.null(opt_data)) {
     stop("Error: `opt_data` parameter is empty.")
@@ -461,6 +519,15 @@ smart_v2g <- function(
 
   # Back to %, as given
   sessions_opt$StateOfCharge <- round(sessions_opt$StateOfCharge * 100, 8)
+  # Back to battery-side kWh, with the losses of every row
+  if (has_efficiency) {
+    sessions_opt <- sessions_to_battery_side(sessions_opt, 2)
+    if (!is.null(battery_capacity)) {
+      sessions_opt$BatteryCapacity <- battery_capacity[
+        match(sessions_opt$Session, battery_sessions)
+      ]
+    }
+  }
 
   structure(
     list(
@@ -485,7 +552,8 @@ smart_v2g <- function(
 #' @param soc_min numeric, SoC floor of the sessions, as a fraction (the
 #'   `soc_min` of [smart_v2g()] divided by 100).
 #' @param discharge_eff numeric, discharge efficiency of the vehicles, counted
-#'   by the cost and combined objectives. See [smart_v2g()].
+#'   by the cost and combined objectives. See [smart_v2g()]. Ignored when the
+#'   sessions carry an `Efficiency` column (see `v2g_fleet_discharge_eff()`).
 #' @param soc_final_min,soc_max numeric, the departure level and the SoC
 #'   ceiling, as fractions: the headroom of each session (see
 #'   `v2g_headroom()`). `soc_final_min = soc_max` (the default) gives none.
@@ -629,12 +697,31 @@ get_setpoints_v2g <- function(
         # battery of the profile's responsive sessions.
         discharge_cost <- 0
         if (cycle_cost > 0) {
-          discharge_cost <- cycle_cost /
-            mean(v2g_battery_capacity(
-              sessions_soc$Energy,
-              sessions_soc$StateOfCharge,
-              sessions_soc[["BatteryCapacity"]]
-            ))
+          capacity <- v2g_battery_capacity(
+            sessions_soc$Energy,
+            sessions_soc$StateOfCharge,
+            sessions_soc[["BatteryCapacity"]]
+          )
+          # With an `Efficiency` column the capacity is counted in grid-side
+          # kWh (`BatteryCapacity / Efficiency`, see smart_v2g()), and a kWh
+          # discharged to the grid drains `1 / Efficiency` kWh of battery:
+          # the wear per grid-side kWh is `cycle_cost / (BatteryCapacity *
+          # Efficiency)`.
+          if ("Efficiency" %in% names(sessions_soc)) {
+            capacity <- capacity * sessions_soc$Efficiency^2
+          }
+          discharge_cost <- cycle_cost / mean(capacity)
+        }
+        # The discharge losses of the fleet in each slot (see
+        # v2g_fleet_discharge_eff()); the scalar `discharge_eff` without an
+        # `Efficiency` column.
+        discharge_eff_prof <- v2g_fleet_discharge_eff(
+          sessions_soc,
+          dttm_seq,
+          discharge_eff
+        )
+        if (length(discharge_eff_prof) > 1) {
+          discharge_eff_prof <- discharge_eff_prof[opt_idxs]
         }
         # The objectives with a squared-net-power term (grid, combined and
         # capacity) discharge only to cut import (see v2g_discharge_floor()).
@@ -681,7 +768,7 @@ get_setpoints_v2g <- function(
             lambda = lambda,
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
-            discharge_eff = discharge_eff,
+            discharge_eff = discharge_eff_prof,
             discharge_cost = discharge_cost,
             cumsum_target = cumsum_target,
             headroom = headroom
@@ -726,7 +813,7 @@ get_setpoints_v2g <- function(
             energy_ratio = energy_ratio,
             cumsum_min = cumsum_min,
             LFmin = discharge_floor,
-            discharge_eff = discharge_eff,
+            discharge_eff = discharge_eff_prof,
             discharge_cost = discharge_cost,
             cumsum_target = cumsum_target,
             headroom = headroom
@@ -1222,7 +1309,8 @@ demand_grid_v2g_window <- function(
 #'   slots, `lambda * sum((O_t - O_{t-1})^2)`, as in `demand_cost_window()`.
 #' @param LFmin numeric vector or `NULL` (default), per-slot floor of the
 #'   optimized load. See `demand_grid_v2g_window()`.
-#' @param discharge_eff numeric, discharge efficiency (0, 1] of the vehicles.
+#' @param discharge_eff numeric, discharge efficiency (0, 1] of the vehicles,
+#'   one value or one per slot (see `v2g_fleet_discharge_eff()`).
 #'   Below 1, every kWh discharged must be charged back as `1 / discharge_eff`
 #'   kWh, as the scheduler counts it, so a discharge pays only when the price
 #'   spread covers the losses (see `solve_optimization_window_v2g()`).
@@ -1501,7 +1589,7 @@ solve_optimization_window_v2g <- function(
   # discharge only (and charge only elsewhere), so it may trim a discharge the
   # losses make not worth it. When the second pass is infeasible the first
   # plan stands. The second pass keeps the plan of the first (see below).
-  if (has_grid_flows && discharge_eff < 1 && is.null(discharge_slots)) {
+  if (has_grid_flows && any(discharge_eff < 1) && is.null(discharge_slots)) {
     solve_pass <- function(discharge_eff, discharge_slots, plan) {
       solve_optimization_window_v2g(
         G,
@@ -2292,7 +2380,8 @@ schedule_sessions_v2g <- function(
           "FlexibilityHours",
           "StateOfCharge",
           "BatteryCapacity",
-          "EnergyHeadroom"
+          "EnergyHeadroom",
+          "Efficiency"
         ))
       ),
       by = "Session"
@@ -2304,6 +2393,17 @@ schedule_sessions_v2g <- function(
     sessions_expanded$StateOfCharge,
     sessions_expanded[["BatteryCapacity"]]
   )
+  # The round trip of each session: `discharge_eff`, or, with an `Efficiency`
+  # column, `Efficiency^2`. smart_v2g() counts the energy and the battery in
+  # the grid-side kWh it takes to charge them, so a discharge of `d` kWh to
+  # the grid drains `d / Efficiency^2` of them.
+  sessions_expanded$DischargeEff <- if (
+    "Efficiency" %in% names(sessions_expanded)
+  ) {
+    sessions_expanded$Efficiency^2
+  } else {
+    rep(discharge_eff, nrow(sessions_expanded))
+  }
   sessions_expanded <- sessions_expanded %>%
     mutate(
       Power = 0,
@@ -2415,11 +2515,15 @@ schedule_sessions_v2g <- function(
           sessions_timeslot$EnergyInBattery
       )
       # Both slacks are battery-side: a discharge of `d` kWh to the grid
-      # drains `d / discharge_eff` from the battery and adds as much to the
+      # drains `d / DischargeEff` from the battery and adds as much to the
       # energy to charge, so the session can discharge only
-      # `slack * discharge_eff` to the grid without missing its deadline or
+      # `slack * DischargeEff` to the grid without missing its deadline or
       # going below its SoC floor.
-      min_energy <- ifelse(min_energy < 0, min_energy * discharge_eff, min_energy)
+      min_energy <- ifelse(
+        min_energy < 0,
+        min_energy * sessions_timeslot$DischargeEff,
+        min_energy
+      )
       min_power <- pmax(
         # Can be negative (discharging)
         min_energy / (resolution / 60),
@@ -2779,7 +2883,7 @@ schedule_sessions_v2g <- function(
         session_energy <- sessions_timeslot$Power[s] * resolution / 60
         if (session_energy < 0) {
           # Account for discharge losses: more energy must be recharged later.
-          session_energy <- session_energy / discharge_eff
+          session_energy <- session_energy / sessions_timeslot$DischargeEff[s]
         }
 
         # Update `EnergyToCharge`
@@ -3276,4 +3380,43 @@ v2g_battery_capacity <- function(
     return(battery_capacity)
   }
   energy / (1 - state_of_charge)
+}
+
+
+#' Discharge efficiency of a V2G fleet in each slot
+#'
+#' The setpoint plans each profile's responsive sessions as one fleet, while
+#' each session has its own `Efficiency` `e` (see [smart_v2g()]). In the
+#' grid-side units of the internals a discharge of one kWh to the grid drains
+#' `1 / e^2` kWh of the session's battery, so the fleet's discharge efficiency
+#' in a slot is the mean `e^2` of the sessions connected in it, weighted by
+#' their `Energy`. Exact for a fleet of one efficiency; with several, the
+#' setpoint's charge-back of a discharge is an estimate, and the scheduler,
+#' which counts each session's own losses, charges back what each one lost. A
+#' per-session model would need one discharge variable per session and slot
+#' in the setpoint's linear programme, which plans the fleet's power alone.
+#'
+#' @param sessions tibble of the profile's responsive sessions
+#' @param dttm_seq datetime vector of the window
+#' @param discharge_eff numeric, the scalar `discharge_eff` of [smart_v2g()],
+#'   returned as is when the sessions carry no `Efficiency` column
+#'
+#' @return numeric, `discharge_eff`, or a vector of `length(dttm_seq)` (1 in
+#'   the slots with no session connected)
+#' @keywords internal
+#'
+v2g_fleet_discharge_eff <- function(sessions, dttm_seq, discharge_eff = 1) {
+  if (!("Efficiency" %in% names(sessions)) || nrow(sessions) == 0) {
+    return(discharge_eff)
+  }
+  slots <- as.numeric(dttm_seq)
+  connected <- outer(slots, as.numeric(sessions$ConnectionStartDateTime), ">=") &
+    outer(slots, as.numeric(sessions$ConnectionEndDateTime), "<")
+  weight <- connected * rep(sessions$Energy, each = length(slots))
+  total <- rowSums(weight)
+  ifelse(
+    total > 0,
+    as.numeric(weight %*% sessions$Efficiency^2) / pmax(total, 1e-12),
+    1
+  )
 }

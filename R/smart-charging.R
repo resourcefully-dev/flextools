@@ -10,6 +10,8 @@
 #'
 #' @param sessions tibble, sessions data set containig the following variables:
 #' `"Session"`, `"Timecycle"`, `"Profile"`, `"ConnectionStartDateTime"`, `"ConnectionHours"`, `"Power"` and `"Energy"`.
+#' It can also carry an `"Efficiency"` column, the charging efficiency of each
+#' session (see Details).
 #'
 #' @param opt_data tibble, optimization contextual data.
 #' The first column must be named `datetime` (mandatory) containing the
@@ -138,6 +140,14 @@
 #' time), so the sessions schedule carries a `Part` column and such a session
 #' returns several rows per part; its delivered energy is the sum of its rows'
 #' `Energy` grouped by `Session`.
+#'
+#' With an `Efficiency` column in `sessions`, every row's `Energy` (and
+#' `EnergyToCharge`) is what reached the battery, and two more columns carry
+#' the row's losses in kWh: `ChargingLosses` (grid-side energy charged minus
+#' what reached the battery) and `DischargeLosses` (always 0 here, see
+#' [smart_v2g()]). A row's grid-side energy is `Energy + ChargingLosses`. The
+#' `setpoints` and `demand` are grid-side power. Without the column the
+#' sessions schedule has neither loss column, as up to version 1.23.0.
 #' @export
 #'
 #' @details
@@ -183,6 +193,20 @@
 #' `energy_min` share of the energy of the sessions that have already
 #' departed. Energy owed to a car leaving early is therefore never postponed
 #' into the slots of the cars that stay longer.
+#'
+#' The `sessions` tibble can carry an `Efficiency` column, the charging
+#' efficiency of each session as a fraction in (0, 1] (for example 0.9 for an
+#' AC charger losing 10 %). It is fixed per session, whatever the power. A
+#' session's `Energy` is what reaches its battery and its `Power` is drawn from
+#' the grid, so at `Power` its battery gains `Power * Efficiency`: it needs
+#' `Energy / Efficiency` from the grid and charges for `Energy / (Power *
+#' Efficiency)` hours at full power. The setpoints and the scheduler work in
+#' grid-side power and energy, so every method, the `energy_min` and
+#' `energy_max` shares and the grid capacities apply to the grid-side energy
+#' `Energy / Efficiency`. A 10 kWh session at 0.9 draws 11.11 kWh from the
+#' grid and is returned with `Energy` 10 and `ChargingLosses` 1.11. Without
+#' the column every session is lossless (`Efficiency = 1`). An `Efficiency`
+#' that is NA, at or below 0 or above 1 is an error naming the sessions.
 #'
 #' @examples
 #' # Example: we will use the example data set of charging sessions
@@ -301,6 +325,12 @@ smart_charging <- function(
   check_energy_ratios(energy_min, energy_max)
   check_charging_power_min(charging_power_min)
   check_allow_interruptions(allow_interruptions)
+  # The setpoints and the scheduler work in grid-side energy (see
+  # sessions_to_grid_side()); the returned sessions are battery-side again.
+  has_efficiency <- check_sessions_efficiency(sessions)
+  if (has_efficiency) {
+    sessions <- sessions_to_grid_side(sessions)
+  }
 
   if (is.null(responsive)) {
     responsive <- map(
@@ -519,6 +549,10 @@ smart_charging <- function(
     log <- do.call(c, log_lst)
   }
 
+  if (has_efficiency) {
+    sessions_opt <- sessions_to_battery_side(sessions_opt, SCHEDULE_OUTPUT_DIGITS)
+  }
+
   results <- list(
     sessions = sessions_opt,
     setpoints = setpoints_opt,
@@ -735,6 +769,101 @@ check_allow_interruptions <- function(allow_interruptions) {
     stop("Error: `allow_interruptions` must be a single TRUE or FALSE")
   }
   invisible(TRUE)
+}
+
+#' Validate the `Efficiency` column of the sessions
+#'
+#' Shared by [smart_charging()], [schedule_sessions()] and [smart_v2g()]. The
+#' column is optional: without it every session is lossless.
+#'
+#' @param sessions tibble of sessions
+#'
+#' @return `TRUE`, invisibly, when the sessions carry a valid `Efficiency`
+#'   column, `FALSE` when they carry none. Stops naming the sessions whose
+#'   efficiency is NA or outside (0, 1].
+#' @keywords internal
+#'
+check_sessions_efficiency <- function(sessions) {
+  if (!("Efficiency" %in% names(sessions))) {
+    return(invisible(FALSE))
+  }
+  efficiency <- sessions$Efficiency
+  if (!is.numeric(efficiency)) {
+    stop("Error: `Efficiency` in `sessions` must be numeric, a fraction in (0, 1]")
+  }
+  bad <- is.na(efficiency) | efficiency <= 0 | efficiency > 1
+  if (any(bad)) {
+    stop(
+      "Error: `Efficiency` in `sessions` must be a fraction in (0, 1], not NA. Sessions: ",
+      paste(unique(sessions$Session[bad]), collapse = ", ")
+    )
+  }
+  invisible(TRUE)
+}
+
+#' Sessions in grid-side energy
+#'
+#' A session's `Energy` is what reaches its battery and its `Power` is drawn
+#' from the grid: at `Power` its battery gains `Power * Efficiency`. The
+#' schedulers work in grid-side power and energy, so the session needs
+#' `Energy / Efficiency` from the grid, and its charging hours, flexibility
+#' and the `energy_min`/`energy_max` shares all follow from that.
+#'
+#' @param sessions tibble of sessions with a valid `Efficiency` column
+#' @param stocks character, other columns in kWh of the battery to scale the
+#'   same way (e.g. `"BatteryCapacity"` for [smart_v2g()])
+#'
+#' @return `sessions`, with `Energy` (and `stocks`) divided by `Efficiency`
+#' @keywords internal
+#'
+sessions_to_grid_side <- function(sessions, stocks = character(0)) {
+  for (col in intersect(c("Energy", stocks), names(sessions))) {
+    sessions[[col]] <- sessions[[col]] / sessions$Efficiency
+  }
+  sessions
+}
+
+#' Sessions back in battery-side energy, with their losses
+#'
+#' The inverse of `sessions_to_grid_side()` on the returned session rows.
+#' A row's grid-side `Energy` (its `Power` over its `ChargingHours`) becomes
+#' what its battery gained: `Energy * Efficiency` while charging, and
+#' `Energy / Efficiency` (more negative) while discharging. `EnergyToCharge`,
+#' what was left to charge, is scaled back by `Efficiency`. Two columns carry
+#' the losses of each row in kWh, both at or above 0:
+#'
+#' - `ChargingLosses`: grid-side energy charged minus what reached the
+#'   battery, `Energy_grid * (1 - Efficiency)`.
+#' - `DischargeLosses`: what left the battery minus the grid-side energy
+#'   discharged, `|Energy_grid| * (1 / Efficiency - 1)`.
+#'
+#' So a row's grid-side energy is `Energy + ChargingLosses + DischargeLosses`,
+#' as [get_conversion_losses()] adds them to the storage-side power. A row at
+#' `Efficiency = 1` keeps its values untouched and has no losses.
+#'
+#' @param sessions tibble of session rows with a valid `Efficiency` column
+#' @param digits integer, decimals of the converted columns
+#'
+#' @return `sessions`, with `Energy` and `EnergyToCharge` battery-side and the
+#'   `ChargingLosses` and `DischargeLosses` columns
+#' @keywords internal
+#'
+sessions_to_battery_side <- function(sessions, digits) {
+  efficiency <- sessions$Efficiency
+  lossy <- efficiency < 1
+  grid <- sessions$Energy
+  battery <- ifelse(grid < 0, grid / efficiency, grid * efficiency)
+  sessions$Energy <- ifelse(lossy, round(battery, digits), grid)
+  if ("EnergyToCharge" %in% names(sessions)) {
+    sessions$EnergyToCharge <- ifelse(
+      lossy,
+      round(sessions$EnergyToCharge * efficiency, digits),
+      sessions$EnergyToCharge
+    )
+  }
+  sessions$ChargingLosses <- round(pmax(grid, 0) - pmax(sessions$Energy, 0), digits)
+  sessions$DischargeLosses <- round(pmin(grid, 0) - pmin(sessions$Energy, 0), digits)
+  sessions
 }
 
 #' Set `Responsive` column in `sessions`
@@ -1393,7 +1522,7 @@ smart_charging_window <- function(
 
   results_log <- character(0)
   if (nrow(sessions_window_flex) > 0) {
-    results <- schedule_sessions(
+    results <- schedule_sessions_grid(
       sessions = sessions_window_flex,
       setpoint = setpoint_flex,
       method = method,
@@ -1577,6 +1706,12 @@ SCHEDULE_OUTPUT_DIGITS <- 4L
 #' @param include_log logical, whether to output the algorithm messages for every user profile and time-slot
 #' @param show_progress logical, whether to output the progress bar in the console
 #'
+#' @details
+#' The `sessions` can carry an `Efficiency` column, as in [smart_charging()]:
+#' the setpoint is grid-side power, each session needs `Energy / Efficiency`
+#' from the grid, and the returned sessions are battery-side, with their
+#' `ChargingLosses` and `DischargeLosses` in kWh.
+#'
 #' @return list of three elements: `sessions` (the schedule, one row per
 #'   constant-power segment), `demand` (the scheduled power per time slot,
 #'   one column per `Profile` when the sessions carry one, else `Demand`,
@@ -1590,6 +1725,54 @@ SCHEDULE_OUTPUT_DIGITS <- 4L
 #' @importFrom timefully get_time_resolution
 #'
 schedule_sessions <- function(
+  sessions,
+  setpoint,
+  method,
+  power_th = 0,
+  charging_power_min = 0,
+  energy_min = 1,
+  energy_max = 1,
+  include_log = FALSE,
+  show_progress = TRUE,
+  allow_interruptions = FALSE
+) {
+  has_efficiency <- !is.null(sessions) && check_sessions_efficiency(sessions)
+  if (has_efficiency) {
+    sessions <- sessions_to_grid_side(sessions)
+  }
+  results <- schedule_sessions_grid(
+    sessions = sessions,
+    setpoint = setpoint,
+    method = method,
+    power_th = power_th,
+    charging_power_min = charging_power_min,
+    energy_min = energy_min,
+    energy_max = energy_max,
+    include_log = include_log,
+    show_progress = show_progress,
+    allow_interruptions = allow_interruptions
+  )
+  if (has_efficiency && !is.null(results)) {
+    results$sessions <- sessions_to_battery_side(
+      results$sessions,
+      SCHEDULE_OUTPUT_DIGITS
+    )
+  }
+  results
+}
+
+
+#' Schedule sessions in grid-side energy
+#'
+#' The body of [schedule_sessions()], on sessions whose `Energy` is already
+#' grid-side (see `sessions_to_grid_side()`). [smart_charging()] calls it
+#' directly, having converted the sessions once.
+#'
+#' @inheritParams schedule_sessions
+#' @return see [schedule_sessions()]
+#' @keywords internal
+#'
+schedule_sessions_grid <- function(
   sessions,
   setpoint,
   method,

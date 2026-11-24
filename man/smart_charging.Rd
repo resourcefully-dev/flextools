@@ -24,7 +24,9 @@ smart_charging(
 }
 \arguments{
 \item{sessions}{tibble, sessions data set containig the following variables:
-\code{"Session"}, \code{"Timecycle"}, \code{"Profile"}, \code{"ConnectionStartDateTime"}, \code{"ConnectionHours"}, \code{"Power"} and \code{"Energy"}.}
+\code{"Session"}, \code{"Timecycle"}, \code{"Profile"}, \code{"ConnectionStartDateTime"}, \code{"ConnectionHours"}, \code{"Power"} and \code{"Energy"}.
+It can also carry an \code{"Efficiency"} column, the charging efficiency of each
+session (see Details).}
 
 \item{opt_data}{tibble, optimization contextual data.
 The first column must be named \code{datetime} (mandatory) containing the
@@ -149,6 +151,14 @@ into one part per window before scheduling (energy shared by connection
 time), so the sessions schedule carries a \code{Part} column and such a session
 returns several rows per part; its delivered energy is the sum of its rows'
 \code{Energy} grouped by \code{Session}.
+
+With an \code{Efficiency} column in \code{sessions}, every row's \code{Energy} (and
+\code{EnergyToCharge}) is what reached the battery, and two more columns carry
+the row's losses in kWh: \code{ChargingLosses} (grid-side energy charged minus
+what reached the battery) and \code{DischargeLosses} (always 0 here, see
+\code{\link[=smart_v2g]{smart_v2g()}}). A row's grid-side energy is \code{Energy + ChargingLosses}. The
+\code{setpoints} and \code{demand} are grid-side power. Without the column the
+sessions schedule has neither loss column, as up to version 1.23.0.
 }
 \description{
 This function provides a framework to simulate different smart charging methods
@@ -197,6 +207,19 @@ connected (and \code{load_capacity}), and, at every time slot, at least the
 \code{energy_min} share of the energy of the sessions that have already
 departed. Energy owed to a car leaving early is therefore never postponed
 into the slots of the cars that stay longer.
+
+The \code{sessions} tibble can carry an \code{Efficiency} column, the charging
+efficiency of each session as a fraction in (0, 1] (for example 0.9 for an
+AC charger losing 10 \%). It is fixed per session, whatever the power. A
+session's \code{Energy} is what reaches its battery and its \code{Power} is drawn from
+the grid, so at \code{Power} its battery gains \code{Power * Efficiency}: it needs
+\code{Energy / Efficiency} from the grid and charges for \code{Energy / (Power * Efficiency)} hours at full power. The setpoints and the scheduler work in
+grid-side power and energy, so every method, the \code{energy_min} and
+\code{energy_max} shares and the grid capacities apply to the grid-side energy
+\code{Energy / Efficiency}. A 10 kWh session at 0.9 draws 11.11 kWh from the
+grid and is returned with \code{Energy} 10 and \code{ChargingLosses} 1.11. Without
+the column every session is lossless (\code{Efficiency = 1}). An \code{Efficiency}
+that is NA, at or below 0 or above 1 is an error naming the sessions.
 }
 \examples{
 # Example: we will use the example data set of charging sessions

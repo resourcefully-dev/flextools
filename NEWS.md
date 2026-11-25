@@ -1,3 +1,31 @@
+# flextools 1.27.0
+
+Every tank window had to end with the tank at least at `SOCini`, which for
+the usual full start is a full tank at every window's end. With daily windows
+from midnight, hot water drawn in the evening was made back before midnight,
+in the dearest hours, instead of being served from the tank and made later.
+Over a year of a FLEX+ heat pump at 2050 prices, 18 % of its electricity fell
+between 20:00 and midnight, against 0.2 % in another model on the same
+inputs. The house lost its end-of-window target in 1.26.0; the tank now
+loses its own.
+
+* Breaking: in `add_tank_optimization()` the band is the tank's only bound
+  on its level, `Tcap * SOCmin/100 <= S[t] <= Tcap * SOCmax/100` (with the
+  comfort floor soft in the fallback, as before). A window has no target for
+  the level it ends at, in the hard solve or the soft one, with or without a
+  house or `stores`. The level still carries from one window to the next, so
+  the heat balance over the run is closed.
+* `SOCini` is only the level before the run's first slot: no window returns
+  to it.
+* Heat left in a tank at the end of a window is worth nothing to that window,
+  so a window ends as low as its band and its demand allow when heating
+  later costs less, and the next window starts from there. A window does not
+  fill the tank for the next window's demand. With the comfort floor at
+  `SOCmin = 0`, a window may then start empty, and a draw in its first slots
+  beyond what the compressor makes becomes unmet heat.
+* A tank with `Tcap = 0` gives the same results as in 1.26.0, and the result's
+  form is unchanged.
+
 # flextools 1.26.0
 
 The house behind a space-heating tank had an end-of-window target: every

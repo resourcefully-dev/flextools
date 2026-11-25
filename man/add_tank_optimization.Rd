@@ -64,9 +64,10 @@ one compressor's nameplate, which the stores share.}
 \item{SOCmax}{numeric, maximum State-of-Charge (\%).}
 
 \item{SOCini}{numeric, State-of-Charge (\%) at the start of the run, within
-\verb{[SOCmin, SOCmax]}, and the reference level every window ends at least
-as full as. \code{NULL} (default) means \code{SOCmax}, unlike the battery: a tank
-starting at its floor has no reserve for its first window.}
+\verb{[SOCmin, SOCmax]}: the level before the first slot, and nothing else
+(no window returns to it). \code{NULL} (default) means \code{SOCmax}, unlike the
+battery: a tank starting at its floor has no reserve for its first
+window.}
 
 \item{window_days}{integer, optimization window length in days.}
 
@@ -193,9 +194,13 @@ water temperature (level 0, \code{SOC = 0}) and \code{k = (1 - loss/100)^dt}:
 \item \verb{0 <= P[t] <= Pc}, and \code{P[t] = 0} where \code{cop[t] = 0}
 \item \verb{0 <= B[t] <= Pb}, also where \code{cop[t] = 0}
 \item \verb{0 <= H[t] <= Pg}, also where \code{cop[t] = 0}
-\item every window ends at least as full as \code{Tcap * SOCini/100}, the reference
-level (or as full as its top allows).
 }
+
+The band is the only bound on the level: a window has no target for the
+level it ends at. Heat left in the tank at the end of a window is worth
+nothing to that window, so it ends as low as its band and its demand
+allow when heating later costs less, and the next window starts from
+there.
 
 \code{B} (the backup heater) is a variable only with \code{Pb > 0}, and \code{H} (the gas
 backup) only with \code{Pg > 0}; a tank has one backup at most. The comfort floor
@@ -215,11 +220,8 @@ functions (one every \code{window_days} from \code{window_start_hour}), plus the
 partial windows the run cuts at both ends: when the first slot is not a
 window start, the slots up to the first window start form a \strong{leading
 window}, and the slots after the last full window a \strong{trailing window},
-both optimised like any other window (the leading one from \code{SOCini}, both
-with the end-of-window rule at their last slot). Where a window cannot
-meet a grid capacity, the tank may end it below the reference level, at a
-price above any compressor heat and below the capacity's, and the next
-windows fill it back. Only the first
+both optimised like any other window (the leading one from \code{SOCini}).
+Only the first
 \code{flex_window_hours} of every window are optimised, so with
 \code{flex_window_hours = 24 * window_days} every slot is optimised. The slots
 past \code{flex_window_hours} run the \code{flexible} schedule, without backup.
@@ -240,13 +242,11 @@ the run's end). Outside the heating season the house holds no heat, even
 at a negative price. A level within it can always stay within it: with
 nothing heating the house, the demand draws the level down at least as
 fast as \code{D} falls. \code{F} has no cap of its own.
-\item the house has no end condition: every window ends with the tank at least
-at its reference level as without a house, and the heat left in the
-house does not count towards it.
+\item the house has no end condition, as the tank has none.
 }
 
-The tank's band, its soft floor, its end condition, the backups and their
-order are those without a house. The house starts the run at its setpoint
+The tank's band, its soft floor, the backups and their order are those
+without a house. The house starts the run at its setpoint
 (\code{R = 0}) and its level carries from one window to the next like the
 tank's, so a window uses the heat the last one left there, but no window
 has to put it back. The schedule heats the house ahead when that costs

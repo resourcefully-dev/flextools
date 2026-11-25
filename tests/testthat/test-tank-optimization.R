@@ -50,17 +50,20 @@ test_that("one tank: heat and electricity add up and the level stays in the band
 
   expect_type(P, "double")
   expect_length(P, nrow(d))
-  expect_equal(sum(d$cop * P), 24, tolerance = 0.02)
-  expect_equal(sum(P), 8, tolerance = 0.01)
+  # The window has no end target: the 3 kWh the tank starts with serve the
+  # last hours of the demand, and the compressor makes the other 21 kWh
+  expect_equal(sum(d$cop * P), 24 - 3, tolerance = 0.02)
+  expect_equal(sum(P), 7, tolerance = 0.01)
 
   level <- tank_path(P, d, init = 3)
   expect_gte(min(level), 0 - rounding_tol)
   expect_lte(max(level), 3 + rounding_tol)
+  expect_lte(level[25], rounding_tol)
 
   # The tank is full when the cheap hours end: the electricity sits in the
   # cheap hours as far as the capacity allows.
   expect_equal(level[7], 3, tolerance = rounding_tol)
-  expect_equal(sum(P[7:24]), 18 / 3, tolerance = 0.01)
+  expect_equal(sum(P[7:24]), (18 - 3) / 3, tolerance = 0.01)
 
 })
 
@@ -197,43 +200,79 @@ test_that("an import capacity is missed before heat is left unmet", {
   expect_equal(sum(attr(P2, "unmet_heat_kw")), 24 * 1.5, tolerance = 0.05)
 })
 
-test_that("every window ends at least as full as it started", {
-  # Prices that reward ending each window empty: cheap first, dear last
-  d <- tank_data(days = 2, cheap_hours = 0:11)
-  d$price_imported[lubridate::hour(d$datetime) >= 18] <- 1
-  P <- add_tank_optimization(d, "cost", Tcap = 6, Pc = 3, SOCini = 50)
-
-  path <- tank_path(P, d, init = 3)
-  expect_gte(path[25], path[1] - rounding_tol)
-  expect_gte(path[49], path[25] - rounding_tol)
-
-  # The solver's own (unrounded) solution meets it within its tolerance
-  P_window <- tank_solve_window(
-    G = d$production[1:24],
-    L = d$static[1:24],
-    Q = d$heat_demand[1:24],
-    cop = d$cop[1:24],
-    PI = d$price_imported[1:24],
-    PE = d$price_exported[1:24],
-    import_capacity = Inf,
-    export_capacity = Inf,
-    S0 = 3,
-    Smin = 0,
-    Smax = 6,
-    Pc = 3,
-    k = 1,
-    dt = 1,
-    objective = "cost"
+test_that("an evening draw is served from storage, not reheated in the dear hours", {
+  # Two days of a hot-water tank: 6 kWh drawn at 20:00 and 21:00, cheap power
+  # from 12:00 to 18:00 and dear from 20:00. The 8 kWh tank starts full. Up to
+  # flextools 1.26.0 every window had to end full, so the compressor made the
+  # draw back after it, at 0.5 EUR/kWh (2 EUR over the two days).
+  h <- rep(0:23, 2)
+  d <- tank_data(
+    days = 2,
+    heat_demand = ifelse(h %in% 20:21, 3, 0),
+    flexible = 0,
+    cheap_hours = integer(0)
   )
-  window_path <- tank_level_path(
-    P_window$power,
-    d$heat_demand[1:24],
-    d$cop[1:24],
-    3,
-    1,
-    1
+  d$price_imported <- ifelse(h %in% 12:17, 0.05, ifelse(h >= 20, 0.5, 0.25))
+  P <- add_tank_optimization(d, "cost", Tcap = 8, Pc = 2, SOCini = 100)
+  level <- tank_path(P, d, init = 8)
+  expect_equal(attr(P, "unmet_heat_kw"), rep(0, 48))
+  # The compressor stays off in the dear hours
+  expect_equal(as.numeric(P[h >= 20]), rep(0, sum(h >= 20)))
+  # The first day's draw comes from the full tank, which ends the window
+  # below `SOCini`; the second day makes up what it lacks in the cheap hours
+  expect_equal(sum(P[1:24]), 0)
+  expect_equal(level[25], 2, tolerance = rounding_tol)
+  expect_equal(sum(P[25:48]), 4 / 3, tolerance = 0.01)
+  expect_equal(sum(P[h %in% 12:17 & seq_along(h) > 24]), 4 / 3, tolerance = 0.01)
+  expect_lt(level[49], 8)
+  expect_lt(sum(d$price_imported * P), 0.1)
+  expect_equal(tank_balance_gap(P, d, init = 8), 0, tolerance = 1e-9)
+})
+
+test_that("each window starts where the last one ended, and the heat balance closes", {
+  # Three days of windows from 06:00 that optimise 18 hours each, with
+  # uneven demand and prices that reward ending every window low
+  h <- rep(0:23, 3)
+  d <- tank_data(days = 3, heat_demand = 1 + sin(pi * h / 12)^2, flexible = 0.7)
+  d$price_imported <- 0.2 + 0.2 * (h >= 17)
+  real_window <- tank_solve_window
+  starts <- numeric(0)
+  local_mocked_bindings(tank_solve_window = function(...) {
+    starts[length(starts) + 1] <<- list(...)$S0
+    real_window(...)
+  })
+  P <- suppressMessages(add_tank_optimization(
+    d, "cost", Tcap = 6, Pc = 3, SOCini = 100,
+    window_start_hour = 6, flex_window_hours = 18
+  ))
+  level <- tank_path(P, d, init = 6)
+  # One window every day from 06:00 (the leading one optimises nothing in
+  # the run: its 18 hours end before it starts), each optimising up to 24:00
+  window_start <- which(h == 6)
+  expect_equal(starts, pmin(pmax(level[window_start], 0), 6), tolerance = 1e-9)
+  # Heat in is the demand plus the level's change, over the whole run
+  expect_equal(tank_balance_gap(P, d, init = 6), 0, tolerance = 1e-9)
+  expect_equal(sum(d$cop * P) - sum(d$heat_demand), level[73] - 6, tolerance = 1e-9)
+  # The optimised part of every window ends empty, below where it started
+  window_end <- which(h == 23) + 1
+  expect_true(all(level[window_end] <= rounding_tol))
+  expect_true(all(level[window_end] < level[window_start] - 1))
+})
+
+test_that("a tank left empty at a window's end leaves a draw beyond the compressor unmet", {
+  # The accepted side effect of the band alone: with its floor at the inlet
+  # temperature, the first day's window ends empty, and the next window's
+  # first hour draws 9 kWh against the 6 kWh the compressor makes in it. Up
+  # to flextools 1.26.0 the tank ended the first day full and served it.
+  d <- tank_data(days = 2, heat_demand = c(rep(1, 24), 9, rep(1, 23)), flexible = 0)
+  P <- suppressMessages(
+    add_tank_optimization(d, "cost", Tcap = 6, Pc = 2, SOCmin = 0, SOCini = 100)
   )
-  expect_gte(window_path[25], 3 - optimization_solution_tolerance())
+  level <- tank_path(P, d, init = 6)
+  expect_lte(level[25], rounding_tol)
+  U <- attr(P, "unmet_heat_kw")
+  expect_equal(U[25], 3, tolerance = 0.02)
+  expect_equal(sum(U), 3, tolerance = 0.02)
 })
 
 test_that("`SOCini = NULL` is `SOCmax`, and inputs out of range stop", {
@@ -413,9 +452,11 @@ test_that("slots that run `flexible` stop the compressor at the top of the band"
   )
 
   # The tank starts full: the thermostat holds it there with just the demand
-  # (1/3 kW, in steps of 0.01 kW)
+  # (1/3 kW, in steps of 0.01 kW). The window leaves it low, so the evening's
+  # `flexible` slots run at 3 kW until the tank is full, and then stop there
   expect_true(all(P[1:6] %in% c(0.33, 0.34)))
-  expect_lt(max(P[19:30]), 3)
+  expect_equal(P[[19]], 3)
+  expect_true(any(P[19:30] < 3))
   expect_null(attr(P, "tank_clamp_kwh"))
   expect_equal(attr(P, "unmet_heat_kw"), rep(0, 54))
 
@@ -802,13 +843,14 @@ test_that("a lossless house is more tank", {
     # Without a loss, the heat into the house is the demand plus its level
     expect_equal(sum(attr(P, "house_heat_kw")), sum(d$heat_demand) + R[25], tolerance = 1e-9)
 
-    # The tank closes its balance with the heat into the house as its demand,
-    # and the two end the day with the heat they started with
+    # The tank closes its balance with the heat into the house as its demand.
+    # Neither store has an end target, so they end the day empty, as the
+    # 12 kWh tank does.
     S <- tank_path(P, tank_side(P, d), init = 3)
     expect_gte(min(S), 0 - rounding_tol)
     expect_lte(max(S), 3 + rounding_tol)
     expect_equal(tank_balance_gap(P, tank_side(P, d), init = 3), 0, tolerance = 1e-9)
-    expect_gte(S[25] + R[25], 3 - 2 * rounding_tol)
+    expect_lte(S[25] + R[25], 2 * rounding_tol)
     expect_equal(
       get_tank_level(P, attr(P, "house_heat_kw"), d$cop, init = 3),
       round(S[1:24], 2)
@@ -1194,10 +1236,8 @@ test_that("the slots before the first window start form a leading window", {
   tol <- 0.005 * max(d$cop, 1) * 0.25 * 4 + 1e-9
   expect_gte(min(path), 6 * 20 / 100 - tol)
   expect_lte(max(path), 6 + tol)
-  # The leading window ends at least as full as the run started
-  expect_gte(path[25], 3 - tol)
-  # Its peak (18 kWh in 3 hours against 3 kW of compressor heat and a tank
-  # that must end where it started) needs the backup heater before 06:00
+  # Its peak (18 kWh in 3 hours against 3 kW of compressor heat and the
+  # 4.8 kWh of the tank above its floor) needs the backup heater before 06:00
   expect_gt(sum(B[1:24]), 0)
   expect_equal(
     tank_balance_gap(P, d, init = 3, resolution = 15, backup = B),
@@ -1509,10 +1549,11 @@ test_that("the scaled level gives the schedule the level in kWh gave", {
     # price dwarfs the grid term, both stop up to 1e-4 kW off it. With the
     # end shortfall priced apart from the floor (flextools 1.23.0), the two
     # formulations of the combined soft window `peak_soft_w05 2` stop 1.6e-5
-    # kW apart.
+    # kW apart. Without the end condition (flextools 1.27.0), the two
+    # formulations of the small tank's first window stop 4e-6 kW apart.
     tol <- if (isTRUE(args$soft)) {
       2e-5
-    } else if (startsWith(key, "evening_w05_30")) {
+    } else if (startsWith(key, "evening_w05_30") || startsWith(key, "small_day_3kwh")) {
       2e-5
     } else {
       1e-6
@@ -1525,7 +1566,9 @@ test_that("the scaled level gives the schedule the level in kWh gave", {
 })
 
 test_that("runs that solved before the level was scaled are unchanged", {
-  # Pinned from flextools 1.18.1. Rounding to 2 decimals tracks the
+  # Pinned from flextools 1.18.1, and pinned again from 1.27.0, which dropped
+  # the tank's end-of-window target (every case but the two that start at
+  # `SOCini = 0` changed). Rounding to 2 decimals tracks the
   # unrounded level, and on these fixtures with round numbers some slots land
   # exactly half a step from both neighbours: there a difference of 1e-15 kW
   # in the solution (see above) moves the slot by one step.
@@ -1548,7 +1591,8 @@ test_that("runs that solved before the level was scaled are unchanged", {
 })
 
 test_that("without a gas backup the runs of 1.19.5 are unchanged", {
-  # Pinned from flextools 1.19.5, before the gas backup: `Pg = NULL` and
+  # Pinned from flextools 1.19.5, before the gas backup, and again from 1.27.0
+  # (see above; the file keeps its name): `Pg = NULL` and
   # `Pg = 0` give exactly those results, with no `gas_backup_kw` attribute.
   # The slots on a rounding tie (see below) may move by one step elsewhere.
   golden <- readRDS(test_path("golden-tank-schedules-1.19.5.rds"))
@@ -1576,7 +1620,8 @@ test_that("without a gas backup the runs of 1.19.5 are unchanged", {
 })
 
 test_that("without a house the runs of 1.20.0 are unchanged", {
-  # Pinned from flextools 1.20.0, before the house: `Hcap` and `Hloss` left
+  # Pinned from flextools 1.20.0, before the house, and again from 1.27.0
+  # (see above; the file keeps its name): `Hcap` and `Hloss` left
   # out or `NULL` give exactly those results, with no house attribute.
   golden <- readRDS(test_path("golden-tank-schedules-1.20.0.rds"))
   cases <- tank_golden_cases()
@@ -1638,37 +1683,22 @@ breach_tank_run <- function(d) {
   ))
 }
 
-test_that("a full tank is drawn during a breach and filled back to SOCini after", {
+test_that("a full tank is drawn during a breach, and no window refills it", {
   # Up to flextools 1.22.1 the end-of-window shortfall shared the comfort
-  # floor's price, 80 x the heat price per kWh at 15 minutes against 10 x per
-  # kW of breach: the tank stayed full and the compressor ran through the
-  # breach. And the next window's target was its own start, so a drained tank
-  # was never filled back.
+  # floor's price, so the tank stayed full and the compressor ran through the
+  # breach. Up to 1.26.0 every window had to end back at `SOCini`, so the next
+  # day refilled the tank to 20 kWh. With the band alone, the tank serves the
+  # breach and the windows after it run on what they need.
   d <- breach_tank_data()
   P <- as.numeric(breach_tank_run(d))
   breach <- seq(18 * 4 + 1, 24 * 4)
   level <- tank_path(P, d, init = 20, resolution = 15)
   expect_lte(sum(P[breach]) / 4, 0.01)
   expect_equal(sum(pmax(d$static + P - 14, 0)[1:96]) / 4, 6, tolerance = 1e-2)
-  expect_equal(level[96 + 1], 8, tolerance = 1e-2)
-  # Filled back by the end of the second day, within the capacity
-  expect_gte(level[2 * 96 + 1], 20 - 0.05)
   expect_lte(max((d$static + P)[-breach]), 14 + 1e-6)
-})
-
-test_that("the end shortfall at the floor's price on the window's start is the schedule of 1.22.1", {
-  # `return_weight = 20 / dt` and `S_ref = S0` are the end condition up to
-  # flextools 1.22.1: the compressor runs its 4 kWh through the breach
-  real_window <- tank_solve_window
-  local_mocked_bindings(tank_solve_window = function(...) {
-    args <- list(...)
-    args$S_ref <- args$S0
-    args$return_weight <- 20 / args$dt
-    do.call(real_window, args)
-  })
-  d <- breach_tank_data()
-  P <- as.numeric(breach_tank_run(d))
-  breach <- seq(18 * 4 + 1, 24 * 4)
-  expect_equal(sum(P[breach]) / 4, 4, tolerance = 1e-2)
-  expect_equal(sum(pmax(d$static + P - 14, 0)[1:96]) / 4, 10, tolerance = 1e-2)
+  # The tank ends every window empty, and the heat balance closes
+  expect_lte(max(abs(level[c(97, 193, 289)])), 0.01)
+  expect_gte(min(level), -0.01)
+  expect_equal(attr(breach_tank_run(d), "unmet_heat_kw"), rep(0, 288))
+  expect_equal(tank_balance_gap(P, d, init = 20, resolution = 15), 0, tolerance = 1e-9)
 })

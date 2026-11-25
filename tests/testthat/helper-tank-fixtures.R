@@ -74,7 +74,8 @@ small_tank_args <- list(
 
 # Runs whose windows OSQP solves, with their results pinned in
 # `golden-tank-schedules.rds` from flextools 1.18.1, before the level was
-# normalised: the small-tank day with a larger tank or with demand, and the
+# normalised, and again from 1.27.0, without the end-of-window target: the
+# small-tank day with a larger tank or with demand, and the
 # OSQP fixtures below (grid, combined and ramping objectives, hourly and
 # 15-minute, with and without the soft floor and the backup heater).
 tank_golden_cases <- function() {

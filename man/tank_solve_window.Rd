@@ -31,9 +31,7 @@ tank_solve_window(
   Hcap = 0,
   kh = 1,
   R0 = 0,
-  house_top = NULL,
-  S_ref = S0,
-  return_weight = NULL
+  house_top = NULL
 )
 }
 \arguments{
@@ -108,15 +106,6 @@ slot (kWh), one column per store, or \code{NULL} (default) for \code{Hcap} in
 every slot. A level above it may cool down at the house's loss: the top
 is \code{min(Hcap, max(house_top, R0 * kh^t))}, so a house the rounding left
 a little above its top keeps a schedule.}
-
-\item{S_ref}{numeric, the level the window returns to (kWh): it ends at
-least this full, within the band and the room \code{ub_S} leaves at the top.
-Defaults to \code{S0}, the window's own start.}
-
-\item{return_weight}{numeric, the price of a kWh the window ends below
-\code{S_ref}, in units of \code{\link[=tank_heat_price]{tank_heat_price()}}. \code{NULL} (default) is \code{2 / (cop * dt)} at the window's lowest COP (at least 1), between the compressor's
-heat and a missed grid capacity (see the body). \code{20 / dt}, the comfort
-floor's, is the price up to flextools 1.22.1.}
 }
 \value{
 list of the unrounded \code{power}, \code{backup} and \code{gas} (kW), the heat
@@ -128,8 +117,8 @@ says why (see \code{tank_failure()}). With more than one store, \code{power},
 }
 \description{
 One compressor behind one or more stores. Every per-store argument (\code{Q},
-\code{cop}, \code{S0}, \code{Smin}, \code{Smax}, \code{k}, \code{Pb}, \code{Pg}, \code{Hcap}, \code{kh}, \code{R0}, \code{S_ref},
-\code{return_weight}, \code{level_unit}, \code{power_unit}) takes one value per store
+\code{cop}, \code{S0}, \code{Smin}, \code{Smax}, \code{k}, \code{Pb}, \code{Pg}, \code{Hcap}, \code{kh}, \code{R0},
+\code{level_unit}, \code{power_unit}) takes one value per store
 (\code{Q} and \code{cop} one column per store), and a single store is given as
 vectors and numbers, as without \code{stores}. The stores share \code{Pc}:
 their compressor powers sum to at most it in every slot.

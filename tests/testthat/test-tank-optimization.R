@@ -927,6 +927,183 @@ test_that("the house carries from one window to the next, and `flexible` never h
   )
 })
 
+test_that("the house has no end target: a full house is left to cool", {
+  # Four days, with 2 kW of heat on the last one only, and the house allowed
+  # to hold heat for all of it (`house_horizon_hours = 96`). The first six
+  # hours are paid to consume, so the first window fills the 30 kWh house,
+  # and the price is positive after. Up to flextools 1.25.0 every later
+  # window had to end with the heat it started with in the tank and the house
+  # together, so it refilled what the house had lost, about 9.7 kWh of heat
+  # a day.
+  d <- tank_data(
+    days = 4,
+    heat_demand = rep(c(0, 2), c(72, 24)),
+    flexible = 0,
+    cheap_hours = integer(0)
+  )
+  d$price_imported[1:6] <- -0.05
+  P <- suppressMessages(add_tank_optimization(
+    d, "cost", Tcap = 2, Pc = 2, Hcap = 30, Hloss = 3, house_horizon_hours = 96
+  ))
+  R <- house_path(P, d, Hloss = 3)
+  expect_equal(attr(P, "house_level_kwh"), round(R[1:96], 2))
+  expect_gt(max(R[1:24]), 29)
+
+  # On the second and third days nothing heats the house, the compressor
+  # stays off, and the house cools at its loss towards its setpoint
+  later <- 25:72
+  expect_equal(attr(P, "house_heat_kw")[later], rep(0, length(later)))
+  expect_equal(as.numeric(P[later]), rep(0, length(later)))
+  expect_equal(R[73], R[25] * 0.97^48, tolerance = 1e-9)
+  expect_lt(R[73], 0.25 * R[25])
+  expect_gte(min(R), -1e-9)
+  expect_equal(tank_balance_gap(P, tank_side(P, d), init = 2), 0, tolerance = 1e-9)
+})
+
+# The house's top at the end of each slot: the heat demand of the next
+# `horizon` hours, at most `Hcap`
+house_top <- function(d, Hcap, horizon = 24, resolution = 60) {
+  dt <- resolution / 60
+  n <- nrow(d)
+  steps <- horizon / dt
+  vapply(seq_len(n), function(t) {
+    ahead <- seq_len(steps) + t
+    min(Hcap, sum(d$heat_demand[ahead[ahead <= n]]) * dt)
+  }, numeric(1))
+}
+
+test_that("without heat demand ahead the house holds no heat, whatever the price", {
+  # Summer: three days without heat demand, and a negative price in the first
+  # six hours of each. The tank starts full; the house is not heated at all
+  d <- tank_data(days = 3, heat_demand = 0, flexible = 0, cheap_hours = integer(0))
+  d$price_imported[lubridate::hour(d$datetime) %in% 0:5] <- -0.05
+  for (objective in list("cost", 0.5, "grid")) {
+    P <- suppressMessages(
+      add_tank_optimization(d, objective, Tcap = 2, Pc = 2, Hcap = 30, Hloss = 3)
+    )
+    expect_equal(attr(P, "house_heat_kw"), rep(0, 72))
+    expect_equal(attr(P, "house_level_kwh"), rep(0, 72))
+    expect_equal(as.numeric(P), rep(0, 72))
+  }
+})
+
+test_that("a negative price fills the house up to the demand ahead, not to `Hcap`", {
+  # Winter: 0.5 kW of heat from 12:00 to 18:00 on each of two days, 3 kWh a
+  # day, and a negative price before 06:00. The house would take 30 kWh; it
+  # takes the next day's 3 kWh at most, and holds no more than the demand of
+  # the next 24 hours in any slot.
+  h <- rep(0:23, 2)
+  d <- tank_data(
+    days = 2,
+    heat_demand = ifelse(h %in% 12:17, 0.5, 0),
+    flexible = 0,
+    cheap_hours = integer(0)
+  )
+  d$price_imported[h %in% 0:5] <- -0.05
+  for (objective in list("cost", 0.5)) {
+    P <- suppressMessages(
+      add_tank_optimization(d, objective, Tcap = 2, Pc = 2, Hcap = 30, Hloss = 3)
+    )
+    R <- house_path(P, d, Hloss = 3)
+    top <- house_top(d, 30)
+    expect_equal(attr(P, "house_level_kwh"), round(R[1:48], 2))
+    expect_true(all(R[-1] <= top + 0.01))
+    expect_gt(R[7], 2.5)
+    expect_lte(max(R), 3 + 0.01)
+    expect_gte(min(R), -1e-9)
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 48))
+    expect_equal(tank_balance_gap(P, tank_side(P, d), init = 2), 0, tolerance = 1e-9)
+  }
+
+  # A shorter horizon lowers the top: 6 hours ahead of 06:00 is the demand
+  # up to 12:00, none
+  P <- suppressMessages(add_tank_optimization(
+    d, "cost", Tcap = 2, Pc = 2, Hcap = 30, Hloss = 3, house_horizon_hours = 6
+  ))
+  R <- house_path(P, d, Hloss = 3)
+  expect_true(all(R[-1] <= house_top(d, 30, horizon = 6) + 0.01))
+  expect_lte(max(R[1:7]), 0.01)
+})
+
+test_that("a house within its top keeps a schedule in every window", {
+  # The top falls no faster than the demand draws the house down, so a level
+  # within it can always stay within it: a run over a week of uneven demand,
+  # cheap and negative hours and `flexible` slots solves every window with no
+  # soft pass and no failure, and the house never passes its top by more
+  # than a rounding step
+  h <- rep(0:23, 7)
+  day <- rep(1:7, each = 24)
+  demand <- pmax(0, 2 * sin(pi * (h - 4) / 16)) * (day %% 3 != 0)
+  d <- tank_data(days = 7, heat_demand = demand, flexible = 0.7, cheap_hours = 0:23)
+  d$price_imported <- 0.25 + 0.15 * sin(2 * pi * h / 24) - 0.4 * (h %in% 8:10)
+  real_window <- tank_solve_window
+  soft <- 0
+  local_mocked_bindings(tank_solve_window = function(...) {
+    if (isTRUE(list(...)$soft)) soft <<- soft + 1
+    real_window(...)
+  })
+  for (horizon in c(24, 6)) {
+    P <- add_tank_optimization(
+      d, "cost", Tcap = 2, Pc = 2, Hcap = 20, Hloss = 3,
+      window_start_hour = 6, flex_window_hours = 18,
+      house_horizon_hours = horizon, on_failure = "error"
+    )
+    R <- house_path(P, d, Hloss = 3)
+    top <- house_top(d, 20, horizon)
+    expect_true(all(R[-1] <= top + 0.01))
+    expect_gte(min(R), -1e-9)
+    # The negative hours fill the house up to its top
+    expect_true(any(top > 1 & R[-1] > top - 0.02))
+  }
+  expect_equal(soft, 0)
+
+  # A house the rounding left above its top cools down into it: a window
+  # starting 0.5 kWh above a top of 0, without demand, is solved with the
+  # house left to its loss
+  n <- 6
+  sol <- tank_solve_window(
+    G = rep(0, n), L = rep(0, n), Q = rep(0, n), cop = rep(3, n),
+    PI = rep(0.2, n), PE = rep(0, n),
+    import_capacity = rep(10, n), export_capacity = rep(10, n),
+    S0 = 2, Smin = 0, Smax = 2, Pc = 2, k = 1, dt = 1, objective = "cost",
+    Hcap = 20, kh = 0.97, R0 = 0.5, house_top = rep(0, n)
+  )
+  expect_equal(sol$status, "optimal")
+  expect_equal(sol$house, rep(0, n), tolerance = 1e-9)
+})
+
+test_that("a house is pre-heated in a cheap block for demand later in the window", {
+  # Two days with 3 kW of heat from 17:00 to 21:00 at 0.5 EUR/kWh, 0.1 from
+  # 10:00 to 16:00 and 0.3 otherwise. The 2 kWh tank cannot hold the peak's
+  # 12 kWh; the 20 kWh house, losing 2 % per hour, can.
+  h <- rep(0:23, 2)
+  d <- tank_data(
+    days = 2,
+    heat_demand = ifelse(h %in% 17:20, 3, 0),
+    flexible = 0,
+    cheap_hours = integer(0)
+  )
+  d$price_imported <- ifelse(h %in% 10:15, 0.1, ifelse(h %in% 17:20, 0.5, 0.3))
+  peak <- which(h %in% 17:20)
+  for (objective in list("cost", 0.5)) {
+    P0 <- add_tank_optimization(d, objective, Tcap = 2, Pc = 2)
+    P <- add_tank_optimization(d, objective, Tcap = 2, Pc = 2, Hcap = 20, Hloss = 2)
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 48))
+
+    # Every day the house is filled in the cheap block and carries the peak,
+    # with the compressor off through it but for a rounding step
+    R <- house_path(P, d, Hloss = 2)
+    expect_equal(attr(P, "house_level_kwh"), round(R[1:48], 2))
+    expect_gt(R[18], 9)
+    expect_gt(R[42], 9)
+    expect_lte(max(P[peak]), 0.01 + 1e-9)
+    expect_gt(sum(P[h %in% 10:15]), sum(P0[h %in% 10:15]))
+    expect_lt(sum(d$price_imported * P), sum(d$price_imported * P0) - 1)
+    expect_gte(min(R), -1e-9)
+    expect_lte(max(R), 20 + 1e-9)
+  }
+})
+
 test_that("read as cold, a house is pre-cooled ahead of a price peak", {
   # Cooling: the demand is the heat the house gains, the COP is the chiller's
   # EER, the tank holds cold below its return temperature and the house holds
@@ -977,6 +1154,14 @@ test_that("a house takes `Hcap` and `Hloss` together, in range", {
   expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30, Hloss = -1), "Hloss")
   expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30, Hloss = 100), "Hloss")
   expect_error(add_tank_optimization(d, Tcap = 3, Pc = 3, Hcap = 30, Hloss = "3"), "Hloss")
+  for (horizon in list(0, -1, NA_real_, Inf, "24", c(12, 24), NULL)) {
+    expect_error(
+      add_tank_optimization(
+        d, Tcap = 3, Pc = 3, Hcap = 30, Hloss = 3, house_horizon_hours = horizon
+      ),
+      "`house_horizon_hours` must be a number greater than 0"
+    )
+  }
 })
 
 

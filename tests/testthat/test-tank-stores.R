@@ -136,6 +136,28 @@ test_that("a store that holds nothing pre-heats the house behind it", {
   }
 })
 
+test_that("a store's house holds heat only for its own demand ahead", {
+  # Summer: hot water all day, no space heating, a negative price before
+  # 06:00 on each of three days. The hot-water store has no house; the
+  # space-heating store's house takes no heat, and from the second day on
+  # the compressor makes the hot water only.
+  d <- tank_data(days = 3, heat_demand = 0.5, flexible = 0, cheap_hours = integer(0))
+  d$price_imported[lubridate::hour(d$datetime) %in% 0:5] <- -0.05
+  d2 <- store_data(
+    d, c("dhw", "space_heating"),
+    heat_demand = list(space_heating = rep(0, 72)),
+    cop = list(dhw = rep(2.5, 72))
+  )
+  P <- suppressMessages(add_tank_optimization(
+    d2, "cost", Tcap = c(3, 2), Pc = 2, Hcap = c(NA, 30), Hloss = c(NA, 3),
+    stores = c("dhw", "space_heating")
+  ))
+  expect_named(attr(P, "house_level_kwh"), "space_heating")
+  expect_equal(attr(P, "house_heat_kw")$space_heating, rep(0, 72))
+  expect_equal(attr(P, "house_level_kwh")$space_heating, rep(0, 72))
+  expect_equal(sum(P[25:72]), 2 * 24 * 0.5 / 2.5, tolerance = 0.02)
+})
+
 test_that("a store that holds nothing follows the demand, up to its share of `Pc`", {
   heat_demand <- rep(1, 24)
   heat_demand[18] <- 9

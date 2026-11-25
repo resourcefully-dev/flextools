@@ -1,3 +1,38 @@
+# flextools 1.26.0
+
+The house behind a space-heating tank had an end-of-window target: every
+window had to end with at least the heat it started with in the tank and the
+house together. The house's level carries from one window to the next, so
+once a window filled it (on a negative price, say) every later window had to
+put back what it had lost, with no heat demand to serve. Over a year with a
+house that loses 2.7 % per hour, that was 100 to 130 kWh of electricity a
+month from April to December. And nothing stopped a negative price from
+filling the house in summer, when no demand would ever draw the heat.
+
+* Fix: in `add_tank_optimization()` with `Hcap` and `Hloss`, the house has no
+  end-of-window target. Every window ends with the tank at least at its
+  reference level (from `SOCini`), as without a house, and the heat left in
+  the house no longer counts towards it. That holds for the hard end
+  condition and the soft one, and per store with `stores`. The house still
+  starts the run at its setpoint, its level still carries from one window to
+  the next, and a window still uses the heat the last one left there. It
+  pre-heats the house when the heat it loses before the demand costs less
+  than heating later in the same window. The heat the house holds at the end
+  of a window is worth nothing to that window, so a window does not heat the
+  house late for the next window's demand.
+* New: `add_tank_optimization(house_horizon_hours = 24)`. The house holds no
+  more heat than its demand of the next `house_horizon_hours` will draw: at
+  the end of every slot `0 <= R[t] <= min(Hcap, D[t])`, with `D[t]` the
+  store's heat demand over the `house_horizon_hours` after slot `t`, over
+  the whole run (past the window, and fewer slots near its end), both bounds
+  hard. Without heat demand ahead the house takes no heat, even at a
+  negative price, and before a modest demand it takes that demand at most.
+  A level within the bound can always stay within it, so a window with a
+  house keeps a schedule. One value for every store with a house; it must be
+  a number greater than 0, and it is not read without a house. The default
+  applies to every run with a house, so their schedules change.
+* Runs without a house are unchanged, and so is the result's form.
+
 # flextools 1.25.0
 
 A heat pump's hot-water cylinder and heating buffer share one compressor.

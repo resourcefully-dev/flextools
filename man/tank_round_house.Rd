@@ -18,7 +18,8 @@ unrounded heat (kWh)}
 
 \item{dt}{numeric, slot length in hours}
 
-\item{Hcap}{numeric, the house's capacity (kWh)}
+\item{Hcap}{numeric, the house's top at the end of each slot (kWh), one
+value or one per slot}
 }
 \value{
 numeric vector, the rounded heat from the tank to the house (kW)

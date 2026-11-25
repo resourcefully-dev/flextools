@@ -230,19 +230,21 @@ is the house's. Per slot, with \code{kh = (1 - Hloss/100)^dt}:
 \item \code{R[t] = kh * R[t-1] + (F[t] - heat_demand[t]) * dt}
 \item \verb{0 <= R[t] <= Hcap}, the floor at the setpoint hard; \code{F} has no cap of its
 own
-\item every window ends with at least the heat it started with in the tank and
-the house together, \code{S + R}, soft as above.
+\item the house has no end condition: every window ends with the tank at least
+at its reference level as without a house, and the heat left in the
+house does not count towards it.
 }
 
-The tank's band, its soft floor, the backups and their order are those
-without a house. The house starts the run at its setpoint (\code{R = 0}) and its
-level carries from one window to the next like the tank's. Nothing orders
-the two stores: the schedule holds heat where it loses least, and heats the
-house ahead when that costs less than the heat it loses before the demand
-needs it. The demand the tank cannot pass to the house is unmet heat, as
-without a house. The slots that run \code{flexible} never heat the house: it
-serves the demand while it is above its setpoint, and the tank gives the
-rest.
+The tank's band, its soft floor, its end condition, the backups and their
+order are those without a house. The house starts the run at its setpoint
+(\code{R = 0}) and its level carries from one window to the next like the
+tank's, so a window uses the heat the last one left there, but no window
+has to put it back. The schedule heats the house ahead when that costs
+less than the heat it loses before the demand needs it, within the window:
+the heat it holds at the window's end is worth nothing to that window.
+The demand the tank cannot pass to the house is unmet heat, as without a
+house. The slots that run \code{flexible} never heat the house: it serves the
+demand while it is above its setpoint, and the tank gives the rest.
 }
 
 \section{A store that holds nothing}{

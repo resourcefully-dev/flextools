@@ -927,6 +927,64 @@ test_that("the house carries from one window to the next, and `flexible` never h
   )
 })
 
+test_that("the house has no end target: a full house is left to cool", {
+  # Four days without heat demand. The first six hours are paid to consume,
+  # so the first window fills the 30 kWh house, and the price is positive
+  # after. Up to flextools 1.25.0 every later window had to end with the
+  # heat it started with in the tank and the house together, so it refilled
+  # what the house had lost, about 9.7 kWh of heat a day.
+  d <- tank_data(days = 4, heat_demand = 0, flexible = 0, cheap_hours = integer(0))
+  d$price_imported[1:6] <- -0.05
+  P <- suppressMessages(
+    add_tank_optimization(d, "cost", Tcap = 2, Pc = 2, Hcap = 30, Hloss = 3)
+  )
+  R <- house_path(P, d, Hloss = 3)
+  expect_equal(attr(P, "house_level_kwh"), round(R[1:96], 2))
+  expect_gt(max(R[1:24]), 29)
+
+  # From the second day on nothing heats the house, the compressor stays
+  # off, and the house cools at its loss towards its setpoint
+  later <- 25:96
+  expect_equal(attr(P, "house_heat_kw")[later], rep(0, length(later)))
+  expect_equal(as.numeric(P[later]), rep(0, length(later)))
+  expect_equal(R[97], R[25] * 0.97^72, tolerance = 1e-9)
+  expect_lt(R[97], 0.15 * R[25])
+  expect_gte(min(R), -1e-9)
+  expect_equal(tank_balance_gap(P, tank_side(P, d), init = 2), 0, tolerance = 1e-9)
+})
+
+test_that("a house is pre-heated in a cheap block for demand later in the window", {
+  # Two days with 3 kW of heat from 17:00 to 21:00 at 0.5 EUR/kWh, 0.1 from
+  # 10:00 to 16:00 and 0.3 otherwise. The 2 kWh tank cannot hold the peak's
+  # 12 kWh; the 20 kWh house, losing 2 % per hour, can.
+  h <- rep(0:23, 2)
+  d <- tank_data(
+    days = 2,
+    heat_demand = ifelse(h %in% 17:20, 3, 0),
+    flexible = 0,
+    cheap_hours = integer(0)
+  )
+  d$price_imported <- ifelse(h %in% 10:15, 0.1, ifelse(h %in% 17:20, 0.5, 0.3))
+  peak <- which(h %in% 17:20)
+  for (objective in list("cost", 0.5)) {
+    P0 <- add_tank_optimization(d, objective, Tcap = 2, Pc = 2)
+    P <- add_tank_optimization(d, objective, Tcap = 2, Pc = 2, Hcap = 20, Hloss = 2)
+    expect_equal(attr(P, "unmet_heat_kw"), rep(0, 48))
+
+    # Every day the house is filled in the cheap block and carries the peak,
+    # with the compressor off through it but for a rounding step
+    R <- house_path(P, d, Hloss = 2)
+    expect_equal(attr(P, "house_level_kwh"), round(R[1:48], 2))
+    expect_gt(R[18], 9)
+    expect_gt(R[42], 9)
+    expect_lte(max(P[peak]), 0.01 + 1e-9)
+    expect_gt(sum(P[h %in% 10:15]), sum(P0[h %in% 10:15]))
+    expect_lt(sum(d$price_imported * P), sum(d$price_imported * P0) - 1)
+    expect_gte(min(R), -1e-9)
+    expect_lte(max(R), 20 + 1e-9)
+  }
+})
+
 test_that("read as cold, a house is pre-cooled ahead of a price peak", {
   # Cooling: the demand is the heat the house gains, the COP is the chiller's
   # EER, the tank holds cold below its return temperature and the house holds

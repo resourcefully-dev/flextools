@@ -16,12 +16,13 @@
 #
 # A space-heating tank may carry the house it heats behind it, a second,
 # lossy store: the tank passes `F` to the house, whose level `R` (kWh above
-# its setpoint) serves the demand, and the window's end rule is on `S + R`:
+# its setpoint) serves the demand. The house only keeps to its comfort band:
+# it has no end rule, and its heat does not count towards the tank's.
 #
 #   S[t] = k * S[t-1] + (cop[t] * P[t] + B[t] + H[t] - F[t]) * dt
 #   R[t] = kh * R[t-1] + (F[t] - Q[t]) * dt            kh = (1 - Hloss/100)^dt
 #   0 <= R[t] <= Hcap,  0 <= F[t]
-#   S[last] + R[last] >= S[before the first] + R[before the first]
+#   S[last slot of a window] >= S[slot before its first]
 #
 # A window with no schedule that holds this is solved again with a soft
 # comfort floor (the level may go down to 0, with the depth below `Smin`
@@ -722,8 +723,10 @@ tank_solve_window <- function(
     # (or at the floor, when that is below it), within that room
     S_end[s] <- min(max(Smin[s], S_ref[s]), ub_S[n, s])
   }
-  # With a house, the rule is on the heat in both stores
-  end_total <- ifelse(with_house, S_end + R0, S_end)
+  # The house has no end condition: what it holds at the end of the window
+  # only has to be within its band, and does not count towards the tank's.
+  # Holding it to the level it started with refilled what it lost every
+  # window, with no demand to serve.
   # The least unmet heat with a house, or with stores sharing the compressor,
   # is solved for once the rows are built (below)
   least_lp <- soft && (any(with_house) || m > 1)
@@ -748,9 +751,7 @@ tank_solve_window <- function(
     }
   } else {
     lb_S <- matrix(rep(Smin, each = n), n, m)
-    for (s in which(!with_house)) {
-      lb_S[n, s] <- S_end[s]
-    }
+    lb_S[n, ] <- S_end
   }
 
   # The level enters the solver in units of `level_unit` kWh. On OSQP that is
@@ -917,7 +918,7 @@ tank_solve_window <- function(
         upper,
         if (with_house[s]) Q[, s] + (Smax[s] + Hcap[s]) / dt else Q[, s] + Smax[s] / dt,
         rep(Smin[s], n) / level_unit[s],
-        end_total[s] / level_unit[s]
+        S_end[s] / level_unit[s]
       )
     }
   }
@@ -1011,19 +1012,18 @@ tank_solve_window <- function(
   if (soft) {
     # Per store:
     # S_t + D_t >= Smin            depth below the comfort floor
-    # S_n + R >= S_end             end condition, soft
-    # With a house, the end condition is S_n + W_n + R >= S_end + R0
+    # S_n + R >= S_end             end condition, soft, the tank's alone
     # Then, over every store: sum(U) <= the least unmet heat any schedule
     # needs
     for (s in seq_len(m)) {
       A_soft <- Matrix::sparseMatrix(
-        i = c(seq_len(n), seq_len(n), n + 1, n + 1, if (with_house[s]) n + 1),
-        j = c(idx_S[[s]], idx_D[[s]], idx_S[[s]][n], idx_R[[s]], if (with_house[s]) idx_W[[s]][n]),
-        x = c(rep(1, 2 * n + 2), if (with_house[s]) house_unit[s] / level_unit[s]),
+        i = c(seq_len(n), seq_len(n), n + 1, n + 1),
+        j = c(idx_S[[s]], idx_D[[s]], idx_S[[s]][n], idx_R[[s]]),
+        x = rep(1, 2 * n + 2),
         dims = c(n + 1, nv)
       )
       A <- rbind(A, A_soft)
-      lower <- c(lower, rep(Smin[s], n) / level_unit[s], end_total[s] / level_unit[s])
+      lower <- c(lower, rep(Smin[s], n) / level_unit[s], S_end[s] / level_unit[s])
       upper <- c(upper, rep(Inf, n), Inf)
     }
     A_unmet <- Matrix::sparseMatrix(
@@ -1035,20 +1035,6 @@ tank_solve_window <- function(
     A <- rbind(A, A_unmet)
     lower <- c(lower, 0)
     upper <- c(upper, U_cap)
-  } else {
-    for (s in which(with_house)) {
-      # S_n + W_n >= S_end + R0: the window ends with at least the heat it
-      # started with, in the tank and the house together
-      A_end <- Matrix::sparseMatrix(
-        i = c(1, 1),
-        j = c(idx_S[[s]][n], idx_W[[s]][n]),
-        x = c(1, house_unit[s] / level_unit[s]),
-        dims = c(1, nv)
-      )
-      A <- rbind(A, A_end)
-      lower <- c(lower, end_total[s] / level_unit[s])
-      upper <- c(upper, Inf)
-    }
   }
 
   if (least_lp) {
@@ -1224,8 +1210,7 @@ tank_solve_window <- function(
       if (with_flows) rep(row_power_unit, n),
       if (soft_caps) rep(row_power_unit, 2 * n) else if (load_row) rep(row_power_unit, n),
       if (m > 1) rep(row_power_unit, n),
-      if (soft) c(rep(1, m * (n + 1)), row_power_unit),
-      if (!soft) rep(1, sum(with_house))
+      if (soft) c(rep(1, m * (n + 1)), row_power_unit)
     )
     A <- Matrix::Diagonal(x = 1 / row_unit) %*% A %*% Matrix::Diagonal(x = col_unit)
     lower <- lower / row_unit
@@ -1300,18 +1285,14 @@ tank_solve_window <- function(
     if (
       (!soft && any(level < Smin[s] - tol)) ||
         any(level > Smax[s] + tol) ||
-        (!soft && !with_house[s] && level[n] < S_end[s] - tol)
+        (!soft && level[n] < S_end[s] - tol)
     ) {
       return(tank_failure("the solution leaves the tank's band on the exact dynamics"))
     }
     if (with_house[s]) {
       house <- tank_house_path(F_house[, s], Q[, s], R0[s], kh[s], dt)[-1]
       tol_house <- max(1e-3, 1e-4 * Hcap[s])
-      if (
-        any(house < -tol_house) ||
-          any(house > Hcap[s] + tol_house) ||
-          (!soft && level[n] + house[n] < end_total[s] - tol - tol_house)
-      ) {
+      if (any(house < -tol_house) || any(house > Hcap[s] + tol_house)) {
         return(tank_failure("the solution leaves the house's band on the exact dynamics"))
       }
     }
@@ -1539,18 +1520,20 @@ tank_check_column <- function(opt_data, name, non_negative = TRUE) {
 #' - `R[t] = kh * R[t-1] + (F[t] - heat_demand[t]) * dt`
 #' - `0 <= R[t] <= Hcap`, the floor at the setpoint hard; `F` has no cap of its
 #'   own
-#' - every window ends with at least the heat it started with in the tank and
-#'   the house together, `S + R`, soft as above.
+#' - the house has no end condition: every window ends with the tank at least
+#'   at its reference level as without a house, and the heat left in the
+#'   house does not count towards it.
 #'
-#' The tank's band, its soft floor, the backups and their order are those
-#' without a house. The house starts the run at its setpoint (`R = 0`) and its
-#' level carries from one window to the next like the tank's. Nothing orders
-#' the two stores: the schedule holds heat where it loses least, and heats the
-#' house ahead when that costs less than the heat it loses before the demand
-#' needs it. The demand the tank cannot pass to the house is unmet heat, as
-#' without a house. The slots that run `flexible` never heat the house: it
-#' serves the demand while it is above its setpoint, and the tank gives the
-#' rest.
+#' The tank's band, its soft floor, its end condition, the backups and their
+#' order are those without a house. The house starts the run at its setpoint
+#' (`R = 0`) and its level carries from one window to the next like the
+#' tank's, so a window uses the heat the last one left there, but no window
+#' has to put it back. The schedule heats the house ahead when that costs
+#' less than the heat it loses before the demand needs it, within the window:
+#' the heat it holds at the window's end is worth nothing to that window.
+#' The demand the tank cannot pass to the house is unmet heat, as without a
+#' house. The slots that run `flexible` never heat the house: it serves the
+#' demand while it is above its setpoint, and the tank gives the rest.
 #'
 #' @section A store that holds nothing:
 #' `Tcap = 0` is a heat pump without a tank (or a store without a buffer): its

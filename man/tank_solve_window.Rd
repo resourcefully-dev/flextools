@@ -31,6 +31,7 @@ tank_solve_window(
   Hcap = 0,
   kh = 1,
   R0 = 0,
+  house_top = NULL,
   S_ref = S0,
   return_weight = NULL
 )
@@ -101,6 +102,12 @@ house's demand and the tank's is the heat it passes to the house.}
 
 \item{R0}{numeric, house level before the first slot, within \verb{[0, Hcap]}
 (kWh)}
+
+\item{house_top}{numeric, the top of the house's level at the end of each
+slot (kWh), one column per store, or \code{NULL} (default) for \code{Hcap} in
+every slot. A level above it may cool down at the house's loss: the top
+is \code{min(Hcap, max(house_top, R0 * kh^t))}, so a house the rounding left
+a little above its top keeps a schedule.}
 
 \item{S_ref}{numeric, the level the window returns to (kWh): it ends at
 least this full, within the band and the room \code{ub_S} leaves at the top.
